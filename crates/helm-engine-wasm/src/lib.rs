@@ -135,9 +135,7 @@ fn call_wasm(input: &[u8]) -> Result<Vec<u8>, HelmEngineError> {
     // klog's init() reads os.Args[0] unconditionally — an empty argv crashes
     // Go's runtime with index-out-of-range. We provide a dummy arg and nothing
     // else from the host.
-    let wasi = WasiCtxBuilder::new()
-        .arg("helm-engine")
-        .build_p1();
+    let wasi = WasiCtxBuilder::new().arg("helm-engine").build_p1();
     let mut store = Store::new(&engine, wasi);
     let mut linker: Linker<WasiP1Ctx> = Linker::new(&engine);
     p1::add_to_linker_sync(&mut linker, |s: &mut WasiP1Ctx| s).map_err(wasm_err)?;
@@ -201,7 +199,7 @@ fn copy_out<T>(
     ptr: i32,
     len: i32,
 ) -> Result<Vec<u8>, wasmtime::Error> {
-    let data = memory.data(&*store);
+    let data = memory.data(store);
     let start = ptr as usize;
     let end = start + len as usize;
     Ok(data[start..end].to_vec())

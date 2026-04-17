@@ -57,8 +57,44 @@ tasks:
 
   # ---------- WASM bindings ----------
 
+  ci:
+    desc: Run the full CI pipeline locally (mirrors .github/workflows/ci.yml)
+    cmds:
+      - task: build:helm-engine-wasm
+      - task: fmt:check
+      - task: lint
+      - task: test
+      - task: wasm:smoke
+
+  fmt:check:
+    desc: Check Rust formatting (no writes)
+    cmds:
+      - cargo fmt --all -- --check
+
+  lint:
+    desc: Run cargo clippy with warnings as errors
+    cmds:
+      - cargo clippy --workspace --all-targets -- -D warnings
+
+  release:local:
+    desc: Build the release binary locally (matches what CI ships to GitHub releases)
+    cmds:
+      - task: build:helm-engine-wasm
+      - cargo build --release -p akua-cli
+      - ls -lh target/release/akua
+
+  release:target:
+    desc: Build akua for a specific Rust target (used by the release workflow)
+    vars:
+      TARGET: '{{.TARGET | default "x86_64-unknown-linux-gnu"}}'
+      CARGO: '{{.CARGO | default "cargo"}}'
+    cmds:
+      - task: build:helm-engine-wasm
+      - '{{.CARGO}} build --release -p akua-cli --target {{.TARGET}}'
+      - ls -lh target/{{.TARGET}}/release/akua
+
   build:helm-engine-wasm:
-    desc: Build the embedded Helm v4 template engine (Go→wasip1, Extism plugin)
+    desc: Build the embedded Helm v4 template engine (Go→wasip1)
     dir: crates/helm-engine-wasm/go-src
     cmds:
       - go mod tidy

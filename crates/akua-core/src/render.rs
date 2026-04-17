@@ -108,13 +108,13 @@ pub fn render_umbrella_embedded(
             source,
         })?;
     }
-    crate::fetch::fetch_dependencies(&chart.chart_yaml.dependencies, &charts_dir).map_err(
-        |e| RenderError::HelmFailed {
+    crate::fetch::fetch_dependencies(&chart.chart_yaml.dependencies, &charts_dir).map_err(|e| {
+        RenderError::HelmFailed {
             cmd: "akua fetch".to_string(),
             status: -1,
             stderr: e.to_string(),
-        },
-    )?;
+        }
+    })?;
 
     // Values fed to the embedded engine: umbrella's values.yaml + any
     // override values passed in RenderOptions (from CEL-resolved inputs).
@@ -133,11 +133,13 @@ pub fn render_umbrella_embedded(
         revision: 1,
         service: "Helm".to_string(),
     };
-    let manifests = render_dir(chart_dir, &chart.chart_yaml.name, &values_yaml, &release)
-        .map_err(|e| RenderError::HelmFailed {
-            cmd: "embedded helm-engine-wasm".to_string(),
-            status: -1,
-            stderr: e.to_string(),
+    let manifests =
+        render_dir(chart_dir, &chart.chart_yaml.name, &values_yaml, &release).map_err(|e| {
+            RenderError::HelmFailed {
+                cmd: "embedded helm-engine-wasm".to_string(),
+                status: -1,
+                stderr: e.to_string(),
+            }
         })?;
 
     // Concatenate in deterministic template order, separated by `---`.
@@ -155,10 +157,7 @@ pub fn render_umbrella_embedded(
 }
 
 #[cfg(feature = "helm-wasm")]
-fn merge_values(
-    base: &serde_json::Value,
-    over: &serde_json::Value,
-) -> serde_json::Value {
+fn merge_values(base: &serde_json::Value, over: &serde_json::Value) -> serde_json::Value {
     use serde_json::Value;
     match (base, over) {
         (Value::Object(b), Value::Object(o)) => {
@@ -200,10 +199,7 @@ pub fn write_umbrella(chart: &UmbrellaChart, chart_dir: &Path) -> Result<(), Ren
 
 /// Write `.akua/metadata.yaml` alongside the chart files. Callers decide
 /// whether to emit (default on) or strip (commercial / compliance distros).
-pub fn write_metadata(
-    metadata: &AkuaMetadata,
-    chart_dir: &Path,
-) -> Result<(), RenderError> {
+pub fn write_metadata(metadata: &AkuaMetadata, chart_dir: &Path) -> Result<(), RenderError> {
     let dir = chart_dir.join(".akua");
     std::fs::create_dir_all(&dir).map_err(|source| RenderError::Write {
         path: dir.clone(),

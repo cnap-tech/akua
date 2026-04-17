@@ -182,9 +182,7 @@ fn set_at_segments(current: &mut Value, segments: &[PathSegment], value: Value) 
                         },
                     );
                 }
-                let child = map
-                    .get_mut(k)
-                    .expect("just inserted or pre-existing");
+                let child = map.get_mut(k).expect("just inserted or pre-existing");
                 set_at_segments(child, &segments[1..], value);
             }
         }

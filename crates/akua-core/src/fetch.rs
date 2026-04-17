@@ -42,10 +42,7 @@ pub enum FetchError {
 ///
 /// Dep entries are keyed by `alias` if present, else by `name` — matching
 /// Helm's convention.
-pub fn fetch_dependencies(
-    deps: &[Dependency],
-    charts_dir: &Path,
-) -> Result<(), FetchError> {
+pub fn fetch_dependencies(deps: &[Dependency], charts_dir: &Path) -> Result<(), FetchError> {
     if deps.is_empty() {
         return Ok(());
     }
@@ -118,12 +115,9 @@ async fn fetch_http(dep: &Dependency) -> Result<Vec<u8>, FetchError> {
             name: dep.name.clone(),
             version: dep.version.clone(),
         })?;
-    let chart_url = entry
-        .urls
-        .first()
-        .ok_or_else(|| FetchError::NoChartUrl {
-            name: dep.name.clone(),
-        })?;
+    let chart_url = entry.urls.first().ok_or_else(|| FetchError::NoChartUrl {
+        name: dep.name.clone(),
+    })?;
     let url = if chart_url.starts_with("http://") || chart_url.starts_with("https://") {
         chart_url.clone()
     } else {
@@ -164,11 +158,7 @@ struct RepoEntry {
 /// e.g., `nginx-18.1.0.tgz` wraps `nginx/`). We extract the archive and
 /// rename the top-level dir to `target_name` (so aliased deps land at
 /// their alias).
-fn unpack_chart_tgz(
-    tgz: &[u8],
-    charts_dir: &Path,
-    target_name: &str,
-) -> Result<(), FetchError> {
+fn unpack_chart_tgz(tgz: &[u8], charts_dir: &Path, target_name: &str) -> Result<(), FetchError> {
     let tmp = tempfile::tempdir_in(charts_dir)?;
     let gz = flate2::read::GzDecoder::new(tgz);
     let mut archive = tar::Archive::new(gz);
@@ -187,9 +177,8 @@ fn unpack_chart_tgz(
             top = Some(entry.path());
         }
     }
-    let top = top.ok_or_else(|| {
-        FetchError::Oci("chart tarball has no top-level directory".to_string())
-    })?;
+    let top =
+        top.ok_or_else(|| FetchError::Oci("chart tarball has no top-level directory".to_string()))?;
     let dest = charts_dir.join(target_name);
     std::fs::rename(&top, &dest)?;
     Ok(())
@@ -220,8 +209,7 @@ mod tests {
     fn unpacks_tarball_under_target_name() {
         use std::io::Write;
         // Build a minimal chart tarball: nginx/Chart.yaml
-        let mut gz =
-            flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         {
             let mut tar = tar::Builder::new(&mut gz);
             let mut header = tar::Header::new_gnu();

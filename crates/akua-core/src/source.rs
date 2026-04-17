@@ -75,12 +75,11 @@ pub fn extract_chart_name_from_oci(repo_url: &str) -> Option<String> {
     // Strip scheme, split on '/', drop the host, filter empty segments.
     let without_scheme = repo_url.strip_prefix("oci://")?;
     // Everything after the first '/' is the path.
-    let (_host, path) = without_scheme.split_once('/').unwrap_or((without_scheme, ""));
+    let (_host, path) = without_scheme
+        .split_once('/')
+        .unwrap_or((without_scheme, ""));
     // Strip any trailing tag ("chart:v1.2.3" → "chart")
-    let last_segment = path
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .next_back()?;
+    let last_segment = path.split('/').rfind(|s| !s.is_empty())?;
     let without_tag = last_segment.split(':').next()?;
     if without_tag.is_empty() {
         None
@@ -143,7 +142,9 @@ pub fn parse_oci_url(repo_url: &str) -> Option<ParsedOciUrl> {
         return None;
     }
     let without_scheme = repo_url.strip_prefix("oci://")?;
-    let (host, path) = without_scheme.split_once('/').unwrap_or((without_scheme, ""));
+    let (host, path) = without_scheme
+        .split_once('/')
+        .unwrap_or((without_scheme, ""));
     let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     if segments.is_empty() {
         return None;
@@ -159,7 +160,10 @@ pub fn parse_oci_url(repo_url: &str) -> Option<ParsedOciUrl> {
     } else {
         format!("oci://{host}/{parent}")
     };
-    Some(ParsedOciUrl { chart_name, repository })
+    Some(ParsedOciUrl {
+        chart_name,
+        repository,
+    })
 }
 
 #[cfg(test)]
@@ -214,17 +218,19 @@ mod tests {
 
     #[test]
     fn chart_name_from_source_prefers_explicit_chart() {
-        let s = src(Some("id1"), "https://charts.example.com", Some("redis"), None);
+        let s = src(
+            Some("id1"),
+            "https://charts.example.com",
+            Some("redis"),
+            None,
+        );
         assert_eq!(get_chart_name_from_source(&s), Some("redis".to_string()));
     }
 
     #[test]
     fn chart_name_from_source_falls_back_to_oci() {
         let s = src(Some("id1"), "oci://ghcr.io/org/postgres", None, None);
-        assert_eq!(
-            get_chart_name_from_source(&s),
-            Some("postgres".to_string())
-        );
+        assert_eq!(get_chart_name_from_source(&s), Some("postgres".to_string()));
     }
 
     #[test]
@@ -256,7 +262,12 @@ mod tests {
 
     #[test]
     fn alias_is_chart_name_dash_hash() {
-        let s = src(Some("thsrc_abc123"), "https://charts.example.com", Some("redis"), None);
+        let s = src(
+            Some("thsrc_abc123"),
+            "https://charts.example.com",
+            Some("redis"),
+            None,
+        );
         let alias = get_source_alias(&s).unwrap();
         assert!(alias.starts_with("redis-"));
         assert_eq!(alias.len(), "redis-".len() + 4);
@@ -264,7 +275,12 @@ mod tests {
 
     #[test]
     fn alias_is_stable_across_calls() {
-        let s = src(Some("thsrc_abc123"), "oci://ghcr.io/org/postgres", None, None);
+        let s = src(
+            Some("thsrc_abc123"),
+            "oci://ghcr.io/org/postgres",
+            None,
+            None,
+        );
         let a = get_source_alias(&s).unwrap();
         let b = get_source_alias(&s).unwrap();
         assert_eq!(a, b);

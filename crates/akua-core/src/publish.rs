@@ -145,11 +145,7 @@ struct ChartMetadata {
     kube_version: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     dependencies: Vec<serde_json::Value>,
-    #[serde(
-        rename = "type",
-        default,
-        skip_serializing_if = "String::is_empty"
-    )]
+    #[serde(rename = "type", default, skip_serializing_if = "String::is_empty")]
     chart_type: String,
 }
 
@@ -178,9 +174,7 @@ pub fn publish_chart(
         "{}/{}:{}",
         namespace_url, chart_meta.name, chart_meta.version
     );
-    let reference: Reference = reference
-        .parse()
-        .map_err(PublishError::InvalidReference)?;
+    let reference: Reference = reference.parse().map_err(PublishError::InvalidReference)?;
 
     let tarball = package_chart_tgz(chart_dir, &chart_meta.name)?;
     let config_json = serde_json::to_vec(&chart_meta)?;
@@ -230,7 +224,11 @@ fn generate_oci_annotations(meta: &ChartMetadata) -> std::collections::BTreeMap<
     let immutable = [TITLE, VERSION];
 
     let mut out: BTreeMap<String, String> = BTreeMap::new();
-    insert_if_nonempty(&mut out, "org.opencontainers.image.description", &meta.description);
+    insert_if_nonempty(
+        &mut out,
+        "org.opencontainers.image.description",
+        &meta.description,
+    );
     insert_if_nonempty(&mut out, TITLE, &meta.name);
     insert_if_nonempty(&mut out, VERSION, &meta.version);
     insert_if_nonempty(&mut out, "org.opencontainers.image.url", &meta.home);
@@ -349,10 +347,7 @@ mod tests {
 
     #[test]
     fn parses_oci_target_with_trailing_slash() {
-        assert_eq!(
-            parse_target("oci://ghcr.io/acme/").unwrap(),
-            "ghcr.io/acme"
-        );
+        assert_eq!(parse_target("oci://ghcr.io/acme/").unwrap(), "ghcr.io/acme");
     }
 
     #[test]
@@ -377,8 +372,11 @@ mod tests {
             "apiVersion: v2\nname: mychart\nversion: 1.0.0\n",
         )
         .unwrap();
-        std::fs::write(chart_dir.join("templates/deploy.yaml"), "kind: Deployment\n")
-            .unwrap();
+        std::fs::write(
+            chart_dir.join("templates/deploy.yaml"),
+            "kind: Deployment\n",
+        )
+        .unwrap();
 
         let tgz = package_chart_tgz(&chart_dir, "mychart").unwrap();
         // Validate: read back the tarball, check the entries.
@@ -519,10 +517,22 @@ annotations:
         let a = generate_oci_annotations(&meta);
         assert_eq!(a.get("org.opencontainers.image.title").unwrap(), "mychart");
         assert_eq!(a.get("org.opencontainers.image.version").unwrap(), "1.0.0");
-        assert_eq!(a.get("org.opencontainers.image.description").unwrap(), "A chart");
-        assert_eq!(a.get("org.opencontainers.image.url").unwrap(), "https://example.com");
-        assert_eq!(a.get("org.opencontainers.image.source").unwrap(), "https://github.com/a/b");
-        assert_eq!(a.get("org.opencontainers.image.authors").unwrap(), "Alice (a@b.c)");
+        assert_eq!(
+            a.get("org.opencontainers.image.description").unwrap(),
+            "A chart"
+        );
+        assert_eq!(
+            a.get("org.opencontainers.image.url").unwrap(),
+            "https://example.com"
+        );
+        assert_eq!(
+            a.get("org.opencontainers.image.source").unwrap(),
+            "https://github.com/a/b"
+        );
+        assert_eq!(
+            a.get("org.opencontainers.image.authors").unwrap(),
+            "Alice (a@b.c)"
+        );
         assert!(a.contains_key("org.opencontainers.image.created"));
     }
 
@@ -561,6 +571,9 @@ annotations:
         let a = generate_oci_annotations(&meta);
         assert_eq!(a.get("category").unwrap(), "App");
         // Title is immutable — chart.annotations[title] doesn't win.
-        assert_eq!(a.get("org.opencontainers.image.title").unwrap(), "real-name");
+        assert_eq!(
+            a.get("org.opencontainers.image.title").unwrap(),
+            "real-name"
+        );
     }
 }

@@ -62,10 +62,7 @@ pub struct TransformInfo {
 }
 
 /// Build a provenance block from a package's sources and extracted fields.
-pub fn build_metadata(
-    sources: &[HelmSource],
-    fields: &[ExtractedInstallField],
-) -> AkuaMetadata {
+pub fn build_metadata(sources: &[HelmSource], fields: &[ExtractedInstallField]) -> AkuaMetadata {
     AkuaMetadata {
         akua: BuildInfo {
             version: env!("CARGO_PKG_VERSION").to_string(),

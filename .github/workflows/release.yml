@@ -1,0 +1,109 @@
+name: Release
+
+# Local debugging: `task release:target TARGET=<triple>` builds exactly
+# what this workflow uploads. Tools are pinned in .mise.toml; CI just
+# provisions them via mise.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag name (e.g. v0.1.0) — required for manual runs"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  binary:
+    name: Build akua (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            archive_suffix: linux-x86_64
+            cargo: cargo
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            archive_suffix: linux-aarch64
+            cargo: cross
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            archive_suffix: macos-x86_64
+            cargo: cargo
+          - target: aarch64-apple-darwin
+            runner: macos-14
+            archive_suffix: macos-aarch64
+            cargo: cargo
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+          cache: true
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install cross (linux-aarch64 only)
+        if: matrix.cargo == 'cross'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      - name: Build
+        run: mise exec -- task release:target TARGET=${{ matrix.target }} CARGO=${{ matrix.cargo }}
+
+      - name: Package
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          ARCHIVE="akua-${TAG}-${{ matrix.archive_suffix }}.tar.gz"
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/akua dist/
+          cp README.md LICENSE dist/
+          tar -C dist -czf "$ARCHIVE" akua README.md LICENSE
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARCHIVE }}
+          path: ${{ env.ARCHIVE }}
+
+  release:
+    name: Publish GitHub Release
+    needs: binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: "akua-*.tar.gz"
+          merge-multiple: true
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum akua-*.tar.gz > SHA256SUMS
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "$TAG" \
+            --generate-notes \
+            artifacts/*.tar.gz artifacts/SHA256SUMS

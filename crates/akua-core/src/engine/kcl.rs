@@ -63,7 +63,10 @@ impl Engine for KclEngine {
 
         let rendered = eval_kcl(&entrypoint, &source_code)?;
 
-        let source_id = source.id.clone().unwrap_or_else(|| "kcl-source".to_string());
+        let source_id = source
+            .id
+            .clone()
+            .unwrap_or_else(|| "kcl-source".to_string());
         let chart_dir = ctx.work_dir.join(&source_id);
         let templates_dir = chart_dir.join("templates");
         std::fs::create_dir_all(&templates_dir).map_err(|e| EngineError::Write {
@@ -168,7 +171,9 @@ mod tests {
             },
             values: None,
         };
-        let ctx = PrepareContext { work_dir: tmp.path() };
+        let ctx = PrepareContext {
+            work_dir: tmp.path(),
+        };
         let err = KclEngine.prepare(&s, &ctx).unwrap_err();
         assert!(matches!(err, EngineError::MissingField { .. }));
     }
@@ -189,7 +194,9 @@ mod tests {
             },
             values: None,
         };
-        let ctx = PrepareContext { work_dir: tmp.path() };
+        let ctx = PrepareContext {
+            work_dir: tmp.path(),
+        };
         let result = KclEngine.prepare(&s, &ctx).unwrap();
         match result {
             PreparedSource::LocalChart(path) => {

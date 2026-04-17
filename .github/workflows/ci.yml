@@ -1,43 +1,37 @@
 name: CI
 
+# Local debugging: `task ci` runs exactly what this workflow runs. Any
+# command you see here either lives in Taskfile.yml or is mise/actions
+# boilerplate.
+
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  rust:
-    name: Rust build + test
+  ci:
+    name: Full CI pipeline
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+
+      # mise owns every tool version — pinned in .mise.toml.
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+          cache: true
+
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --workspace --all-targets
-      - run: cargo test --workspace
 
-  typescript:
-    name: TypeScript build + test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-      - run: pnpm install --frozen-lockfile || pnpm install
-      - run: pnpm -r build
-      - run: pnpm -r test
-
-  fmt:
-    name: Formatting
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # `task ci` = build wasm → fmt:check → lint → test → wasm:smoke.
+      - name: task ci
+        run: mise exec -- task ci

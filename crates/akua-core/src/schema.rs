@@ -111,7 +111,10 @@ fn get_slugify(prop: &Value) -> bool {
 /// `uniqueIn: "hostname"`; new `x-input` takes it as an explicit string.
 fn get_unique_in(prop: &Value) -> Option<String> {
     if let Some(ext) = prop.get("x-input") {
-        return ext.get("uniqueIn").and_then(|v| v.as_str()).map(String::from);
+        return ext
+            .get("uniqueIn")
+            .and_then(|v| v.as_str())
+            .map(String::from);
     }
     if prop.get("x-hostname").is_some() {
         return Some("hostname".to_string());
@@ -327,7 +330,10 @@ pub fn apply_install_transforms(
     let mut overrides = Value::Object(Map::new());
 
     for field in fields {
-        let raw = user_values.get(&field.path).map(String::as_str).unwrap_or("");
+        let raw = user_values
+            .get(&field.path)
+            .map(String::as_str)
+            .unwrap_or("");
         let trimmed = raw.trim();
 
         if field.required && trimmed.is_empty() {
@@ -462,8 +468,7 @@ pub fn validate_values_schema(schema: &JsonSchema) -> Option<String> {
 fn validate_properties(props: &Map<String, Value>) -> Option<String> {
     for (key, prop) in props {
         let has_input_marker = has_user_input_marker(prop);
-        let has_transform_ext =
-            prop.get("x-input").is_some() || prop.get("x-hostname").is_some();
+        let has_transform_ext = prop.get("x-input").is_some() || prop.get("x-hostname").is_some();
 
         let is_object_with_children = prop.get("type").and_then(|v| v.as_str()) == Some("object")
             && prop
@@ -490,7 +495,7 @@ fn validate_properties(props: &Map<String, Value>) -> Option<String> {
             if let Some(ext) = ext {
                 let template = ext.get("template").and_then(|v| v.as_str());
                 match template {
-                    Some(t) if t.is_empty() => {
+                    Some("") => {
                         return Some(format!(
                             "Property \"{key}\": x-input must have a \"template\" string"
                         ))
@@ -613,7 +618,10 @@ mod tests {
             }
         });
         let fields = extract_install_fields(&schema);
-        assert_eq!(fields[0].hostname_template.as_deref(), Some("{{value}}.example.com"));
+        assert_eq!(
+            fields[0].hostname_template.as_deref(),
+            Some("{{value}}.example.com")
+        );
         assert!(fields[0].slugify);
         assert_eq!(fields[0].unique_in.as_deref(), Some("hostname"));
     }
@@ -766,8 +774,7 @@ mod tests {
             }
         });
         let fields = extract_install_fields(&schema);
-        let result =
-            apply_install_transforms(&fields, &inputs(&[("name", "My App!")])).unwrap();
+        let result = apply_install_transforms(&fields, &inputs(&[("name", "My App!")])).unwrap();
         assert_eq!(result, json!({"name": "my-app-prod"}));
     }
 
@@ -869,7 +876,9 @@ mod tests {
             }
         });
         let fields = extract_install_fields(&schema);
-        let result = apply_install_transforms(&fields, &inputs(&[("config.email", "admin@example.com")])).unwrap();
+        let result =
+            apply_install_transforms(&fields, &inputs(&[("config.email", "admin@example.com")]))
+                .unwrap();
         assert_eq!(result, json!({"config": {"email": "admin@example.com"}}));
     }
 
@@ -1031,7 +1040,12 @@ mod tests {
             "properties": {"replicas": {"type": "number"}}
         });
         let input = vec![SourceWithSchema {
-            source: make_source(Some("id1"), "https://charts.example.com", Some("redis"), None),
+            source: make_source(
+                Some("id1"),
+                "https://charts.example.com",
+                Some("redis"),
+                None,
+            ),
             schema: Some(schema.clone()),
         }];
         assert_eq!(merge_values_schemas(&input), schema);
@@ -1040,7 +1054,12 @@ mod tests {
     #[test]
     fn merge_nests_helm_oci_under_alias_keys() {
         let s1 = SourceWithSchema {
-            source: make_source(Some("id_a"), "https://charts.example.com", Some("redis"), None),
+            source: make_source(
+                Some("id_a"),
+                "https://charts.example.com",
+                Some("redis"),
+                None,
+            ),
             schema: Some(json!({"type": "object", "properties": {"port": {"type": "number"}}})),
         };
         let s2 = SourceWithSchema {
@@ -1062,7 +1081,12 @@ mod tests {
             schema: Some(json!({"type": "object", "properties": {"global": {"type": "boolean"}}})),
         };
         let helm = SourceWithSchema {
-            source: make_source(Some("id1"), "https://charts.example.com", Some("redis"), None),
+            source: make_source(
+                Some("id1"),
+                "https://charts.example.com",
+                Some("redis"),
+                None,
+            ),
             schema: Some(json!({"type": "object", "properties": {"replicas": {"type": "number"}}})),
         };
         let merged = merge_values_schemas(&[git, helm]);
@@ -1075,7 +1099,12 @@ mod tests {
     #[test]
     fn merge_empty_when_no_sources_have_schema() {
         let s = SourceWithSchema {
-            source: make_source(Some("id"), "https://charts.example.com", Some("redis"), None),
+            source: make_source(
+                Some("id"),
+                "https://charts.example.com",
+                Some("redis"),
+                None,
+            ),
             schema: None,
         };
         let merged = merge_values_schemas(&[s]);

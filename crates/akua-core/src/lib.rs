@@ -46,27 +46,26 @@ pub mod source;
 pub mod umbrella;
 pub mod values;
 
-pub use hash::hash_to_suffix;
 pub use attest::{build_provenance, SlsaProvenance};
+pub use engine::{Engine, EngineError, HelmEngine, PrepareContext, PreparedSource, DEFAULT_ENGINE};
 #[cfg(feature = "fetch")]
 pub use fetch::{fetch_dependencies, FetchError};
+pub use hash::hash_to_suffix;
 pub use manifest::{load_manifest, PackageManifest};
 pub use metadata::{build_metadata, AkuaMetadata};
 #[cfg(feature = "publish")]
 pub use publish::{publish_chart, PublishError, PublishOptions, PublishOutcome};
-#[cfg(feature = "helm-cli")]
-pub use render::{render_umbrella, write_metadata, write_umbrella, RenderError, RenderOptions};
 #[cfg(feature = "helm-wasm")]
 pub use render::render_umbrella_embedded;
+#[cfg(feature = "helm-cli")]
+pub use render::{render_umbrella, write_metadata, write_umbrella, RenderError, RenderOptions};
 pub use schema::{
     apply_install_transforms, extract_install_fields, merge_values_schemas, validate_values_schema,
     ExtractedInstallField, JsonSchema,
 };
 pub use source::{extract_chart_name_from_oci, get_source_alias, is_oci, HelmSource};
-pub use engine::{Engine, EngineError, HelmEngine, PrepareContext, PreparedSource, DEFAULT_ENGINE};
 pub use umbrella::{
-    build_umbrella_chart, build_umbrella_chart_in, BuildError, ChartYaml, Dependency,
-    UmbrellaChart,
+    build_umbrella_chart, build_umbrella_chart_in, BuildError, ChartYaml, Dependency, UmbrellaChart,
 };
 pub use values::{deep_merge_values, merge_helm_source_values, set_nested_value};
 

@@ -140,11 +140,16 @@ mod tests {
             },
             values: None,
         };
-        let ctx = PrepareContext { work_dir: tmp.path() };
+        let ctx = PrepareContext {
+            work_dir: tmp.path(),
+        };
         let err = HelmfileEngine.prepare(&s, &ctx).unwrap_err();
         assert!(matches!(
             err,
-            EngineError::MissingField { engine: "helmfile", .. }
+            EngineError::MissingField {
+                engine: "helmfile",
+                ..
+            }
         ));
     }
 }

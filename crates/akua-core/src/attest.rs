@@ -193,14 +193,20 @@ mod tests {
     #[test]
     fn captures_external_parameters() {
         let p = build_provenance("my-pkg", "1.0.0", &fixture_metadata());
-        assert_eq!(p.build_definition.external_parameters.source, "my-pkg@1.0.0");
+        assert_eq!(
+            p.build_definition.external_parameters.source,
+            "my-pkg@1.0.0"
+        );
     }
 
     #[test]
     fn builder_id_is_akua_repo() {
         let p = build_provenance("pkg", "0.1.0", &fixture_metadata());
         assert!(p.run_details.builder.id.contains("cnap-tech/akua"));
-        assert_eq!(p.run_details.builder.version.get("akua-core").unwrap(), "0.3.0");
+        assert_eq!(
+            p.run_details.builder.version.get("akua-core").unwrap(),
+            "0.3.0"
+        );
     }
 
     #[test]
@@ -209,7 +215,9 @@ mod tests {
         assert_eq!(p.build_definition.resolved_dependencies.len(), 2);
         assert_eq!(p.build_definition.resolved_dependencies[0].name, "redis");
         assert_eq!(
-            p.build_definition.resolved_dependencies[0].version.as_deref(),
+            p.build_definition.resolved_dependencies[0]
+                .version
+                .as_deref(),
             Some("20.1.3")
         );
     }
@@ -226,7 +234,10 @@ mod tests {
             alias: None,
         });
         let p = build_provenance("pkg", "0.1.0", &meta);
-        assert_eq!(p.build_definition.internal_parameters.engines, vec!["helm", "kcl"]);
+        assert_eq!(
+            p.build_definition.internal_parameters.engines,
+            vec!["helm", "kcl"]
+        );
     }
 
     #[test]

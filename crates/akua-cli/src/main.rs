@@ -12,8 +12,8 @@ use clap::{ArgGroup, Parser, Subcommand};
 use akua_core::{
     apply_install_transforms, build_metadata, build_provenance, build_umbrella_chart_in,
     extract_install_fields, load_manifest, publish_chart, render_umbrella,
-    render_umbrella_embedded, validate_values_schema, write_metadata, write_umbrella,
-    AkuaMetadata, PackageManifest, PublishOptions, RenderOptions, UmbrellaChart,
+    render_umbrella_embedded, validate_values_schema, write_metadata, write_umbrella, AkuaMetadata,
+    PackageManifest, PublishOptions, RenderOptions, UmbrellaChart,
 };
 
 #[derive(Parser)]
@@ -151,9 +151,12 @@ fn main() -> Result<()> {
         .init();
 
     match Cli::parse().command {
-        Commands::Preview { package, inputs, inputs_file, compact } => {
-            run_preview(&package, inputs.as_deref(), inputs_file.as_deref(), compact)
-        }
+        Commands::Preview {
+            package,
+            inputs,
+            inputs_file,
+            compact,
+        } => run_preview(&package, inputs.as_deref(), inputs_file.as_deref(), compact),
         Commands::Lint { package } => run_lint(&package),
         Commands::Tree { package } => run_tree(&package),
         Commands::Build {
@@ -265,10 +268,7 @@ fn run_preview(
     Ok(())
 }
 
-fn load_package(
-    package_dir: &Path,
-    work_dir: &Path,
-) -> Result<(PackageManifest, UmbrellaChart)> {
+fn load_package(package_dir: &Path, work_dir: &Path) -> Result<(PackageManifest, UmbrellaChart)> {
     let manifest = load_manifest(package_dir)
         .with_context(|| format!("loading package manifest from {}", package_dir.display()))?;
 
@@ -310,7 +310,8 @@ fn resolve_source_paths(
             }
             if let Some(p) = &out.chart.path {
                 let path = PathBuf::from(p);
-                if !path.is_absolute() && !out.chart.repo_url.starts_with("http")
+                if !path.is_absolute()
+                    && !out.chart.repo_url.starts_with("http")
                     && !out.chart.repo_url.starts_with("oci://")
                 {
                     out.chart.path = Some(base_dir.join(path).display().to_string());
@@ -393,18 +394,21 @@ fn run_publish(
 
 fn read_akua_metadata(chart_dir: &Path) -> Result<AkuaMetadata> {
     let path = chart_dir.join(".akua").join("metadata.yaml");
-    let bytes = std::fs::read(&path)
-        .with_context(|| format!("reading {} (chart built with --strip-metadata?)", path.display()))?;
+    let bytes = std::fs::read(&path).with_context(|| {
+        format!(
+            "reading {} (chart built with --strip-metadata?)",
+            path.display()
+        )
+    })?;
     serde_yaml::from_slice(&bytes)
         .with_context(|| format!("parsing {} as AkuaMetadata", path.display()))
 }
 
 fn read_chart_yaml(chart_dir: &Path) -> Result<(String, String)> {
     let path = chart_dir.join("Chart.yaml");
-    let bytes = std::fs::read(&path)
-        .with_context(|| format!("reading {}", path.display()))?;
-    let v: serde_yaml::Value = serde_yaml::from_slice(&bytes)
-        .with_context(|| format!("parsing {}", path.display()))?;
+    let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+    let v: serde_yaml::Value =
+        serde_yaml::from_slice(&bytes).with_context(|| format!("parsing {}", path.display()))?;
     let name = v
         .get("name")
         .and_then(|x| x.as_str())
@@ -420,8 +424,12 @@ fn read_chart_yaml(chart_dir: &Path) -> Result<(String, String)> {
 
 fn run_inspect(chart_dir: &Path) -> Result<()> {
     let path = chart_dir.join(".akua").join("metadata.yaml");
-    let bytes = std::fs::read(&path)
-        .with_context(|| format!("reading {} (chart built with --strip-metadata?)", path.display()))?;
+    let bytes = std::fs::read(&path).with_context(|| {
+        format!(
+            "reading {} (chart built with --strip-metadata?)",
+            path.display()
+        )
+    })?;
     print!("{}", String::from_utf8_lossy(&bytes));
     Ok(())
 }
@@ -472,9 +480,7 @@ fn run_render(args: RenderArgs<'_>) -> Result<()> {
         "helm-cli" => render_umbrella(&umbrella, args.out, &opts).context("helm-cli render")?,
         "helm-wasm" => render_umbrella_embedded(&umbrella, args.out, &opts)
             .context("helm-wasm (embedded) render")?,
-        other => anyhow::bail!(
-            "unknown --engine `{other}`; expected `helm-wasm` or `helm-cli`"
-        ),
+        other => anyhow::bail!("unknown --engine `{other}`; expected `helm-wasm` or `helm-cli`"),
     };
     print!("{manifest_yaml}");
     Ok(())
