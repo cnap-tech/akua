@@ -5,6 +5,10 @@
 > Read this before proposing architectural changes.
 >
 > **Status:** Living document. Updated 2026-04-17. Owners: package team.
+>
+> **For "how it actually flows"** — author → install → ArgoCD → cluster,
+> with both per-customer OCI and shared OCI models worked through —
+> see [`use-cases.md`](./use-cases.md).
 
 The upstream design narrative (CEP-0008) lives in the CNAP repo. This doc
 is the condensed operational version that travels with the OSS codebase.

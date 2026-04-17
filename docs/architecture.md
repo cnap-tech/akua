@@ -67,6 +67,7 @@ All produce byte-identical OCI artifacts:
 
 ## See also
 
+- [Use Cases](./use-cases.md) — end-to-end user journeys (author → install → deploy); both shared-chart and per-customer OCI models with ArgoCD YAML
 - [Design Notes](./design-notes.md) — in-repo design rationale (positioning, engine plugins, CEL, provenance, CNAP integration, open questions)
 - [Roadmap](./roadmap.md) — phase-by-phase plan
 - [Getting Started](./getting-started.md) — using Akua
