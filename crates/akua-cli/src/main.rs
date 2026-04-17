@@ -11,7 +11,8 @@ use clap::{ArgGroup, Parser, Subcommand};
 
 use akua_core::{
     apply_install_transforms, build_umbrella_chart, extract_install_fields, load_manifest,
-    validate_values_schema,
+    render_umbrella, validate_values_schema, write_umbrella, PackageManifest, RenderOptions,
+    UmbrellaChart,
 };
 
 #[derive(Parser)]
@@ -63,10 +64,38 @@ enum Commands {
         #[arg(long, default_value = ".")]
         package: PathBuf,
     },
-    /// Build the package into an OCI-ready artifact.
+    /// Assemble the umbrella chart on disk (no render, no fetch).
+    ///
+    /// Writes Chart.yaml + values.yaml for the package into `--out`. Useful as
+    /// input to `helm dependency update && helm template` or as a
+    /// pre-flight check before `akua render`.
     Build {
-        #[arg(long, default_value = "./dist")]
-        out: String,
+        #[arg(long, default_value = ".")]
+        package: PathBuf,
+        #[arg(long, default_value = "./dist/chart")]
+        out: PathBuf,
+    },
+    /// Render the umbrella chart to Kubernetes manifests via the `helm` CLI.
+    ///
+    /// Shells to `helm dependency update` + `helm template`. Requires `helm`
+    /// on `$PATH` (override with `--helm-bin`).
+    #[command(group(ArgGroup::new("render_inputs").args(["inputs", "inputs_file"])))]
+    Render {
+        #[arg(long, default_value = ".")]
+        package: PathBuf,
+        #[arg(long, default_value = "./dist/chart")]
+        out: PathBuf,
+        #[arg(long, default_value = "release")]
+        release: String,
+        #[arg(long, default_value = "default")]
+        namespace: String,
+        #[arg(long, default_value = "helm")]
+        helm_bin: PathBuf,
+        /// JSON user inputs (path → value) applied via schema transforms.
+        #[arg(long)]
+        inputs: Option<String>,
+        #[arg(long)]
+        inputs_file: Option<PathBuf>,
     },
     /// Publish the built package to an OCI registry.
     Publish {
@@ -88,9 +117,26 @@ fn main() -> Result<()> {
         }
         Commands::Lint { package } => run_lint(&package),
         Commands::Tree { package } => run_tree(&package),
+        Commands::Build { package, out } => run_build(&package, &out),
+        Commands::Render {
+            package,
+            out,
+            release,
+            namespace,
+            helm_bin,
+            inputs,
+            inputs_file,
+        } => run_render(RenderArgs {
+            package_dir: &package,
+            out: &out,
+            release: &release,
+            namespace: &namespace,
+            helm_bin: &helm_bin,
+            inputs_inline: inputs.as_deref(),
+            inputs_file: inputs_file.as_deref(),
+        }),
         Commands::Init { .. } => stub("init"),
         Commands::Test => stub("test"),
-        Commands::Build { .. } => stub("build"),
         Commands::Publish { .. } => stub("publish"),
         Commands::Mcp => stub("mcp"),
     }
@@ -168,10 +214,71 @@ fn run_preview(
     Ok(())
 }
 
-fn run_tree(package_dir: &Path) -> Result<()> {
+fn load_package(package_dir: &Path) -> Result<(PackageManifest, UmbrellaChart)> {
     let manifest = load_manifest(package_dir)
         .with_context(|| format!("loading package manifest from {}", package_dir.display()))?;
     let umbrella = build_umbrella_chart(&manifest.name, &manifest.version, &manifest.sources);
+    Ok((manifest, umbrella))
+}
+
+fn resolve_inputs_to_values(
+    package_dir: &Path,
+    inline: Option<&str>,
+    file: Option<&Path>,
+) -> Result<Option<serde_json::Value>> {
+    if inline.is_none() && file.is_none() {
+        return Ok(None);
+    }
+    let schema = load_schema(package_dir)?;
+    validate_or_bail(&schema)?;
+    let inputs = load_inputs(inline, file)?;
+    let fields = extract_install_fields(&schema);
+    let resolved = apply_install_transforms(&fields, &inputs)
+        .map_err(|e| anyhow::anyhow!("resolving inputs: {e}"))?;
+    Ok(Some(resolved))
+}
+
+fn run_build(package_dir: &Path, out: &Path) -> Result<()> {
+    let (_, umbrella) = load_package(package_dir)?;
+    write_umbrella(&umbrella, out).context("writing umbrella chart")?;
+    println!("wrote {}/Chart.yaml + values.yaml", out.display());
+    if !umbrella.git_sources.is_empty() {
+        eprintln!(
+            "note: {} git source(s) skipped — Helm cannot fetch these",
+            umbrella.git_sources.len()
+        );
+    }
+    Ok(())
+}
+
+struct RenderArgs<'a> {
+    package_dir: &'a Path,
+    out: &'a Path,
+    release: &'a str,
+    namespace: &'a str,
+    helm_bin: &'a Path,
+    inputs_inline: Option<&'a str>,
+    inputs_file: Option<&'a Path>,
+}
+
+fn run_render(args: RenderArgs<'_>) -> Result<()> {
+    let (_, umbrella) = load_package(args.package_dir)?;
+    let override_values =
+        resolve_inputs_to_values(args.package_dir, args.inputs_inline, args.inputs_file)?;
+    let opts = RenderOptions {
+        helm_bin: args.helm_bin.to_path_buf(),
+        release_name: args.release.to_string(),
+        namespace: args.namespace.to_string(),
+        override_values,
+    };
+    let manifest_yaml =
+        render_umbrella(&umbrella, args.out, &opts).context("rendering umbrella chart")?;
+    print!("{manifest_yaml}");
+    Ok(())
+}
+
+fn run_tree(package_dir: &Path) -> Result<()> {
+    let (manifest, umbrella) = load_package(package_dir)?;
 
     println!(
         "{} {} ({} sources)",

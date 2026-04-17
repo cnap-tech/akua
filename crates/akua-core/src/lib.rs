@@ -32,6 +32,7 @@
 
 pub mod hash;
 pub mod manifest;
+pub mod render;
 pub mod schema;
 pub mod source;
 pub mod umbrella;
@@ -39,6 +40,7 @@ pub mod values;
 
 pub use hash::hash_to_suffix;
 pub use manifest::{load_manifest, PackageManifest};
+pub use render::{render_umbrella, write_umbrella, RenderError, RenderOptions};
 pub use schema::{
     apply_install_transforms, extract_install_fields, merge_values_schemas, validate_values_schema,
     ExtractedInstallField, JsonSchema,

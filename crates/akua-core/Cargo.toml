@@ -17,3 +17,4 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 reqwest = { workspace = true }
+tempfile = "3"
