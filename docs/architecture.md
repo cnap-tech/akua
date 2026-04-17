@@ -67,6 +67,7 @@ All produce byte-identical OCI artifacts:
 
 ## See also
 
-- [CNAP CEP-0008](https://github.com/cnap-tech/cnap/blob/main/internal/cep/20260417-chart-transformation-platform.md) — the complete design rationale and roadmap
+- [Design Notes](./design-notes.md) — in-repo design rationale (positioning, engine plugins, CEL, provenance, CNAP integration, open questions)
 - [Roadmap](./roadmap.md) — phase-by-phase plan
-- [Getting Started](./getting-started.md) — using Akua once v4 ships
+- [Getting Started](./getting-started.md) — using Akua
+- [CNAP CEP-0008](https://github.com/cnap-tech/cnap/blob/main/internal/cep/20260417-chart-transformation-platform.md) — upstream design narrative (private)
