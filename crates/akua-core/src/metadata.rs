@@ -52,10 +52,11 @@ pub struct SourceInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TransformInfo {
     pub field: String,
+    /// Akua-reference CEL expression from `x-input.cel`. Null when the
+    /// author used a different transform language (bundle-specific)
+    /// or no transform at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expression: Option<String>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub slugify: bool,
+    pub cel: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unique_in: Option<String>,
     pub required: bool,
@@ -95,15 +96,10 @@ fn source_info(source: &HelmSource) -> SourceInfo {
 }
 
 fn field_to_transform(field: &ExtractedInstallField) -> TransformInfo {
-    let expression = field
-        .cel
-        .clone()
-        .or_else(|| field.hostname_template.clone());
     TransformInfo {
         field: field.path.clone(),
-        expression,
-        slugify: field.slugify,
-        unique_in: field.unique_in.clone(),
+        cel: field.cel().map(String::from),
+        unique_in: field.unique_in().map(String::from),
         required: field.required,
     }
 }
@@ -135,16 +131,15 @@ mod tests {
         }
     }
 
-    fn field(path: &str, cel: Option<&str>, slugify: bool) -> ExtractedInstallField {
+    fn field(path: &str, cel: Option<&str>) -> ExtractedInstallField {
+        let schema = match cel {
+            Some(expr) => json!({ "x-user-input": true, "x-input": { "cel": expr } }),
+            None => json!({ "x-user-input": true }),
+        };
         ExtractedInstallField {
             path: path.to_string(),
-            schema: json!({}),
+            schema,
             required: false,
-            hostname_template: None,
-            cel: cel.map(String::from),
-            slugify,
-            unique_in: None,
-            order: None,
         }
     }
 
@@ -176,25 +171,20 @@ mod tests {
 
     #[test]
     fn transforms_capture_cel_expression() {
-        let f = field(
-            "httpRoute.hostname",
-            Some("value + '.apps.example.com'"),
-            true,
-        );
+        let f = field("httpRoute.hostname", Some("value + '.apps.example.com'"));
         let meta = build_metadata(&[], &[f]);
         assert_eq!(meta.transforms.len(), 1);
         assert_eq!(meta.transforms[0].field, "httpRoute.hostname");
         assert_eq!(
-            meta.transforms[0].expression.as_deref(),
+            meta.transforms[0].cel.as_deref(),
             Some("value + '.apps.example.com'")
         );
-        assert!(meta.transforms[0].slugify);
     }
 
     #[test]
     fn serializes_to_yaml() {
         let s = helm_source("app", "redis", "7.0.0", None);
-        let f = field("name", Some("value"), false);
+        let f = field("name", Some("value"));
         let meta = build_metadata(&[s], &[f]);
         let yaml = serde_yaml::to_string(&meta).unwrap();
         assert!(yaml.contains("akua:"));

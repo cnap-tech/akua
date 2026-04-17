@@ -36,8 +36,7 @@
             "order": 20
           },
           "x-input": {
-            "slugify": true,
-            "cel": "value + '.apps.example.com'"
+            "cel": "slugify(value) + '.apps.example.com'"
           }
         }
       },

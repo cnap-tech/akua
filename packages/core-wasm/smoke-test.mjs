@@ -21,7 +21,7 @@ const schema = {
         hostname: {
           type: 'string',
           'x-user-input': { order: 20 },
-          'x-input': { slugify: true, cel: "value + '.apps.example.com'" },
+          'x-input': { cel: "slugify(value) + '.apps.example.com'" },
         },
       },
       required: ['hostname'],

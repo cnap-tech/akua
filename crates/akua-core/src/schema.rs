@@ -30,38 +30,51 @@ use crate::values::set_nested_value;
 /// Thin wrapper around [`serde_json::Value`] to make schema APIs explicit.
 pub type JsonSchema = Value;
 
-/// A field extracted from a schema's `x-user-input` annotations.
+/// A field extracted from a schema walk.
 ///
-/// `path` is a dot-notation path into the resolved values tree. `schema` is
-/// the leaf's JSON Schema definition (type, title, description, default,
-/// pattern, etc.). `hostname_template` is present when `x-input.template` or
-/// legacy `x-hostname.template` is set.
-/// A field extracted from a schema's `x-user-input` annotation.
+/// Minimal, universal: just the leaf's dot-path, its raw JSON Schema node
+/// (including any `x-*` extensions), and a denormalised `required` flag.
 ///
-/// `path` is the dot-notation location of the field in the resolved values
-/// tree. `schema` is the field's JSON Schema node. Transform configuration
-/// comes entirely from the field's `x-input.cel` expression — there are
-/// no separate `slugify` / `template` flags; authors write CEL directly and
-/// call `slugify()` as a registered CEL function when they need it.
+/// Akua-opinionated extensions (`x-input.cel`, `x-input.uniqueIn`,
+/// `x-user-input.order`, …) are NOT first-class fields on this struct —
+/// read them via the accessor methods, or directly from `schema` as raw
+/// JSON. See [`spec-markers.md`](../../docs/spec-markers.md) for the
+/// canonical marker vocabulary.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtractedInstallField {
+    /// Dot-notation path into the resolved values tree.
     pub path: String,
+    /// Raw JSON Schema node for this leaf, including any `x-*` extensions.
     pub schema: JsonSchema,
+    /// Denormalised cache: true iff the leaf's key is in its parent's
+    /// `required: [...]` array at extraction time. Convenience for
+    /// flat-list consumers. Re-derivable from the raw schema tree.
     pub required: bool,
-    /// CEL expression evaluated with `value` (this field's raw input, after
-    /// trim) and `values` (the resolved-so-far object) in scope. Absent ⇒
-    /// pass the raw input through unchanged.
-    ///
-    /// Stdlib CEL plus Akua registered functions: `slugify(s)`,
-    /// `slugifyMax(s, n)`. Compose as e.g.
-    /// `slugify(value) + '.' + values.env + '.apps.example.com'`.
-    pub cel: Option<String>,
-    /// Name of a uniqueness registry this field participates in. Akua core
-    /// surfaces the hint; the registry itself is a platform concern.
-    pub unique_in: Option<String>,
-    /// UI ordering hint (lower = earlier in the form).
-    pub order: Option<i64>,
+}
+
+impl ExtractedInstallField {
+    /// CEL expression from `x-input.cel`, if any. Akua's reference
+    /// transform language. Third-party bundle assemblers that use a
+    /// different transform language ignore this and read their own key.
+    pub fn cel(&self) -> Option<&str> {
+        self.schema.get("x-input")?.get("cel")?.as_str()
+    }
+
+    /// Uniqueness-registry hint from `x-input.uniqueIn`, if any.
+    pub fn unique_in(&self) -> Option<&str> {
+        self.schema.get("x-input")?.get("uniqueIn")?.as_str()
+    }
+
+    /// UI ordering hint from `x-user-input.order`, if any.
+    pub fn order(&self) -> Option<i64> {
+        self.schema.get("x-user-input")?.as_object()?.get("order")?.as_i64()
+    }
+
+    /// Standard JSON Schema `title`, if any.
+    pub fn title(&self) -> Option<&str> {
+        self.schema.get("title")?.as_str()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -77,25 +90,6 @@ fn has_user_input_marker(prop: &Value) -> bool {
     }
 }
 
-/// Extract the order hint from `x-user-input: { order: N }`. Returns `None`
-/// when the marker is just `true`.
-fn get_install_order(prop: &Value) -> Option<i64> {
-    let obj = prop.get("x-user-input")?.as_object()?;
-    obj.get("order")?.as_i64()
-}
-
-/// Extract the CEL expression from `x-input.cel`.
-fn get_cel(prop: &Value) -> Option<String> {
-    prop.get("x-input")?.get("cel")?.as_str().map(String::from)
-}
-
-/// Extract the `uniqueIn` registry name from `x-input.uniqueIn`.
-fn get_unique_in(prop: &Value) -> Option<String> {
-    prop.get("x-input")?
-        .get("uniqueIn")?
-        .as_str()
-        .map(String::from)
-}
 
 // ---------------------------------------------------------------------------
 // Alias computation for schema merge (mirrors values merge logic)
@@ -214,8 +208,8 @@ pub fn extract_install_fields(schema: &JsonSchema) -> Vec<ExtractedInstallField>
         .unwrap_or_default();
     walk_schema(schema, "", &required, &mut out);
     out.sort_by(|a, b| {
-        let ao = a.order.unwrap_or(i64::MAX);
-        let bo = b.order.unwrap_or(i64::MAX);
+        let ao = a.order().unwrap_or(i64::MAX);
+        let bo = b.order().unwrap_or(i64::MAX);
         ao.cmp(&bo)
     });
     out
@@ -245,9 +239,6 @@ fn walk_schema(
                 path: path.clone(),
                 schema: prop.clone(),
                 required,
-                cel: get_cel(prop),
-                unique_in: get_unique_in(prop),
-                order: get_install_order(prop),
             });
         }
 
@@ -319,7 +310,7 @@ pub fn apply_install_transforms(
             continue;
         }
 
-        let resolved = match &field.cel {
+        let resolved = match field.cel() {
             Some(expr) => eval_cel(expr, trimmed, &overrides, &field.path)?,
             None => trimmed.to_string(),
         };
@@ -413,18 +404,19 @@ fn collapse_hyphens(s: &str) -> String {
 // validate_values_schema
 // ---------------------------------------------------------------------------
 
-/// Validate a JSON Schema with Akua's CNAP extension rules.
+/// Validate a JSON Schema against Akua's structural rules.
 ///
 /// Returns `None` if valid, `Some(error)` with a human-readable message if not.
 ///
-/// Rules:
+/// Rules (see `docs/spec-markers.md`):
 /// 1. Root must have `type: "object"`.
-/// 2. `x-user-input` (or legacy `x-install`) must only appear on leaf
-///    properties (not on objects that have their own nested `properties`).
-/// 3. `x-input.template` (or legacy `x-hostname.template`) must exist and
-///    contain `{{value}}`.
-/// 4. `x-input` / `x-hostname` requires `x-user-input` / `x-install` on the
-///    same property.
+/// 2. `x-user-input` must only appear on leaf properties — not on objects
+///    with their own nested `properties`.
+/// 3. `x-input.cel`, if present, must be a non-empty string.
+///
+/// `x-input` does NOT require `x-user-input` — derived fields (computed
+/// from other values, not shown to users) are a valid combination. See
+/// the four-combinations matrix in the marker spec.
 pub fn validate_values_schema(schema: &JsonSchema) -> Option<String> {
     if schema.get("type").and_then(|v| v.as_str()) != Some("object") {
         return Some("Values schema must have type: \"object\" at root level".to_string());
@@ -440,7 +432,6 @@ pub fn validate_values_schema(schema: &JsonSchema) -> Option<String> {
 fn validate_properties(props: &Map<String, Value>) -> Option<String> {
     for (key, prop) in props {
         let has_input_marker = has_user_input_marker(prop);
-        let has_transform_ext = prop.get("x-input").is_some() || prop.get("x-hostname").is_some();
 
         let is_object_with_children = prop.get("type").and_then(|v| v.as_str()) == Some("object")
             && prop
@@ -455,38 +446,18 @@ fn validate_properties(props: &Map<String, Value>) -> Option<String> {
             ));
         }
 
-        if has_transform_ext && !has_input_marker {
-            return Some(format!(
-                "Property \"{key}\": x-input requires x-user-input to also be set"
-            ));
-        }
-
-        if has_transform_ext {
-            // Check template shape on whichever extension is present.
-            let ext = prop.get("x-input").or_else(|| prop.get("x-hostname"));
-            if let Some(ext) = ext {
-                let template = ext.get("template").and_then(|v| v.as_str());
-                match template {
-                    Some("") => {
-                        return Some(format!(
-                            "Property \"{key}\": x-input must have a \"template\" string"
-                        ))
-                    }
-                    Some(t) if !t.contains("{{value}}") => {
-                        return Some(format!(
-                            "Property \"{key}\": x-input template must contain \"{{{{value}}}}\""
-                        ))
-                    }
-                    Some(_) => {}
-                    None => {
-                        // legacy x-hostname without template -> error.
-                        // new x-input without template is allowed if it only uses slugify/uniqueIn.
-                        if prop.get("x-hostname").is_some() {
-                            return Some(format!(
-                                "Property \"{key}\": x-input must have a \"template\" string"
-                            ));
-                        }
-                    }
+        if let Some(cel) = prop.get("x-input").and_then(|x| x.get("cel")) {
+            match cel.as_str() {
+                Some("") => {
+                    return Some(format!(
+                        "Property \"{key}\": x-input.cel must be a non-empty string"
+                    ))
+                }
+                Some(_) => {}
+                None => {
+                    return Some(format!(
+                        "Property \"{key}\": x-input.cel must be a string"
+                    ))
                 }
             }
         }
@@ -523,14 +494,15 @@ mod tests {
     }
 
     #[test]
-    fn extract_legacy_x_install() {
+    fn legacy_x_install_no_longer_recognised() {
+        // x-install was the CEP-0006 vocabulary — deprecated in v1alpha1.
+        // Only x-user-input is recognised now.
         let schema = json!({
             "type": "object",
             "properties": {"foo": {"type": "string", "x-install": true}}
         });
         let fields = extract_install_fields(&schema);
-        assert_eq!(fields.len(), 1);
-        assert_eq!(fields[0].path, "foo");
+        assert!(fields.is_empty(), "x-install should not produce a field");
     }
 
     #[test]
@@ -552,50 +524,25 @@ mod tests {
     }
 
     #[test]
-    fn extract_legacy_x_hostname_template() {
+    fn extract_reads_cel_and_unique_in_via_accessors() {
         let schema = json!({
             "type": "object",
             "properties": {
                 "sub": {
                     "type": "string",
-                    "x-install": true,
-                    "x-hostname": {"template": "{{value}}.example.com"}
-                }
-            }
-        });
-        let fields = extract_install_fields(&schema);
-        assert_eq!(fields.len(), 1);
-        assert_eq!(
-            fields[0].hostname_template,
-            Some("{{value}}.example.com".to_string())
-        );
-        assert!(fields[0].slugify, "x-hostname implies slugify");
-        assert_eq!(fields[0].unique_in.as_deref(), Some("hostname"));
-    }
-
-    #[test]
-    fn extract_new_x_input_with_orthogonal_fields() {
-        let schema = json!({
-            "type": "object",
-            "properties": {
-                "sub": {
-                    "type": "string",
-                    "x-user-input": true,
+                    "x-user-input": { "order": 10 },
                     "x-input": {
-                        "template": "{{value}}.example.com",
-                        "slugify": true,
+                        "cel": "slugify(value) + '.example.com'",
                         "uniqueIn": "hostname"
                     }
                 }
             }
         });
         let fields = extract_install_fields(&schema);
-        assert_eq!(
-            fields[0].hostname_template.as_deref(),
-            Some("{{value}}.example.com")
-        );
-        assert!(fields[0].slugify);
-        assert_eq!(fields[0].unique_in.as_deref(), Some("hostname"));
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].cel(), Some("slugify(value) + '.example.com'"));
+        assert_eq!(fields[0].unique_in(), Some("hostname"));
+        assert_eq!(fields[0].order(), Some(10));
     }
 
     #[test]
@@ -671,14 +618,14 @@ mod tests {
     }
 
     #[test]
-    fn transform_hostname_slugifies_and_substitutes() {
+    fn transform_cel_with_slugify_function() {
         let schema = json!({
             "type": "object",
             "properties": {
                 "sub": {
                     "type": "string",
                     "x-user-input": true,
-                    "x-input": {"template": "{{value}}.lando.health", "slugify": true}
+                    "x-input": { "cel": "slugify(value) + '.lando.health'" }
                 }
             }
         });
@@ -734,14 +681,14 @@ mod tests {
     }
 
     #[test]
-    fn transform_cel_with_slugify_slugifies_before_binding() {
+    fn transform_cel_slugify_then_append() {
         let schema = json!({
             "type": "object",
             "properties": {
                 "name": {
                     "type": "string",
                     "x-user-input": true,
-                    "x-input": {"slugify": true, "cel": "value + '-prod'"}
+                    "x-input": { "cel": "slugify(value) + '-prod'" }
                 }
             }
         });
@@ -928,56 +875,64 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_x_hostname_without_x_install() {
-        let s = json!({
-            "type": "object",
-            "properties": {
-                "sub": {
-                    "type": "string",
-                    "x-hostname": {"template": "{{value}}.example.com"}
-                }
-            }
-        });
-        assert!(validate_values_schema(&s).is_some());
-    }
-
-    #[test]
-    fn validate_rejects_x_hostname_missing_template() {
-        let s = json!({
-            "type": "object",
-            "properties": {
-                "sub": {"type": "string", "x-install": true, "x-hostname": {}}
-            }
-        });
-        assert!(validate_values_schema(&s).is_some());
-    }
-
-    #[test]
-    fn validate_rejects_template_without_value_placeholder() {
+    fn validate_rejects_empty_cel_string() {
         let s = json!({
             "type": "object",
             "properties": {
                 "sub": {
                     "type": "string",
                     "x-user-input": true,
-                    "x-input": {"template": "static.example.com"}
+                    "x-input": {"cel": ""}
                 }
             }
         });
         let err = validate_values_schema(&s).unwrap();
-        assert!(err.contains("{{value}}"));
+        assert!(err.contains("cel"));
     }
 
     #[test]
-    fn validate_accepts_x_input_with_only_slugify() {
-        // New x-input without template is OK if it only sets slugify/uniqueIn.
+    fn validate_rejects_non_string_cel() {
         let s = json!({
             "type": "object",
             "properties": {
                 "sub": {
                     "type": "string",
                     "x-user-input": true,
-                    "x-input": {"slugify": true, "uniqueIn": "hostname"}
+                    "x-input": {"cel": 42}
+                }
+            }
+        });
+        let err = validate_values_schema(&s).unwrap();
+        assert!(err.contains("cel"));
+    }
+
+    #[test]
+    fn validate_accepts_derived_field_without_x_user_input() {
+        // x-input without x-user-input IS allowed — derived fields (computed
+        // from other inputs, not shown to users) are a valid combination.
+        // See the four-combinations matrix in spec-markers.md.
+        let s = json!({
+            "type": "object",
+            "properties": {
+                "derived": {
+                    "type": "string",
+                    "x-input": {"cel": "values.env + '.apps.example.com'"}
+                }
+            }
+        });
+        assert!(validate_values_schema(&s).is_none());
+    }
+
+    #[test]
+    fn validate_accepts_x_input_with_only_unique_in() {
+        // x-input without x-input.cel is fine — only uniqueIn is set.
+        let s = json!({
+            "type": "object",
+            "properties": {
+                "sub": {
+                    "type": "string",
+                    "x-user-input": true,
+                    "x-input": {"uniqueIn": "hostname"}
                 }
             }
         });
