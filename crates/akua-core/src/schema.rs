@@ -36,7 +36,8 @@ pub type JsonSchema = Value;
 /// the leaf's JSON Schema definition (type, title, description, default,
 /// pattern, etc.). `hostname_template` is present when `x-input.template` or
 /// legacy `x-hostname.template` is set.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExtractedInstallField {
     pub path: String,
     pub schema: JsonSchema,

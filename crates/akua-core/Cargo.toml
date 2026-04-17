@@ -7,14 +7,21 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[features]
+default = ["helm-cli"]
+# Shell-to-helm rendering (not WASM-safe — requires std::process and tempfile).
+helm-cli = ["dep:tempfile"]
+
 [dependencies]
-tokio = { workspace = true }
-async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 reqwest = { workspace = true }
-tempfile = "3"
+tempfile = { version = "3", optional = true }

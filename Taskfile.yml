@@ -1,0 +1,86 @@
+version: "3"
+
+# Akua dev tasks. Run `task --list` to see available tasks.
+# Install tools first: `mise install`.
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  # ---------- Rust workspace ----------
+
+  build:
+    desc: Build the Rust workspace
+    cmds:
+      - cargo build --workspace
+
+  test:
+    desc: Run all Rust tests
+    cmds:
+      - cargo test --workspace
+
+  check:
+    desc: cargo check + clippy
+    cmds:
+      - cargo check --workspace
+      - cargo clippy --workspace -- -D warnings
+
+  fmt:
+    desc: Format Rust code
+    cmds:
+      - cargo fmt --all
+
+  # ---------- CLI shortcuts ----------
+
+  preview:
+    desc: Run `akua preview` on the hello-package example
+    cmds:
+      - >-
+        cargo run -q -p akua-cli -- preview
+        --package examples/hello-package
+        --inputs '{"config.adminEmail":"admin@example.com","httpRoute.hostname":"My App!"}'
+
+  tree:
+    desc: Print the umbrella chart tree for hello-package
+    cmds:
+      - cargo run -q -p akua-cli -- tree --package examples/hello-package
+
+  render:
+    desc: Render hello-package to Kubernetes manifests via helm
+    cmds:
+      - >-
+        cargo run -q -p akua-cli -- render
+        --package examples/hello-package --out dist/chart --release demo
+        --inputs '{"config.adminEmail":"admin@example.com","httpRoute.hostname":"My App!"}'
+
+  # ---------- WASM bindings ----------
+
+  wasm:build:
+    desc: Build WASM bindings for bundler targets
+    cmds:
+      - wasm-pack build crates/akua-wasm --target bundler --out-dir ../../packages/core-wasm
+      # wasm-pack emits a .gitignore with `*` that shadows our repo rules — drop it.
+      - rm -f packages/core-wasm/.gitignore
+
+  wasm:build:node:
+    desc: Build WASM bindings for direct Node.js consumption
+    cmds:
+      - wasm-pack build crates/akua-wasm --target nodejs --out-dir ../../packages/core-wasm
+      - rm -f packages/core-wasm/.gitignore
+
+  wasm:smoke:
+    desc: Build WASM (node target) + run the smoke test
+    deps: [wasm:build:node]
+    cmds:
+      - bun packages/core-wasm/smoke-test.mjs
+
+  # ---------- Cleanup ----------
+
+  clean:
+    desc: Remove Rust target/ and generated WASM artifacts
+    cmds:
+      - cargo clean
+      - rm -rf dist/
+      - rm -f packages/core-wasm/*.wasm packages/core-wasm/*.js packages/core-wasm/*.d.ts packages/core-wasm/package.json packages/core-wasm/.gitignore

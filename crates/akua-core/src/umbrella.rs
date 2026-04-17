@@ -16,7 +16,8 @@ use crate::source::{get_source_alias, is_oci, parse_oci_url, HelmSource};
 use crate::values::merge_helm_source_values;
 
 /// Assembled umbrella chart ready for Helm render.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UmbrellaChart {
     pub chart_yaml: ChartYaml,
     /// Merged values object, nested by alias. Serialized as `values.yaml`.
