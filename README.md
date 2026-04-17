@@ -215,9 +215,16 @@ Akua builds on and contributes to the Kubernetes/Helm ecosystem:
 
 ## Naming
 
-"Akua" is a Hawaiian word meaning "divine spirit" or "god." It was chosen for its brevity, distinctiveness, and because it's not overloaded in the cloud-native space. We recognize "Akua" sounds similar to "Aqua" (the security company); the projects serve completely different use cases.
+"Akua" — Hawaiian for "divine spirit" — echoes **aqua**, water. That fits the cloud-native tradition: Docker loads the cargo, **Helm** steers the ship, **Harbor** stores what's shipped, **Kubernetes** (Greek: *kubernḗtēs*, "helmsman") pilots the fleet. Akua is the current underneath — the flow that carries your sources, transforms them in motion, and delivers a sealed package to the harbor.
 
-The name is provisional while the project is in pre-alpha. If a better name emerges before we publish any npm packages or tag a v1 release, we may rename.
+Water fits the job functionally too:
+
+- **Flows through channels** — sources into an umbrella, values into manifests, bytes into an OCI registry
+- **Takes the shape of its container** — any source format, any target runtime, same pipeline
+- **Transparent** — you see through it at every stage (live preview, reproducible builds)
+- **Carries things between ports** — between your local environment, CI, and managed infrastructure
+
+The name is provisional while the project is in pre-alpha. If a better name emerges before we publish any npm packages or tag a v1 release, we may rename — though we'd want to keep the elemental / nautical feel that puts Akua alongside its cloud-native siblings.
 
 ## License
 
