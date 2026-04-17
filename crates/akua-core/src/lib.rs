@@ -30,6 +30,7 @@
 
 #![allow(dead_code)]
 
+pub mod engine;
 pub mod hash;
 pub mod manifest;
 #[cfg(feature = "helm-cli")]
@@ -48,7 +49,8 @@ pub use schema::{
     ExtractedInstallField, JsonSchema,
 };
 pub use source::{extract_chart_name_from_oci, get_source_alias, is_oci, HelmSource};
-pub use umbrella::{build_umbrella_chart, ChartYaml, Dependency, UmbrellaChart};
+pub use engine::{Engine, HelmEngine, PreparedSource, DEFAULT_ENGINE};
+pub use umbrella::{build_umbrella_chart, BuildError, ChartYaml, Dependency, UmbrellaChart};
 pub use values::{deep_merge_values, merge_helm_source_values, set_nested_value};
 
 /// Top-level error type for the pipeline.

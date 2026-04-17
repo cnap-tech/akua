@@ -4,6 +4,7 @@ description: Minimal Akua package — one Helm chart, two user-input fields.
 
 sources:
   - id: app
+    engine: helm                 # default; shown here for clarity
     chart:
       repoUrl: https://charts.bitnami.com/bitnami
       chart: nginx

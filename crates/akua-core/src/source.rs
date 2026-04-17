@@ -25,6 +25,11 @@ pub struct HelmSource {
     /// so the alias is stable across runs even when unrelated sources change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// Engine that produces a chart fragment from this source.
+    /// Defaults to `"helm"` (pass-through — the source is already a chart).
+    /// Unknown engines cause a package-level error at build time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
     /// Chart reference (repo URL + chart name + revision + path).
     pub chart: ChartRef,
     /// Default values for the source. May be overridden at install time.
@@ -164,6 +169,7 @@ mod tests {
     fn src(id: Option<&str>, repo: &str, chart: Option<&str>, path: Option<&str>) -> HelmSource {
         HelmSource {
             id: id.map(String::from),
+            engine: None,
             chart: ChartRef {
                 repo_url: repo.to_string(),
                 chart: chart.map(String::from),

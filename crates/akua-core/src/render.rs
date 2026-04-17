@@ -187,6 +187,7 @@ mod tests {
     fn make_chart() -> UmbrellaChart {
         let s = HelmSource {
             id: Some("a".to_string()),
+            engine: None,
             chart: ChartRef {
                 repo_url: "https://charts.example.com".to_string(),
                 chart: Some("redis".to_string()),
@@ -195,7 +196,7 @@ mod tests {
             },
             values: Some(json!({"replicaCount": 2})),
         };
-        build_umbrella_chart("demo", "0.1.0", &[s])
+        build_umbrella_chart("demo", "0.1.0", &[s]).expect("known engine")
     }
 
     #[test]

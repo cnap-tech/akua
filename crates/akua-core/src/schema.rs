@@ -852,6 +852,7 @@ mod tests {
     ) -> HelmSource {
         HelmSource {
             id: id.map(String::from),
+            engine: None,
             chart: crate::source::ChartRef {
                 repo_url: repo.to_string(),
                 chart: chart.map(String::from),

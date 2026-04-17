@@ -217,7 +217,8 @@ fn run_preview(
 fn load_package(package_dir: &Path) -> Result<(PackageManifest, UmbrellaChart)> {
     let manifest = load_manifest(package_dir)
         .with_context(|| format!("loading package manifest from {}", package_dir.display()))?;
-    let umbrella = build_umbrella_chart(&manifest.name, &manifest.version, &manifest.sources);
+    let umbrella = build_umbrella_chart(&manifest.name, &manifest.version, &manifest.sources)
+        .context("assembling umbrella chart")?;
     Ok((manifest, umbrella))
 }
 

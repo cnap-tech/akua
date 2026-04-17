@@ -12,7 +12,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::source::{get_source_alias, is_oci, parse_oci_url, HelmSource};
+use crate::engine::{self, PreparedSource, DEFAULT_ENGINE};
+use crate::source::HelmSource;
 use crate::values::merge_helm_source_values;
 
 /// Assembled umbrella chart ready for Helm render.
@@ -54,29 +55,45 @@ pub struct Dependency {
     pub condition: Option<String>,
 }
 
-/// Build an umbrella chart from a set of sources.
-///
-/// - Helm HTTP sources → `{name: <chart>, version: <rev>, repository: <repoUrl>}`
-/// - OCI sources → chart name parsed from URL, repository is the parent path
-///   (everything before the last segment — Helm's convention)
-/// - Git sources → collected in [`UmbrellaChart::git_sources`] (not deps)
-///
-/// The dependency `alias` matches [`get_source_alias`] so `values.yaml` nesting
-/// done by [`merge_helm_source_values`] aligns with how Helm resolves the dep.
-pub fn build_umbrella_chart(name: &str, version: &str, sources: &[HelmSource]) -> UmbrellaChart {
+#[derive(Debug, thiserror::Error)]
+pub enum BuildError {
+    #[error("source `{source_id}` specifies unknown engine `{engine}`")]
+    UnknownEngine { source_id: String, engine: String },
+}
+
+/// Build an umbrella chart from a set of sources. Each source's `engine` field
+/// selects the [`Engine`] impl that prepares its umbrella entry; unknown
+/// engines surface as [`BuildError::UnknownEngine`].
+pub fn build_umbrella_chart(
+    name: &str,
+    version: &str,
+    sources: &[HelmSource],
+) -> Result<UmbrellaChart, BuildError> {
     let mut dependencies = Vec::new();
     let mut git_sources = Vec::new();
 
     for source in sources {
-        match source_to_dependency(source) {
-            Some(dep) => dependencies.push(dep),
-            None => git_sources.push(source.clone()),
+        let engine_name = source.engine.as_deref().unwrap_or(DEFAULT_ENGINE);
+        let engine = engine::resolve(engine_name).ok_or_else(|| BuildError::UnknownEngine {
+            source_id: source.id.clone().unwrap_or_else(|| "<unnamed>".to_string()),
+            engine: engine_name.to_string(),
+        })?;
+        match engine.prepare(source) {
+            PreparedSource::Dependency(dep) => dependencies.push(dep),
+            PreparedSource::Git => git_sources.push(source.clone()),
+            PreparedSource::LocalChart(path) => dependencies.push(Dependency {
+                name: source.id.clone().unwrap_or_else(|| "local".to_string()),
+                version: source.chart.target_revision.clone(),
+                repository: format!("file://{}", path.display()),
+                alias: crate::source::get_source_alias(source),
+                condition: None,
+            }),
         }
     }
 
     let values = merge_helm_source_values(sources);
 
-    UmbrellaChart {
+    Ok(UmbrellaChart {
         chart_yaml: ChartYaml {
             api_version: "v2".to_string(),
             name: name.to_string(),
@@ -87,37 +104,6 @@ pub fn build_umbrella_chart(name: &str, version: &str, sources: &[HelmSource]) -
         },
         values,
         git_sources,
-    }
-}
-
-fn source_to_dependency(source: &HelmSource) -> Option<Dependency> {
-    let alias = get_source_alias(source);
-
-    if is_oci(&source.chart.repo_url) {
-        let parsed = parse_oci_url(&source.chart.repo_url)?;
-        return Some(Dependency {
-            name: parsed.chart_name,
-            version: source.chart.target_revision.clone(),
-            repository: parsed.repository,
-            alias,
-            condition: None,
-        });
-    }
-
-    // Helm HTTP repo: chart name comes from the explicit field. Git sources
-    // have no chart name and fall through to None.
-    let chart_name = source
-        .chart
-        .chart
-        .as_deref()
-        .filter(|s| !s.is_empty())?;
-
-    Some(Dependency {
-        name: chart_name.to_string(),
-        version: source.chart.target_revision.clone(),
-        repository: source.chart.repo_url.clone(),
-        alias,
-        condition: None,
     })
 }
 
@@ -127,9 +113,18 @@ mod tests {
     use crate::source::ChartRef;
     use serde_json::json;
 
+    fn build_umbrella_chart_unwrapped(
+        name: &str,
+        version: &str,
+        sources: &[HelmSource],
+    ) -> UmbrellaChart {
+        build_umbrella_chart(name, version, sources).expect("known engines only")
+    }
+
     fn helm(id: &str, chart: &str, version: &str) -> HelmSource {
         HelmSource {
             id: Some(id.to_string()),
+            engine: None,
             chart: ChartRef {
                 repo_url: "https://charts.example.com".to_string(),
                 chart: Some(chart.to_string()),
@@ -143,6 +138,7 @@ mod tests {
     fn oci(id: &str, url: &str, version: &str) -> HelmSource {
         HelmSource {
             id: Some(id.to_string()),
+            engine: None,
             chart: ChartRef {
                 repo_url: url.to_string(),
                 chart: None,
@@ -156,6 +152,7 @@ mod tests {
     fn git(id: &str, url: &str, path: &str) -> HelmSource {
         HelmSource {
             id: Some(id.to_string()),
+            engine: None,
             chart: ChartRef {
                 repo_url: url.to_string(),
                 chart: None,
@@ -168,7 +165,7 @@ mod tests {
 
     #[test]
     fn empty_sources_produce_empty_deps() {
-        let u = build_umbrella_chart("pkg", "0.1.0", &[]);
+        let u = build_umbrella_chart_unwrapped("pkg", "0.1.0", &[]);
         assert_eq!(u.chart_yaml.name, "pkg");
         assert_eq!(u.chart_yaml.api_version, "v2");
         assert!(u.chart_yaml.dependencies.is_empty());
@@ -179,7 +176,7 @@ mod tests {
     #[test]
     fn helm_http_source_becomes_dep_with_alias() {
         let s = helm("id_a", "redis", "7.0.0");
-        let u = build_umbrella_chart("pkg", "0.1.0", &[s]);
+        let u = build_umbrella_chart_unwrapped("pkg", "0.1.0", &[s]);
         assert_eq!(u.chart_yaml.dependencies.len(), 1);
         let d = &u.chart_yaml.dependencies[0];
         assert_eq!(d.name, "redis");
@@ -195,7 +192,7 @@ mod tests {
     #[test]
     fn oci_source_splits_url() {
         let s = oci("id_o", "oci://ghcr.io/cnap-tech/charts/cilium", "1.15.0");
-        let u = build_umbrella_chart("pkg", "0.1.0", &[s]);
+        let u = build_umbrella_chart_unwrapped("pkg", "0.1.0", &[s]);
         let d = &u.chart_yaml.dependencies[0];
         assert_eq!(d.name, "cilium");
         assert_eq!(d.repository, "oci://ghcr.io/cnap-tech/charts");
@@ -205,7 +202,7 @@ mod tests {
     #[test]
     fn git_source_is_split_out() {
         let g = git("g1", "https://github.com/org/repo", "charts/app");
-        let u = build_umbrella_chart("pkg", "0.1.0", &[g]);
+        let u = build_umbrella_chart_unwrapped("pkg", "0.1.0", &[g]);
         assert!(u.chart_yaml.dependencies.is_empty());
         assert_eq!(u.git_sources.len(), 1);
         // Git values land at root.
@@ -219,7 +216,7 @@ mod tests {
             oci("b", "oci://ghcr.io/org/postgres", "15.0.0"),
             git("c", "https://github.com/org/repo", "charts/app"),
         ];
-        let u = build_umbrella_chart("pkg", "0.1.0", &sources);
+        let u = build_umbrella_chart_unwrapped("pkg", "0.1.0", &sources);
         assert_eq!(u.chart_yaml.dependencies.len(), 2);
         assert_eq!(u.git_sources.len(), 1);
 
@@ -236,7 +233,7 @@ mod tests {
     #[test]
     fn two_same_chart_different_ids_get_distinct_aliases() {
         let sources = vec![helm("a", "redis", "7.0.0"), helm("b", "redis", "7.0.0")];
-        let u = build_umbrella_chart("pkg", "0.1.0", &sources);
+        let u = build_umbrella_chart_unwrapped("pkg", "0.1.0", &sources);
         assert_eq!(u.chart_yaml.dependencies.len(), 2);
         let alias_a = u.chart_yaml.dependencies[0].alias.as_deref().unwrap();
         let alias_b = u.chart_yaml.dependencies[1].alias.as_deref().unwrap();
@@ -248,7 +245,7 @@ mod tests {
     #[test]
     fn chart_yaml_serializes_to_helm_compatible_shape() {
         let s = helm("id", "redis", "7.0.0");
-        let u = build_umbrella_chart("my-pkg", "0.1.0", &[s]);
+        let u = build_umbrella_chart_unwrapped("my-pkg", "0.1.0", &[s]);
         let yaml = serde_yaml::to_string(&u.chart_yaml).unwrap();
         assert!(yaml.contains("apiVersion: v2"));
         assert!(yaml.contains("name: my-pkg"));
@@ -262,7 +259,7 @@ mod tests {
     fn no_id_means_no_alias_field() {
         let mut s = helm("_", "redis", "7.0.0");
         s.id = None;
-        let u = build_umbrella_chart("pkg", "0.1.0", &[s]);
+        let u = build_umbrella_chart_unwrapped("pkg", "0.1.0", &[s]);
         assert!(u.chart_yaml.dependencies[0].alias.is_none());
     }
 }

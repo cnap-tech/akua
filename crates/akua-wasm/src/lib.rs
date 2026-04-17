@@ -90,6 +90,7 @@ pub fn build_umbrella_chart(
     sources: JsValue,
 ) -> Result<JsValue, JsValue> {
     let sources: Vec<HelmSource> = from_js(sources)?;
-    let umbrella = core_build_umbrella_chart(name, version, &sources);
+    let umbrella = core_build_umbrella_chart(name, version, &sources)
+        .map_err(|e| JsValue::from_str(&format!("buildUmbrellaChart: {e}")))?;
     to_js(&umbrella)
 }
