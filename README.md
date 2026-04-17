@@ -10,7 +10,21 @@
 
 ## What is Akua?
 
-Akua is the authoring and build pipeline that sits between your cloud-native sources (Helm charts, Knative apps, Dockerfiles, raw Kubernetes manifests, WASM transforms) and a deployable OCI artifact. It produces **byte-identical** output whether you run it locally via the CLI, in CI, or delegate to a managed service like CNAP.
+Akua is the **authoring and build pipeline** that sits between your cloud-native sources (Helm charts, Knative apps, Dockerfiles, raw Kubernetes manifests, WASM transforms) and a deployable OCI artifact. It produces **byte-identical** output whether you run it locally via the CLI, in CI, or delegate to a managed service like CNAP.
+
+```
+┌────────┐       ┌───────┐       ┌────────────────────┐       ┌─────────┐
+│  Akua  │  ──▶  │  OCI  │  ──▶  │  ArgoCD / Flux /   │  ──▶  │ Cluster │
+│ (build)│       │artifact│      │  Helm / whatever   │       │         │
+└────────┘       └───────┘       │  (deploy + sync)   │       └─────────┘
+                                  └────────────────────┘
+
+     ▲                                ▲                             ▲
+     │                                │                             │
+  Akua's scope              Someone else's job               Someone else's job
+```
+
+Akua's scope **ends** at "produce an OCI-addressable artifact." A separate tool (ArgoCD, Flux, Helm CLI, `kubectl apply`, or CNAP's install workflow) picks up from there and actually deploys.
 
 ```
 Inputs                         Akua pipeline                     Output
@@ -23,33 +37,71 @@ K8s YAML ────┤      render (Helm + Knative) → package → push
 Transform ───┘
 ```
 
-Think of it as **"Docker + Helm, but for cloud-native application packages with customer-configurable inputs and transformation logic."**
+Think of it as **"Docker + Helm, but for cloud-native application packages with customer-configurable inputs and transformation logic."** Docker builds container images; Helm packages charts; Akua packages *everything* (charts, Knative specs, push-deploy apps, transforms) into a single OCI-addressable artifact ready to be deployed by whatever GitOps / sync / install tool you already use.
+
+## What Akua is not
+
+Akua is **not a deployment tool**. It doesn't apply manifests to a cluster, doesn't watch for drift, doesn't handle rollback orchestration, doesn't do GitOps sync. Those concerns belong to tools like:
+
+- [**ArgoCD**](https://argo-cd.readthedocs.io/) or [**Flux**](https://fluxcd.io/) — GitOps continuous delivery
+- [**Helm**](https://helm.sh/) itself via `helm install` — direct chart installs
+- `kubectl apply` — imperative deployment
+- CNAP's own install workflow (wraps ArgoCD under the hood)
+
+Akua produces artifacts those tools consume. They're complementary. A typical production pipeline looks like:
+
+```
+# Build (Akua's job)
+akua pkg build
+akua pkg publish --to oci://ghcr.io/org/my-pkg
+
+# Deploy (ArgoCD's job, configured separately)
+argocd app create my-app \
+  --repo oci://ghcr.io/org/my-pkg \
+  --revision <tag-or-digest> \
+  --dest-namespace prod
+```
+
+**In CNAP specifically**, ArgoCD remains the deploy engine. Every install creates an ArgoCD `Application` resource that syncs the Akua-built package to the customer's cluster. Akua replaces the private chart-generation service on the build side; everything downstream (Argo sync, drift detection, rollback) is unchanged.
+
+Closest tools that overlap with **Akua's build scope** (not ArgoCD's deploy scope):
+
+| Tool | Overlap with Akua | Key difference |
+|---|---|---|
+| [Porter](https://getporter.org/) | Cloud-native app bundles | Uses CNAB format, not OCI-native; no Helm 4 plugin alignment |
+| [werf](https://github.com/werf/werf) | Build + deploy | werf does deploy too; Akua stays build-only |
+| [Timoni](https://timoni.sh/) | CUE-based Helm alternative | Replaces Helm; Akua wraps Helm |
+| [Carvel ytt/kbld](https://carvel.dev/) | YAML templating | Narrower — only YAML/image resolution |
+| [Helmfile](https://github.com/helmfile/helmfile) | Multi-release orchestration | Different direction (many releases vs. one composed package) |
 
 ## Why does this exist?
 
-Kubernetes deployment is painful because there's no standard way to build a package that:
+Kubernetes packaging is painful because there's no standard way to build an artifact that:
 
 1. Composes multiple sources (e.g., a Knative web app + a Helm-managed Postgres + Redis)
 2. Declares which values are customer-configurable at install time
 3. Runs custom transformation logic (for per-customer hostnames, computed defaults, multi-field templates)
-4. Previews the result live in the browser before deploying
-5. Produces a reproducible OCI artifact
+4. Previews the resolved result live in the browser **before** anything deploys
+5. Produces a reproducible, content-addressed OCI artifact
 
-Helm gets close but is chart-only. Knative handles single-image push-deploy but has no composition story. CI/CD tools (Argo, Flux) deploy but don't author. Akua fills the gap: **one pipeline, multiple source types, live preview, reproducible output.**
+Helm gets close but is chart-only. Knative handles single-image push-deploy but has no composition story. GitOps tools (Argo, Flux) deploy artifacts but don't author them. Akua fills the gap between "I have sources + transforms" and "I have a deployable artifact." **One pipeline, multiple source types, live preview, reproducible output — ready for whatever deploy tool you already use.**
 
 ## Relationship to [CNAP](https://github.com/cnap-tech)
 
-Akua is the **open-source core** of CNAP's package platform. CNAP's hosted product (marketplace, billing, tenancy, managed deploy) is built on top of Akua. The split:
+Akua is the **open-source build layer** of CNAP's package platform. CNAP's hosted product (marketplace, billing, tenancy, managed deploy infrastructure) is built on top of Akua — Akua handles package authoring and build; CNAP's proprietary layer handles the commercial + operational lifecycle that sits above and below Akua:
 
 | Open Source (Akua) | Proprietary (CNAP-hosted) |
 |---|---|
-| Rust core: sources, umbrella charts, transforms, render | Marketplace listings, pricing, subscriptions |
-| CLI: `akua build`, `akua preview`, `akua test` | Managed deploy to customer clusters |
-| TS SDK + UI components (editor, form preview, viewer) | Cloud-hosted Package Studio (collaborative IDE) |
-| MCP server for AI coding agents | Customer install tracking, revenue sharing |
+| Rust core: source fetch, umbrella charts, transforms, render | Marketplace listings, pricing, subscriptions, tenancy |
+| CLI: `akua build`, `akua preview`, `akua test` | Customer install workflow (wraps ArgoCD for deploy) |
+| TS SDK + UI components (editor, form preview, viewer) | Cloud-hosted Package Studio (collaborative IDE, workspaces) |
+| MCP server for AI coding agents | Revenue sharing, customer install tracking |
 | Extism plugin runtime (WASM) | Compliance certifications (SOC 2, HIPAA infra) |
+| OCI push for artifacts | CNAP-hosted OCI registry for managed builds |
 
-Use Akua standalone for free against your own clusters, or use CNAP's hosted platform for the managed experience. Both consume the same OSS.
+**Deployment uses ArgoCD** (open-source, not proprietary to CNAP) — Akua-built packages feed into Argo `Application` resources that sync to customer clusters. CNAP's value on the deploy side is the orchestration around Argo (multi-tenant setup, customer cluster management, Temporal workflows for install lifecycle), not Argo itself.
+
+Use Akua standalone for free against your own clusters (build locally, deploy however you like). Or use CNAP's hosted platform for managed end-to-end: authoring → build → marketplace → customer install. Both paths consume the same OSS Akua core.
 
 The full platform design is captured in **[CEP-0008 (CNAP Enhancement Proposal)](https://github.com/cnap-tech/cnap/blob/main/internal/cep/20260417-chart-transformation-platform.md)** — currently in `cnap-tech/cnap` (private), will be mirrored here as docs solidify.
 
@@ -77,6 +129,11 @@ akua pkg build --out ./dist
 
 # Publish to an OCI registry (yours or CNAP-hosted)
 akua pkg publish --to oci://ghcr.io/org/my-package
+
+# Deploy is not Akua's job — hand off to ArgoCD/Flux/Helm/kubectl:
+#   argocd app create ... --repo oci://ghcr.io/org/my-package
+#   flux create helmrelease ... --chart-ref OCIRepository/...
+#   helm install ... oci://ghcr.io/org/my-package
 ```
 
 ### 2. TypeScript SDK (in-process)
