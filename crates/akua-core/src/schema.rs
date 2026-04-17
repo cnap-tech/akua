@@ -36,21 +36,31 @@ pub type JsonSchema = Value;
 /// the leaf's JSON Schema definition (type, title, description, default,
 /// pattern, etc.). `hostname_template` is present when `x-input.template` or
 /// legacy `x-hostname.template` is set.
+/// A field extracted from a schema's `x-user-input` annotation.
+///
+/// `path` is the dot-notation location of the field in the resolved values
+/// tree. `schema` is the field's JSON Schema node. Transform configuration
+/// comes entirely from the field's `x-input.cel` expression — there are
+/// no separate `slugify` / `template` flags; authors write CEL directly and
+/// call `slugify()` as a registered CEL function when they need it.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtractedInstallField {
     pub path: String,
     pub schema: JsonSchema,
     pub required: bool,
-    /// Legacy `{{value}}` template. Preserved as sugar — at transform time
-    /// it auto-rewrites to the CEL expression `value` (optionally wrapped).
-    pub hostname_template: Option<String>,
-    /// CEL expression evaluated with `value` (this field's raw input) and
-    /// `values` (the resolved-so-far object) in scope. Replaces
-    /// `hostname_template` — if both are set, `cel` wins.
+    /// CEL expression evaluated with `value` (this field's raw input, after
+    /// trim) and `values` (the resolved-so-far object) in scope. Absent ⇒
+    /// pass the raw input through unchanged.
+    ///
+    /// Stdlib CEL plus Akua registered functions: `slugify(s)`,
+    /// `slugifyMax(s, n)`. Compose as e.g.
+    /// `slugify(value) + '.' + values.env + '.apps.example.com'`.
     pub cel: Option<String>,
-    pub slugify: bool,
+    /// Name of a uniqueness registry this field participates in. Akua core
+    /// surfaces the hint; the registry itself is a platform concern.
     pub unique_in: Option<String>,
+    /// UI ordering hint (lower = earlier in the form).
     pub order: Option<i64>,
 }
 
@@ -59,67 +69,32 @@ pub struct ExtractedInstallField {
 // ---------------------------------------------------------------------------
 
 /// Returns `true` if the property is marked as customer-configurable.
-/// Accepts both `x-user-input` (CEP-0008) and legacy `x-install` (CEP-0006).
 fn has_user_input_marker(prop: &Value) -> bool {
-    let marker = prop.get("x-user-input").or_else(|| prop.get("x-install"));
-    match marker {
+    match prop.get("x-user-input") {
         Some(Value::Bool(b)) => *b,
         Some(Value::Object(_)) => true,
-        Some(Value::Number(_)) => true, // legacy `{order: n}` normalization
         _ => false,
     }
 }
 
-/// Extract the order hint from `x-user-input: { order: N }` or
-/// `x-install: { order: N }`. Returns `None` when the marker is just `true`.
+/// Extract the order hint from `x-user-input: { order: N }`. Returns `None`
+/// when the marker is just `true`.
 fn get_install_order(prop: &Value) -> Option<i64> {
-    let marker = prop.get("x-user-input").or_else(|| prop.get("x-install"))?;
-    let obj = marker.as_object()?;
+    let obj = prop.get("x-user-input")?.as_object()?;
     obj.get("order")?.as_i64()
 }
 
-/// Extract the template string from `x-input.template` or legacy
-/// `x-hostname.template`. Returns `None` if absent or malformed.
-fn get_template(prop: &Value) -> Option<String> {
-    let ext = prop.get("x-input").or_else(|| prop.get("x-hostname"))?;
-    ext.get("template")?.as_str().map(String::from)
-}
-
-/// Extract the CEL expression from `x-input.cel`. Takes precedence over
-/// `x-input.template` at transform time. See `docs/design-notes.md` §6.
+/// Extract the CEL expression from `x-input.cel`.
 fn get_cel(prop: &Value) -> Option<String> {
-    let ext = prop.get("x-input")?;
-    ext.get("cel")?.as_str().map(String::from)
+    prop.get("x-input")?.get("cel")?.as_str().map(String::from)
 }
 
-/// Extract the `slugify` flag. Legacy `x-hostname` implies `slugify: true`
-/// (the CEP-0006 semantic); new `x-input` requires it to be opt-in.
-fn get_slugify(prop: &Value) -> bool {
-    if let Some(ext) = prop.get("x-input") {
-        return ext
-            .get("slugify")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-    }
-    if prop.get("x-hostname").is_some() {
-        return true; // legacy semantic
-    }
-    false
-}
-
-/// Extract the `uniqueIn` registry name. Legacy `x-hostname` implies
-/// `uniqueIn: "hostname"`; new `x-input` takes it as an explicit string.
+/// Extract the `uniqueIn` registry name from `x-input.uniqueIn`.
 fn get_unique_in(prop: &Value) -> Option<String> {
-    if let Some(ext) = prop.get("x-input") {
-        return ext
-            .get("uniqueIn")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-    }
-    if prop.get("x-hostname").is_some() {
-        return Some("hostname".to_string());
-    }
-    None
+    prop.get("x-input")?
+        .get("uniqueIn")?
+        .as_str()
+        .map(String::from)
 }
 
 // ---------------------------------------------------------------------------
@@ -265,22 +240,14 @@ fn walk_schema(
         };
 
         if has_user_input_marker(prop) {
-            let order = get_install_order(prop);
-            let hostname_template = get_template(prop);
-            let cel = get_cel(prop);
-            let slugify = get_slugify(prop);
-            let unique_in = get_unique_in(prop);
             let required = parent_required.iter().any(|r| r == key);
-
             out.push(ExtractedInstallField {
                 path: path.clone(),
                 schema: prop.clone(),
                 required,
-                hostname_template,
-                cel,
-                slugify,
-                unique_in,
-                order,
+                cel: get_cel(prop),
+                unique_in: get_unique_in(prop),
+                order: get_install_order(prop),
             });
         }
 
@@ -314,15 +281,18 @@ fn walk_schema(
 /// Apply install-time transforms to user-provided string values.
 ///
 /// For each field (in `order`):
-/// - Required but missing/empty → returns an error.
+/// - Required but missing/empty → error.
 /// - Optional and empty → skipped.
-/// - `cel` set → evaluate CEL with `value` (raw input, post-slugify if flagged)
-///   and `values` (resolved-so-far) in scope. Result must be a string.
-/// - `hostname_template` set → legacy `{{value}}` substitution (kept as sugar).
-/// - Otherwise → pass through (trimmed).
+/// - `cel` set → evaluate CEL with `value` (trimmed raw input) and `values`
+///   (resolved-so-far) in scope. Result must be a string.
+/// - `cel` unset → trimmed raw input passes through unchanged.
 ///
-/// Uniqueness checks are **not** performed here — the caller handles those
-/// (typically by querying CNAP's uniqueness registry for hostnames).
+/// CEL environment includes standard functions plus Akua registered:
+/// `slugify(s)` (RFC 1123 DNS label, max 63 chars) and `slugifyMax(s, n)`
+/// (same with custom max length).
+///
+/// Uniqueness checks are **not** performed here — `unique_in` is surfaced
+/// to the caller as a hint; registry integration is a platform concern.
 pub fn apply_install_transforms(
     fields: &[ExtractedInstallField],
     user_values: &std::collections::HashMap<String, String>,
@@ -349,18 +319,9 @@ pub fn apply_install_transforms(
             continue;
         }
 
-        let source_str = if field.slugify {
-            slugify(trimmed)
-        } else {
-            trimmed.to_string()
-        };
-
-        let resolved = if let Some(expr) = &field.cel {
-            eval_cel(expr, &source_str, &overrides, &field.path)?
-        } else if let Some(template) = &field.hostname_template {
-            template.replace("{{value}}", &source_str)
-        } else {
-            source_str
+        let resolved = match &field.cel {
+            Some(expr) => eval_cel(expr, trimmed, &overrides, &field.path)?,
+            None => trimmed.to_string(),
         };
 
         set_nested_value(&mut overrides, &field.path, Value::String(resolved));
@@ -369,8 +330,9 @@ pub fn apply_install_transforms(
     Ok(overrides)
 }
 
-/// Evaluate a CEL expression with `value` (this field's input, post-slugify)
-/// and `values` (the resolved-so-far object) bound in scope.
+/// Evaluate a CEL expression with `value` (trimmed raw input) and `values`
+/// (the resolved-so-far object) bound in scope. `slugify` / `slugifyMax`
+/// are registered as CEL custom functions.
 fn eval_cel(
     expression: &str,
     value: &str,
@@ -383,6 +345,16 @@ fn eval_cel(
         .map_err(|e| format!("field `{path}`: invalid CEL expression: {e}"))?;
 
     let mut ctx = Context::default();
+    ctx.add_function("slugify", |s: std::sync::Arc<String>| -> std::sync::Arc<String> {
+        std::sync::Arc::new(slugify(&s))
+    });
+    ctx.add_function(
+        "slugifyMax",
+        |s: std::sync::Arc<String>, max: i64| -> std::sync::Arc<String> {
+            let n = if max < 0 { 0 } else { max as usize };
+            std::sync::Arc::new(slugify_with_max_length(&s, n))
+        },
+    );
     ctx.add_variable_from_value("value", value.to_string());
     ctx.add_variable("values", values_so_far.clone())
         .map_err(|e| format!("field `{path}`: binding `values`: {e}"))?;

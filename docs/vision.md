@@ -270,6 +270,28 @@ This is the capability no other k8s packaging format offers today.
 JSON Schema's `if`/`then` exists; procedural dynamic schemas don't.
 Akua's CEL foundation makes it nearly free to add.
 
+### The ABI is also what makes `x-input` safe as an extension bag
+
+A non-obvious corollary: because `schema()` *resolves* the schema
+before handing it to consumers, bundle authors can put **anything**
+into `x-input` — CEL, Jsonnet, a custom wasm function, a future
+language that doesn't exist yet. The install UI never sees it. All
+the UI sees is standard JSON Schema + Akua's universal UI marker
+(`x-user-input`).
+
+This cleanly separates:
+
+- **Authoring format** (the schema file bundled inside the package) —
+  flexible, bundle-specific, can use any transform language.
+- **Resolved format** (what `schema()` returns) — always standard
+  JSON Schema + universal UI markers.
+
+Without the ABI, every consumer would have to parse every bundle's
+transform syntax. With it, consumers implement one standard JSON
+Schema parser plus knowledge of `x-user-input`. Done.
+
+See [`spec-markers.md`](./spec-markers.md) for the marker spec itself.
+
 ### Consumer contracts
 
 **Deployer (ArgoCD CMP, Flux plugin, `helm install --wasm`, etc.):**

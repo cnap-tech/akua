@@ -9,6 +9,9 @@
 > **For "how it actually flows"** — author → install → ArgoCD → cluster,
 > with both per-customer OCI and shared OCI models worked through —
 > see [`use-cases.md`](./use-cases.md).
+>
+> **For the canonical spec of Akua's JSON Schema extensions**
+> (`x-user-input` + `x-input`) — see [`spec-markers.md`](./spec-markers.md).
 
 The upstream design narrative (CEP-0008) lives in the CNAP repo. This doc
 is the condensed operational version that travels with the OSS codebase.
