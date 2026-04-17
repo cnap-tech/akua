@@ -20,8 +20,7 @@ Akua is being extracted from CNAP's internal chart generation service. See
 | **4b — SLSA attestation** | ✅ Landed | `akua attest` emits SLSA v1 predicate for cosign + adjacent OCI push |
 | **5 — KCL as native Rust** | ✅ Landed | `engine: kcl` now calls the native `kcl-lang` Rust crate (git dep). No subprocess, no fetch, 4 ms eval. Browser renders via `@kcl-lang/wasm-lib` + JS glue (akua-wasm doesn't compile a KCL engine). |
 | **6 — Install UI reference** | 🔮 Near-term | React + rjsf + WASM bindings; demos the customer-facing flow end-to-end |
-| **7 — MCP server** | 🔮 Near-term | `akua mcp` — tools for AI coding agents |
-| **8 — Helm-engine WASM** | 🔮 Multi-quarter | Go→WASM wrapper around `helm/v3/pkg/engine`, hosted via wasmtime |
+| **7 — Helm-engine WASM** | 🔮 Multi-quarter | Go→WASM wrapper around `helm/v3/pkg/engine`, hosted via wasmtime |
 | **9 — Package Studio IDE** | 🔮 Multi-quarter | Full in-browser authoring IDE |
 | **10 — Upstream** | 🔮 Ongoing | HIP proposals to Helm (template-function plugins), Extism contributions |
 
@@ -53,13 +52,7 @@ directly is cleaner than embedding `kcl.wasm` via wasmtime.
       (or, for Model A, just writes values into ArgoCD Application).
 - [ ] Published as `examples/install-ui/` — not a product, a template.
 
-## Phase 7 — MCP server
-
-- [ ] `akua mcp` implements the Model Context Protocol surface:
-      `akua.preview`, `akua.lint`, `akua.build`, `akua.attest`,
-      `akua.inspect`. Tools for AI coding agents to author packages.
-
-## Phase 8 — Helm-engine WASM (multi-quarter)
+## Phase 7 — Helm-engine WASM (multi-quarter)
 
 The honest gap: `akua render` still shells to `helm`. The viable path
 is a tiny Go wrapper around `helm.sh/helm/v3/pkg/engine.Render`
@@ -67,8 +60,7 @@ compiled to `wasip1`, hosted via wasmtime from Rust. Keeps full Helm
 semantics (Sprig, named templates, subcharts, `.Files`,
 `.Capabilities`) without the CLI.
 
-Not prioritized until Phase 5 proves the wasmtime-embedded-engine
-pattern with KCL.
+Not prioritized until demand materialises — the CLI shell-out works.
 
 ## Explicit non-goals
 

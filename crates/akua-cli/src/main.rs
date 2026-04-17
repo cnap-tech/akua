@@ -135,8 +135,6 @@ enum Commands {
         #[arg(long, env = "AKUA_REGISTRY_PASSWORD")]
         password: Option<String>,
     },
-    /// Run the MCP server exposing Akua tools to AI coding agents.
-    Mcp,
 }
 
 fn main() -> Result<()> {
@@ -182,7 +180,6 @@ fn main() -> Result<()> {
             username,
             password,
         } => run_publish(&chart, &to, username, password),
-        Commands::Mcp => stub("mcp"),
     }
 }
 

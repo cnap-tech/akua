@@ -24,12 +24,12 @@ is the condensed operational version that travels with the OSS codebase.
   Helm chart artifact**.
 - The **contract + artifact + sandbox** wrapper around whatever templating
   engine the package author prefers. "Meta-packager."
-- A **library** (Rust core + WASM bindings + CLI + future MCP server) so the
-  same code runs in:
+- A **library** (Rust core + WASM bindings + CLI) so the same code runs in:
   - package authoring IDE (Chart Studio),
   - customer install UI (in-browser live-preview),
   - CNAP-side build workers,
-  - CI, local CLI, and AI coding agents.
+  - CI, local CLI, and AI coding agents (agents use the CLI via shell —
+    no separate MCP server layer; the CLI *is* the agent interface).
 
 ### What Akua is *not*
 
@@ -321,10 +321,11 @@ Registry lives in CNAP-side infrastructure (not Akua core).
 `akua-core` (Rust) compiles via `wasm-pack` to a browser-consumable
 package. The same functions run in:
 
-1. Native CLI (`cargo run -p akua-cli`)
+1. Native CLI (`cargo run -p akua-cli`) — also the surface AI agents
+   call via their shells; no separate MCP server.
 2. Browser (Chart Studio IDE, customer install UI)
 3. Node.js (build workers, tests)
-4. CI + AI agents (MCP)
+4. CI
 
 No TS reimplementation. No drift.
 
