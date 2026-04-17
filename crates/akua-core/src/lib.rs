@@ -4,85 +4,45 @@
 //! charts, run WASM transforms, render manifests, and produce OCI-addressable
 //! artifacts.
 //!
-//! ## Pipeline stages
-//!
-//! 1. **Source fetch** — pluggable `SourceFetcher` trait; implementations for
-//!    local Git, server PAT, CI tokens, and browser-proxy contexts.
-//! 2. **Schema merge** — combine `values.schema.json` across components, honor
-//!    `x-user-input` annotations.
-//! 3. **Umbrella chart generation** — alias dependencies (`redis-ab12`), nest
-//!    values under aliases, produce a valid Helm chart tarball.
-//! 4. **Transform execution** — run Extism WASM plugins to resolve customer
-//!    inputs into final values.
-//! 5. **Validation** — schema + transform output + Helm render check.
-//! 6. **Package assembly** — tar.gz umbrella chart + transforms bundle + schema
-//!    snapshot + metadata.
-//! 7. **OCI push** — content-addressed push to any OCI registry.
-//!
 //! ## Status
 //!
-//! Pre-alpha. Public API will change.
+//! Pre-alpha. Phase 0 is landed: pure-algorithm utilities ported from CNAP's
+//! private chart generation service. I/O (OCI fetch/push, Git fetch, Helm
+//! render, Extism WASM host) is scaffolded but not yet implemented.
+//!
+//! ## Modules
+//!
+//! - [`hash`] — djb2 hash producing short base36 suffixes for deterministic aliases
+//! - [`source`] — helm source representation, chart-name extraction, alias computation
+//! - [`values`] — value merging with umbrella alias nesting, dot-notation paths, deep merge
+//! - [`schema`] — JSON Schema merging with x-user-input extensions, field extraction, transforms
+//!
+//! ## Intentionally out of scope (Phase 0)
+//!
+//! The following are scaffolded in the pipeline module but return `unimplemented!`
+//! until Phase 1:
+//!
+//! - `SourceFetcher` implementations (Git, OCI, HTTP Helm)
+//! - Extism WASM plugin host
+//! - Helm render (shell to `helm` binary or embed)
+//! - OCI push via `oras`
 
-#![allow(dead_code)] // allow while stubs fill in
+#![allow(dead_code)]
 
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+pub mod hash;
+pub mod schema;
+pub mod source;
+pub mod values;
 
-/// Identifier for a source component within a package.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct SourceRef {
-    pub kind: SourceKind,
-    pub uri: String,
-}
+pub use hash::hash_to_suffix;
+pub use schema::{
+    apply_install_transforms, extract_install_fields, merge_values_schemas, validate_values_schema,
+    ExtractedInstallField, JsonSchema,
+};
+pub use source::{extract_chart_name_from_oci, get_source_alias, is_oci, HelmSource};
+pub use values::{deep_merge_values, merge_helm_source_values, set_nested_value};
 
-/// The kinds of sources a package can contain.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum SourceKind {
-    HelmRepo,
-    OciRegistry,
-    GitRepo,
-    LocalPath,
-    KnativeApp,
-    RawManifests,
-}
-
-/// A fetched source, ready for pipeline processing.
-#[derive(Debug)]
-pub struct FetchedSource {
-    pub source_ref: SourceRef,
-    pub content: Vec<u8>,
-}
-
-/// Pluggable source fetcher. Different contexts (server, CI, local, browser)
-/// provide different implementations with their own auth story.
-#[async_trait]
-pub trait SourceFetcher: Send + Sync {
-    async fn fetch(&self, source_ref: &SourceRef) -> Result<FetchedSource, Error>;
-}
-
-/// The top-level package manifest produced by the pipeline.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Package {
-    pub name: String,
-    pub version: String,
-    pub components: Vec<Component>,
-    pub user_inputs: serde_json::Value, // JSON Schema Draft 7
-    pub transforms: Vec<TransformRef>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Component {
-    pub name: String,
-    pub source: SourceRef,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TransformRef {
-    pub name: String,
-    pub wasm: Vec<u8>, // Extism-compatible
-}
-
+/// Top-level error type for the pipeline.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("fetch error: {0}")]
@@ -95,28 +55,27 @@ pub enum Error {
     Io(#[from] std::io::Error),
 }
 
-/// Build a package from sources + schema + transforms.
+/// A package under construction, assembled by the pipeline.
 ///
-/// This is the main entry point. It runs all pipeline stages and returns the
-/// assembled package ready for OCI push.
-pub async fn build_package(
-    _fetcher: &dyn SourceFetcher,
-    _sources: &[SourceRef],
-) -> Result<Package, Error> {
-    // TODO: implement pipeline stages
-    //   1. fetch_all(fetcher, sources)
-    //   2. merge_schemas
-    //   3. generate_umbrella
-    //   4. execute_transforms (skipped if none)
-    //   5. validate
-    //   6. assemble
-    unimplemented!("pipeline stages — implementation in progress; see milestone v4")
+/// Phase 0 stub: the shape will evolve as Phase 1 pipeline stages come online.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Package {
+    pub name: String,
+    pub version: String,
+    pub components: Vec<Component>,
+    pub user_inputs: Option<serde_json::Value>, // JSON Schema with x-user-input
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Component {
+    pub name: String,
+    pub source: HelmSource,
 }
 
 #[cfg(test)]
 mod tests {
     #[test]
-    fn placeholder() {
-        assert_eq!(2 + 2, 4);
+    fn re_exports_compile() {
+        let _ = super::hash_to_suffix("test", 4);
     }
 }

@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "default": 1
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "adminEmail": {
+          "type": "string",
+          "title": "Admin email",
+          "description": "Email of the cluster administrator.",
+          "x-user-input": {
+            "order": 10
+          }
+        },
+        "logLevel": {
+          "type": "string",
+          "enum": ["debug", "info", "warn", "error"],
+          "default": "info"
+        }
+      },
+      "required": ["adminEmail"]
+    },
+    "httpRoute": {
+      "type": "object",
+      "properties": {
+        "hostname": {
+          "type": "string",
+          "title": "Subdomain",
+          "description": "Subdomain for the app.",
+          "x-user-input": {
+            "order": 20
+          },
+          "x-input": {
+            "slugify": true,
+            "template": "{{value}}.apps.example.com"
+          }
+        }
+      },
+      "required": ["hostname"]
+    }
+  },
+  "required": ["config", "httpRoute"]
+}
