@@ -7,52 +7,63 @@ Akua is being extracted from CNAP's internal chart generation service. See
 
 | Phase | Status | Scope |
 |-------|--------|-------|
-| **0 — Pure algorithms** | ✅ Landed | djb2 hash, source parsing, value merging, schema extraction, transforms. 77 unit tests. |
-| **1a — Umbrella assembly** | ✅ Landed | Multi-source → umbrella Chart.yaml with aliases. `akua tree` + `akua build`. |
-| **1b — Helm render** | ✅ Landed | Shell to `helm template`. `akua render` end-to-end. |
-| **1c — WASM bindings** | ✅ Landed | wasm-pack output; browser + Node consumable; shared core with CLI. |
-| **2 — Meta-packager foundations** | 🚧 Active | Engine trait, CEL expressions, provenance metadata. |
-| **3 — First alt-engine plugin** | ⏭ Next | KCL or helmfile (lives in separate repo). |
-| **4 — Distribution surface** | ⏭ Next | OCI push (`oras`), SLSA/cosign, install UI template, MCP server. |
-| **5 — Package Studio IDE** | 🔮 Multi-quarter | Full in-browser authoring IDE. |
-| **6 — Upstream** | 🔮 Ongoing | HIP proposals to Helm, contributions to Extism. |
+| **0 — Pure algorithms** | ✅ Landed | djb2 hash, source parsing, value merging, schema extraction, transforms |
+| **1a — Umbrella assembly** | ✅ Landed | Multi-source → umbrella Chart.yaml with aliases; `akua tree`, `akua build` |
+| **1b — Helm render** | ✅ Landed | Shell to `helm template`; `akua render` end-to-end |
+| **1c — WASM bindings** | ✅ Landed | wasm-pack output; browser + Node consumable; shared core with CLI |
+| **2a — Engine trait** | ✅ Landed | `Engine` trait + `PreparedSource::{Dependency,Git,LocalChart}`; `engine:` in package.yaml |
+| **2b — CEL expressions** | ✅ Landed | `x-input.cel` via `cel-interpreter`; `{{value}}` kept as sugar |
+| **2c — Provenance** | ✅ Landed | `.akua/metadata.yaml` on build; `akua inspect` reads it back; `--strip-metadata` opt-out |
+| **3a — KCL engine** | ✅ Landed | Shells to `kcl run`; writes static subchart; `examples/kcl-package` |
+| **3b — helmfile engine** | ✅ Landed | Shells to `helmfile template`; static subchart; `examples/helmfile-package` |
+| **4a — OCI publish** | ✅ Landed | `akua publish` via `helm push`; returns OCI digest |
+| **4b — SLSA attestation** | ✅ Landed | `akua attest` emits SLSA v1 predicate for cosign + adjacent OCI push |
+| **5 — KCL as embedded WASM** | 🚧 Next | Replace CLI shell-out with official `kcl.wasm` via wasmtime — real determinism + browser portability |
+| **6 — Install UI reference** | 🔮 Near-term | React + rjsf + WASM bindings; demos the customer-facing flow end-to-end |
+| **7 — MCP server** | 🔮 Near-term | `akua mcp` — tools for AI coding agents |
+| **8 — Helm-engine WASM** | 🔮 Multi-quarter | Go→WASM wrapper around `helm/v3/pkg/engine`, hosted via wasmtime |
+| **9 — Package Studio IDE** | 🔮 Multi-quarter | Full in-browser authoring IDE |
+| **10 — Upstream** | 🔮 Ongoing | HIP proposals to Helm (template-function plugins), Extism contributions |
 
-## Phase 2 — Meta-packager foundations (active)
+## Phase 5 — KCL as embedded WASM (next)
 
-Make Akua a true meta-packager rather than a helm-only tool.
+The research in [`design-notes.md §12`](./design-notes.md#12-engine-determinism-reality-check)
+showed KCL is the only engine with a real path to in-process / WASM
+execution today. Plan:
 
-- [ ] Extract `EnginePlugin` trait from the current `render` module. Helm
-      becomes one impl of many.
-- [ ] Add `engine:` to `package.yaml` (default `helm`). Reserved values
-      for planned plugins.
-- [ ] Stub `WasmPluginEngine` backed by Extism — proves the contract
-      without shipping a full alternate engine yet.
-- [ ] Replace `x-input.template` ("{{value}}") with `x-input.cel` via
-      `cel-rust`. Keep template syntax as sugar during migration.
-- [ ] Emit `.akua/metadata.yaml` on `akua build` (source lineage, engine
-      mix, transform audit, Akua version).
-- [ ] `akua inspect chart.tgz` — show the metadata block, verify
-      provenance.
+- [ ] Add a `wasmtime` dep behind a new `engine-kcl-wasm` feature.
+- [ ] Pin `kcl.wasm` as a build artifact (SHA-locked).
+- [ ] Rewrite `engine::kcl` to load the module, call `kcl_run`, capture
+      output without a subprocess.
+- [ ] Make WASM the default; `engine-kcl-cli` remains as a fallback for
+      contributors who don't want the wasm runtime.
+- [ ] Verify the same `kcl.wasm` drops into `akua-wasm` so the browser
+      can render KCL packages live.
 
-## Phase 3 — First alt-engine plugin
+## Phase 6 — Install UI reference
 
-Prove the plugin contract with a real alternate engine. Candidates:
+- [ ] React + rjsf app reading a chart's `values.schema.json` from OCI.
+- [ ] Browser calls `@akua/core-wasm` for live CEL preview.
+- [ ] Submits resolved values → Akua builder produces per-install chart
+      (or, for Model A, just writes values into ArgoCD Application).
+- [ ] Published as `examples/install-ui/` — not a product, a template.
 
-1. **KCL** — cleanest target (already emits YAML). Repo:
-   `cnap-tech/akua-engine-kcl`.
-2. **helmfile-wasm** — biggest migration story for existing helmfile
-   users. Repo: `cnap-tech/akua-engine-helmfile`. Complicated — Go→WASM.
-3. **kustomize-wasm** — similar shape to helmfile.
+## Phase 7 — MCP server
 
-Pick based on actual user demand once Phase 2 lands.
+- [ ] `akua mcp` implements the Model Context Protocol surface:
+      `akua.preview`, `akua.lint`, `akua.build`, `akua.attest`,
+      `akua.inspect`. Tools for AI coding agents to author packages.
 
-## Phase 4 — Distribution surface
+## Phase 8 — Helm-engine WASM (multi-quarter)
 
-- [ ] `akua publish --to oci://…` via `oras`.
-- [ ] SLSA attestation + cosign signature, adjacent OCI artifact.
-- [ ] Reference install-UI template — React + rjsf + WASM bindings,
-      demonstrates the customer-facing flow end-to-end.
-- [ ] `akua mcp` — MCP server exposing tools to AI coding agents.
+The honest gap: `akua render` still shells to `helm`. The viable path
+is a tiny Go wrapper around `helm.sh/helm/v3/pkg/engine.Render`
+compiled to `wasip1`, hosted via wasmtime from Rust. Keeps full Helm
+semantics (Sprig, named templates, subcharts, `.Files`,
+`.Capabilities`) without the CLI.
+
+Not prioritized until Phase 5 proves the wasmtime-embedded-engine
+pattern with KCL.
 
 ## Explicit non-goals
 
@@ -66,6 +77,8 @@ Pick based on actual user demand once Phase 2 lands.
 
 ## Out of scope for v0.x (possibly later)
 
-- Python / CUE engines — only after KCL / helmfile prove the plugin path.
+- Python / CUE engines — only after KCL WASM validates the embedded-
+  runtime pattern.
 - Cross-package composition (package-of-packages beyond umbrella deps).
-- Upstream Helm 4 HIP contribution for values transforms — Phase 6.
+- Upstream Helm 4 HIP contribution for template-function plugins (HIP
+  after HIP-0026 lands). Currently stub-tracked at [helm#31498](https://github.com/helm/helm/issues/31498).

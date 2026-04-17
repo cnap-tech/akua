@@ -433,40 +433,10 @@ transforms:
 
 ---
 
-## 10. Phase status & roadmap
+## 10. Phase status
 
-### Landed
-
-- ✅ Phase 0 — pure algorithm port from TypeScript: `hash`, `source`,
-  `values`, `schema` modules. 77 unit tests. (Commit 0288d1f)
-- ✅ Umbrella chart assembly + package manifest. `akua tree` +
-  `akua build`. (Commit e6bb317)
-- ✅ Helm render via shell to `helm` binary. `akua render` end-to-end
-  against real Bitnami nginx. (Commit c664e8f)
-- ✅ WASM bindings (wasm-pack, camelCase JSON, node smoke test). mise +
-  Taskfile tooling. (Commit a3aa397)
-
-### Next (Phase 2)
-
-- [ ] Engine trait refactor — extract `EnginePlugin`, make helm the
-  default impl, add an `engine:` field to `package.yaml`.
-- [ ] CEL expression support — replace `{{value}}` with `x-input.cel`,
-  integrate `cel-rust`, keep sugar for migration.
-- [ ] `.akua/metadata.yaml` provenance block emitted by `akua build`.
-- [ ] `akua inspect chart.tgz` — dump metadata, show source lineage.
-
-### Phase 3
-
-- [ ] First alt-engine plugin. Candidates (ranked): KCL (cleanest target,
-  already emits YAML), helmfile-wasm (biggest migration story), kustomize.
-- [ ] Lives in a separate repo: `cnap-tech/akua-engine-<name>`.
-
-### Phase 4
-
-- [ ] OCI push via `oras`. `akua publish --to oci://…`.
-- [ ] SLSA attestation + cosign sig as adjacent OCI artifact.
-- [ ] Schema-driven install UI template (React + rjsf + WASM bindings).
-- [ ] MCP server for AI agents (`akua mcp`).
+Phases 0–4 landed. Current state + upcoming work lives in
+[`roadmap.md`](./roadmap.md) to keep this doc focused on *why*.
 
 ### Non-goals (explicit)
 
@@ -479,7 +449,58 @@ transforms:
 
 ---
 
-## 11. Open questions
+## 11. Engine determinism reality check
+
+The original vision was "all engines run as Extism WASM plugins →
+sandboxed, deterministic, browser-portable." Reality after deep
+research (Q2 2026):
+
+### Where WASM works today
+
+| Engine | WASM story | Akua status |
+|---|---|---|
+| **Akua core** (schema extraction, CEL, umbrella assembly, metadata, attest) | Native Rust + wasm-pack. Deterministic. | ✅ **Actually WASM.** Used from the browser. |
+| **KCL** | Official `kcl.wasm` (WASI p1) ships at [kcl-lang/lib/wasm](https://github.com/kcl-lang/lib/tree/main/wasm). Simple C-ABI. Deterministic by language design. | ✅ Shipped as CLI shell-out today (Phase 3a); WASM replacement queued as Phase 5. |
+| **Helm template** | No mature Rust renderer. `helm.sh/helm/v3/pkg/engine` importable from Go → viable via `wasip1` + wasmtime (medium effort). Shipmight/helm-playground does **not** actually embed Helm — it reimplements a small subset. | 🟡 CLI shell-out. WASM path is Phase 8 (multi-quarter). |
+| **Helmfile** | Pure Go with heavy deps (helm v3+v4, client-go, AWS SDK). TinyGo blocked (no reflection, no `os/exec`). Mainline Go `wasip1` links but `helm` shell-outs fail at runtime. No Rust alternative. | 🟡 CLI shell-out. Honest caveat doc'd in `examples/helmfile-package/README.md`. |
+| **Extism** | Rust SDK stable (1.21.0). Deny-all sandbox. HIP-0026 shipped in Helm 4.0 **but covers only Download/Postrender/CLI plugins** — template-function plugins deferred ([helm#31498](https://github.com/helm/helm/issues/31498)). Determinism is plugin-author discipline, not framework-enforced. | ⏭ Right ABI for future custom plugins; not wired yet. |
+
+### Three takeaways
+
+1. **Akua's own thesis is delivered for its own code.** The schema
+   extraction, CEL evaluation, umbrella assembly, metadata emission,
+   and SLSA predicate generation are deterministic pure functions that
+   run identically in native Rust, Node, and browser WASM.
+2. **Engine-provided determinism is honest-best-effort.** A KCL source
+   is deterministic by KCL's language design. A Helm chart inherits
+   Helm's Sprig non-determinism (`now`, `randAlpha`, `env`). A
+   helmfile inherits helmfile's looser defaults unless
+   `HELMFILE_DISABLE_INSECURE_FEATURES=1`.
+3. **The `.akua/metadata.yaml` block records the determinism level
+   per source** so downstream verifiers know what they can trust.
+
+### What we explicitly ruled out
+
+- **Compiling upstream Helm to WASM ourselves.** Every attempt fails
+  on `client-go` + OCI pulls + `os/exec`. Go→WASM requires either
+  stripping deps (not viable) or providing shims for hundreds of
+  syscalls (expensive, fragile).
+- **Pure Rust Helm template renderer.** `gtmpl-rust` + clean-room
+  Sprig ports exist but cover ~60–80% of real charts. Perpetual
+  semantic drift risk with every Helm release. Not worth it.
+- **Shipmight/helm-playground as a Helm WASM substrate.** It markets
+  as "Helm in the browser" but doesn't embed Helm — imports only
+  Sprig + text/template, stubs `required`/`fail`/`lookup`, has no
+  subchart support. AGPL-3.0 licensing blocks vendoring anyway.
+
+Findings captured here so we don't re-research. Revisit if:
+- Go's WASM story improves enough to compile mainline Helm.
+- A production-grade pure-Rust Helm renderer appears.
+- Helm upstream adds a native WASM backend (unlikely pre-Helm 5).
+
+---
+
+## 12. Open questions
 
 1. **`uniqueIn` semantics.** Registry protocol? Who holds state? Akua
    side has a trait; CNAP side has the impl. Needs API spec.

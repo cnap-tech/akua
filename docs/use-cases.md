@@ -97,11 +97,26 @@ sources:
 | `akua tree` | Shows umbrella dep structure |
 | `akua render --inputs '…'` | Full helm template; write rendered YAML |
 | `akua lint` | Validates schema, checks engine source |
-| `akua build` | Writes the chart dir + `.akua/metadata.yaml` |
-| `akua publish --to oci://…` | Pushes chart + SLSA attestation |
+| `akua build --out dist/chart` | Writes the chart dir + `.akua/metadata.yaml` |
+| `akua inspect --chart dist/chart` | Prints the `.akua/metadata.yaml` lineage |
+| `akua publish --chart dist/chart --to oci://…` | `helm package` + `helm push`; returns OCI digest |
+| `akua attest --chart dist/chart` | Emits SLSA v1 provenance predicate for cosign |
 
-Every `akua publish` of the same package version with the same inputs
-produces the **same OCI digest** (content-addressed).
+Publishing a SLSA-attested chart is a three-step flow:
+
+```bash
+akua build --package ./my-pkg --out dist/chart
+akua publish --chart dist/chart --to oci://ghcr.io/acme/charts
+# note the printed digest, then:
+akua attest --chart dist/chart --out dist/attestation.json
+cosign attest \
+  --predicate dist/attestation.json \
+  --type slsaprovenance1 \
+  ghcr.io/acme/charts/my-pkg@sha256:<digest>
+```
+
+Same package version + same sources → same OCI digest (for engines that
+respect determinism — see `design-notes.md` §11).
 
 ---
 
