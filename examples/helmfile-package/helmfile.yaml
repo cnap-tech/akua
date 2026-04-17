@@ -6,6 +6,6 @@ releases:
   - name: podinfo
     namespace: default
     chart: oci://ghcr.io/stefanprodan/charts/podinfo
-    version: 6.7.1
+    version: 6.11.2
     values:
       - replicaCount: 1
