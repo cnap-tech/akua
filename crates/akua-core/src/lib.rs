@@ -35,7 +35,7 @@ pub mod engine;
 pub mod hash;
 pub mod manifest;
 pub mod metadata;
-#[cfg(feature = "helm-cli")]
+#[cfg(feature = "publish")]
 pub mod publish;
 #[cfg(feature = "helm-cli")]
 pub mod render;
@@ -48,7 +48,7 @@ pub use hash::hash_to_suffix;
 pub use attest::{build_provenance, SlsaProvenance};
 pub use manifest::{load_manifest, PackageManifest};
 pub use metadata::{build_metadata, AkuaMetadata};
-#[cfg(feature = "helm-cli")]
+#[cfg(feature = "publish")]
 pub use publish::{publish_chart, PublishError, PublishOptions, PublishOutcome};
 #[cfg(feature = "helm-cli")]
 pub use render::{render_umbrella, write_metadata, write_umbrella, RenderError, RenderOptions};

@@ -16,7 +16,7 @@ Akua is being extracted from CNAP's internal chart generation service. See
 | **2c — Provenance** | ✅ Landed | `.akua/metadata.yaml` on build; `akua inspect` reads it back; `--strip-metadata` opt-out |
 | **3a — KCL engine** | ✅ Landed | Shells to `kcl run`; writes static subchart; `examples/kcl-package` |
 | **3b — helmfile engine** | ✅ Landed | Shells to `helmfile template`; static subchart; `examples/helmfile-package` |
-| **4a — OCI publish** | ✅ Landed | `akua publish` via `helm push`; returns OCI digest |
+| **4a — OCI publish** | ✅ Landed | `akua publish` via `oci-client` (pure Rust, no `helm` CLI); Helm-compat media types + annotations; returns OCI digest |
 | **4b — SLSA attestation** | ✅ Landed | `akua attest` emits SLSA v1 predicate for cosign + adjacent OCI push |
 | **5 — KCL as native Rust** | ✅ Landed | `engine: kcl` now calls the native `kcl-lang` Rust crate (git dep). No subprocess, no fetch, 4 ms eval. Browser renders via `@kcl-lang/wasm-lib` + JS glue (akua-wasm doesn't compile a KCL engine). |
 | **6 — Install UI reference** | 🔮 Near-term | React + rjsf + WASM bindings; demos the customer-facing flow end-to-end |

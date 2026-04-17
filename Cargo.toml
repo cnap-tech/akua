@@ -28,7 +28,7 @@ thiserror = "2"
 anyhow = "1"
 
 # CLI
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 
 # WASM / runtime (future)
 # extism = "1"
