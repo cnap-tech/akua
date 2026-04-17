@@ -35,6 +35,8 @@ pub mod hash;
 pub mod manifest;
 pub mod metadata;
 #[cfg(feature = "helm-cli")]
+pub mod publish;
+#[cfg(feature = "helm-cli")]
 pub mod render;
 pub mod schema;
 pub mod source;
@@ -44,6 +46,8 @@ pub mod values;
 pub use hash::hash_to_suffix;
 pub use manifest::{load_manifest, PackageManifest};
 pub use metadata::{build_metadata, AkuaMetadata};
+#[cfg(feature = "helm-cli")]
+pub use publish::{publish_chart, PublishError, PublishOptions, PublishOutcome};
 #[cfg(feature = "helm-cli")]
 pub use render::{render_umbrella, write_metadata, write_umbrella, RenderError, RenderOptions};
 pub use schema::{

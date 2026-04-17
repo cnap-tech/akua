@@ -11,8 +11,8 @@ use clap::{ArgGroup, Parser, Subcommand};
 
 use akua_core::{
     apply_install_transforms, build_metadata, build_umbrella_chart_in, extract_install_fields,
-    load_manifest, render_umbrella, validate_values_schema, write_metadata, write_umbrella,
-    PackageManifest, RenderOptions, UmbrellaChart,
+    load_manifest, publish_chart, render_umbrella, validate_values_schema, write_metadata,
+    write_umbrella, PackageManifest, PublishOptions, RenderOptions, UmbrellaChart,
 };
 
 #[derive(Parser)]
@@ -106,10 +106,20 @@ enum Commands {
         #[arg(long)]
         inputs_file: Option<PathBuf>,
     },
-    /// Publish the built package to an OCI registry.
+    /// Publish a built chart directory to an OCI registry.
+    ///
+    /// Uses `helm push` under the hood — pass an OCI *namespace* URL
+    /// (e.g., `oci://ghcr.io/acme/charts`); Helm derives the final
+    /// repository name from the chart's `Chart.yaml`.
     Publish {
+        /// Built chart directory (output of `akua build`).
+        #[arg(long, default_value = "./dist/chart")]
+        chart: PathBuf,
+        /// OCI namespace URL.
         #[arg(long)]
         to: String,
+        #[arg(long, default_value = "helm")]
+        helm_bin: PathBuf,
     },
     /// Run the MCP server exposing Akua tools to AI coding agents.
     Mcp,
@@ -151,7 +161,7 @@ fn main() -> Result<()> {
         }),
         Commands::Init { .. } => stub("init"),
         Commands::Test => stub("test"),
-        Commands::Publish { .. } => stub("publish"),
+        Commands::Publish { chart, to, helm_bin } => run_publish(&chart, &to, &helm_bin),
         Commands::Mcp => stub("mcp"),
     }
 }
@@ -297,6 +307,17 @@ fn run_build(package_dir: &Path, out: &Path, strip_metadata: bool) -> Result<()>
             umbrella.git_sources.len()
         );
     }
+    Ok(())
+}
+
+fn run_publish(chart_dir: &Path, to: &str, helm_bin: &Path) -> Result<()> {
+    let opts = PublishOptions {
+        helm_bin: helm_bin.to_path_buf(),
+        target: to.to_string(),
+    };
+    let outcome = publish_chart(chart_dir, &opts).context("publishing chart")?;
+    println!("pushed: {}", outcome.pushed_ref);
+    println!("digest: {}", outcome.digest);
     Ok(())
 }
 
