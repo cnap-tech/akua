@@ -49,14 +49,14 @@ export interface PreviewResult {
 
 export class Package {
 	static async load(_path: string): Promise<Package> {
-		throw new Error('Package.load — not yet implemented (milestone v4)');
+		throw new Error('Package.load — @akua/sdk not yet implemented — use the akua CLI or @akua/core-wasm directly');
 	}
 }
 
 export async function preview(_pkg: Package, _inputs: PreviewInputs): Promise<PreviewResult> {
-	throw new Error('preview — not yet implemented (milestone v4)');
+	throw new Error('preview — @akua/sdk not yet implemented — use the akua CLI or @akua/core-wasm directly');
 }
 
 export async function buildPackage(_pkg: Package): Promise<{ ociRef: string }> {
-	throw new Error('buildPackage — not yet implemented (milestone v4)');
+	throw new Error('buildPackage — @akua/sdk not yet implemented — use the akua CLI or @akua/core-wasm directly');
 }

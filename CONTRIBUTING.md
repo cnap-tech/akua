@@ -1,45 +1,55 @@
 # Contributing to Akua
 
-Thanks for your interest in Akua. The project is **pre-alpha** — nothing is stable, everything is in flux. Contribution guidelines will solidify as the project matures.
+Thanks for your interest. Akua is **pre-alpha** — APIs, schemas, and CLI
+surfaces are all in flux. Small focused fixes are welcome; big
+architectural PRs are probably better raised as issues first so we can
+discuss direction.
 
-## Current status
-
-Akua is being extracted from CNAP's internal chart generation service. Until the v4 API surface stabilizes, we're not actively accepting code contributions — PRs against a churning API are painful for everyone. We welcome:
+## Ways to help
 
 - **Issues** — bug reports, feature requests, design feedback
-- **Discussions** — design questions, architectural debates
-- **RFCs / CEP comments** — feedback on the [CNAP Enhancement Proposal](https://github.com/cnap-tech/cnap/blob/main/internal/cep/20260417-chart-transformation-platform.md) that drives this project
+- **Docs** — `docs/`, example READMEs, the top-level `README.md`; these drift fastest
+- **Test coverage** — especially for engines + CEL expression edge cases
+- **Regression coverage on real charts** — `akua render` against popular Helm charts from ArtifactHub; file issues for any that mis-render
 
-## What we're working on
+## Development setup
 
-Track active work via the [v4 milestone](https://github.com/cnap-tech/akua/milestones). Top priorities:
-
-1. Port CNAP's umbrella chart generation logic from Go/TS to Rust (`akua-core`)
-2. Integrate Extism as the WASM plugin host
-3. Pluggable `SourceFetcher` trait with implementations for server, CI, local, browser
-4. `akua pkg build` / `akua pkg preview` CLI entry points
-5. OCI push via `oras` or Rust-native OCI crate
-
-## Development setup (when stabilized)
+Prerequisites are managed via [mise](https://mise.jdx.dev/) —
+`mise install` pulls everything listed in `.mise.toml` (Rust, Go, bun,
+task, helmfile, wasm-pack, etc.) at pinned versions.
 
 ```bash
-# Prerequisites
-# - Rust 1.75+
-# - Node.js 20+ with pnpm
-# - wasm-pack (for WASM builds)
-
 git clone git@github.com:cnap-tech/akua.git
 cd akua
+mise install
 
-# Build Rust workspace
-cargo build
+# One-time: build the embedded Helm template engine wasm
+task build:helm-engine-wasm
 
-# Install TS workspace deps
-pnpm install
+# Full workspace build + tests
+cargo build --workspace
+cargo test --workspace
 
-# Run tests
-cargo test && pnpm test
+# WASM bindings + smoke test
+task wasm:smoke
 ```
+
+First `cargo build` takes ~3.5 min (KCL + Helm dep trees are heavy).
+Subsequent builds are fast.
+
+## Running the examples
+
+```bash
+cargo run -p akua-cli -- tree --package examples/hello-package
+cargo run -p akua-cli -- render --package examples/hello-package --out dist/chart --release demo
+```
+
+## What's landed / what's next
+
+See [`docs/roadmap.md`](docs/roadmap.md). Phases 0–7 landed: Akua renders
+end-to-end as a single binary with no external CLI deps in the default
+flow. Upcoming: install UI reference, Package Studio IDE, upstream HIP
+proposals.
 
 ## Code of Conduct
 
@@ -47,4 +57,5 @@ This project follows the [Contributor Covenant Code of Conduct](./CODE_OF_CONDUC
 
 ## License
 
-By contributing, you agree your contributions will be licensed under Apache License 2.0.
+By contributing, you agree your contributions will be licensed under
+Apache License 2.0.

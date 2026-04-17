@@ -7,4 +7,5 @@
  * Status: pre-alpha. No API yet.
  */
 
-export const PLACEHOLDER = '@akua/core — bindings pending (milestone v4)';
+export const PLACEHOLDER =
+	'@akua/core not yet implemented — use @akua/core-wasm (from wasm-pack) directly';
