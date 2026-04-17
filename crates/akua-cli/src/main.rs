@@ -10,9 +10,9 @@ use anyhow::{bail, Context, Result};
 use clap::{ArgGroup, Parser, Subcommand};
 
 use akua_core::{
-    apply_install_transforms, build_umbrella_chart, extract_install_fields, load_manifest,
-    render_umbrella, validate_values_schema, write_umbrella, PackageManifest, RenderOptions,
-    UmbrellaChart,
+    apply_install_transforms, build_metadata, build_umbrella_chart, extract_install_fields,
+    load_manifest, render_umbrella, validate_values_schema, write_metadata, write_umbrella,
+    PackageManifest, RenderOptions, UmbrellaChart,
 };
 
 #[derive(Parser)]
@@ -68,12 +68,21 @@ enum Commands {
     ///
     /// Writes Chart.yaml + values.yaml for the package into `--out`. Useful as
     /// input to `helm dependency update && helm template` or as a
-    /// pre-flight check before `akua render`.
+    /// pre-flight check before `akua render`. By default also emits
+    /// `.akua/metadata.yaml` — pass `--strip-metadata` to omit.
     Build {
         #[arg(long, default_value = ".")]
         package: PathBuf,
         #[arg(long, default_value = "./dist/chart")]
         out: PathBuf,
+        /// Omit `.akua/metadata.yaml` from the built chart.
+        #[arg(long)]
+        strip_metadata: bool,
+    },
+    /// Print the Akua provenance metadata from a built chart directory.
+    Inspect {
+        #[arg(long, default_value = "./dist/chart")]
+        chart: PathBuf,
     },
     /// Render the umbrella chart to Kubernetes manifests via the `helm` CLI.
     ///
@@ -117,7 +126,12 @@ fn main() -> Result<()> {
         }
         Commands::Lint { package } => run_lint(&package),
         Commands::Tree { package } => run_tree(&package),
-        Commands::Build { package, out } => run_build(&package, &out),
+        Commands::Build {
+            package,
+            out,
+            strip_metadata,
+        } => run_build(&package, &out, strip_metadata),
+        Commands::Inspect { chart } => run_inspect(&chart),
         Commands::Render {
             package,
             out,
@@ -239,16 +253,38 @@ fn resolve_inputs_to_values(
     Ok(Some(resolved))
 }
 
-fn run_build(package_dir: &Path, out: &Path) -> Result<()> {
-    let (_, umbrella) = load_package(package_dir)?;
+fn run_build(package_dir: &Path, out: &Path, strip_metadata: bool) -> Result<()> {
+    let (manifest, umbrella) = load_package(package_dir)?;
     write_umbrella(&umbrella, out).context("writing umbrella chart")?;
     println!("wrote {}/Chart.yaml + values.yaml", out.display());
+
+    if !strip_metadata {
+        // Schema is optional for `build`. If absent, fields list is empty and
+        // the transforms section is skipped naturally.
+        let fields = load_schema(package_dir)
+            .ok()
+            .as_ref()
+            .map(extract_install_fields)
+            .unwrap_or_default();
+        let metadata = build_metadata(&manifest.sources, &fields);
+        write_metadata(&metadata, out).context("writing .akua/metadata.yaml")?;
+        println!("wrote {}/.akua/metadata.yaml", out.display());
+    }
+
     if !umbrella.git_sources.is_empty() {
         eprintln!(
             "note: {} git source(s) skipped — Helm cannot fetch these",
             umbrella.git_sources.len()
         );
     }
+    Ok(())
+}
+
+fn run_inspect(chart_dir: &Path) -> Result<()> {
+    let path = chart_dir.join(".akua").join("metadata.yaml");
+    let bytes = std::fs::read(&path)
+        .with_context(|| format!("reading {} (chart built with --strip-metadata?)", path.display()))?;
+    print!("{}", String::from_utf8_lossy(&bytes));
     Ok(())
 }
 

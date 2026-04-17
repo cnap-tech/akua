@@ -12,6 +12,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::metadata::AkuaMetadata;
 use crate::umbrella::UmbrellaChart;
 
 #[derive(Debug, thiserror::Error)]
@@ -102,6 +103,25 @@ pub fn write_umbrella(chart: &UmbrellaChart, chart_dir: &Path) -> Result<(), Ren
 
     write(chart_dir.join("Chart.yaml"), chart_yaml.as_bytes())?;
     write(chart_dir.join("values.yaml"), values_yaml.as_bytes())?;
+    Ok(())
+}
+
+/// Write `.akua/metadata.yaml` alongside the chart files. Callers decide
+/// whether to emit (default on) or strip (commercial / compliance distros).
+pub fn write_metadata(
+    metadata: &AkuaMetadata,
+    chart_dir: &Path,
+) -> Result<(), RenderError> {
+    let dir = chart_dir.join(".akua");
+    std::fs::create_dir_all(&dir).map_err(|source| RenderError::Write {
+        path: dir.clone(),
+        source,
+    })?;
+    let yaml = serde_yaml::to_string(metadata).map_err(|source| RenderError::Serialize {
+        what: ".akua/metadata.yaml",
+        source,
+    })?;
+    write(dir.join("metadata.yaml"), yaml.as_bytes())?;
     Ok(())
 }
 

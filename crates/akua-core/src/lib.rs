@@ -33,6 +33,7 @@
 pub mod engine;
 pub mod hash;
 pub mod manifest;
+pub mod metadata;
 #[cfg(feature = "helm-cli")]
 pub mod render;
 pub mod schema;
@@ -42,8 +43,9 @@ pub mod values;
 
 pub use hash::hash_to_suffix;
 pub use manifest::{load_manifest, PackageManifest};
+pub use metadata::{build_metadata, AkuaMetadata};
 #[cfg(feature = "helm-cli")]
-pub use render::{render_umbrella, write_umbrella, RenderError, RenderOptions};
+pub use render::{render_umbrella, write_metadata, write_umbrella, RenderError, RenderOptions};
 pub use schema::{
     apply_install_transforms, extract_install_fields, merge_values_schemas, validate_values_schema,
     ExtractedInstallField, JsonSchema,

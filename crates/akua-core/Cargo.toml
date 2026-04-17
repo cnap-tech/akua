@@ -18,6 +18,7 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 cel-interpreter = { version = "0.10", default-features = false }
+time = { version = "0.3", default-features = false, features = ["std", "formatting"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { workspace = true }
