@@ -272,23 +272,53 @@ fn load_package(
     let manifest = load_manifest(package_dir)
         .with_context(|| format!("loading package manifest from {}", package_dir.display()))?;
 
-    // Canonicalize before we chdir — otherwise relative paths would resolve
-    // against the new cwd and land in the wrong place.
+    // Absolutise paths so engines never depend on the process CWD. Safe to
+    // call from any thread / concurrent render.
     let abs_work = work_dir
         .canonicalize()
         .with_context(|| format!("resolving work dir {}", work_dir.display()))?;
+    let abs_package = package_dir
+        .canonicalize()
+        .with_context(|| format!("resolving package dir {}", package_dir.display()))?;
+    let sources = resolve_source_paths(&manifest.sources, &abs_package);
 
-    // Engines that read local files (KCL entrypoints, helmfile.yaml) resolve
-    // paths relative to the package dir. Change into it so `file://./app.k`
-    // works regardless of where the CLI was invoked from.
-    let prev_cwd = std::env::current_dir()?;
-    std::env::set_current_dir(package_dir)
-        .with_context(|| format!("changing into {}", package_dir.display()))?;
-    let result = build_umbrella_chart_in(&manifest.name, &manifest.version, &manifest.sources, &abs_work)
-        .context("assembling umbrella chart");
-    std::env::set_current_dir(prev_cwd)?;
-    let umbrella = result?;
+    let umbrella = build_umbrella_chart_in(&manifest.name, &manifest.version, &sources, &abs_work)
+        .context("assembling umbrella chart")?;
     Ok((manifest, umbrella))
+}
+
+/// Rewrite any `file://<relative>` URL in a source's `chart.repoUrl` to an
+/// absolute `file://<abs>` form, resolved against `base_dir`. Engines that
+/// load local files (KCL entrypoints, helmfile.yaml) see absolute paths only
+/// — no CWD dependency, safe for concurrent use.
+fn resolve_source_paths(
+    sources: &[akua_core::HelmSource],
+    base_dir: &Path,
+) -> Vec<akua_core::HelmSource> {
+    sources
+        .iter()
+        .map(|s| {
+            let mut out = s.clone();
+            if let Some(rest) = out.chart.repo_url.strip_prefix("file://") {
+                let path = PathBuf::from(rest);
+                let abs = if path.is_absolute() {
+                    path
+                } else {
+                    base_dir.join(path)
+                };
+                out.chart.repo_url = format!("file://{}", abs.display());
+            }
+            if let Some(p) = &out.chart.path {
+                let path = PathBuf::from(p);
+                if !path.is_absolute() && !out.chart.repo_url.starts_with("http")
+                    && !out.chart.repo_url.starts_with("oci://")
+                {
+                    out.chart.path = Some(base_dir.join(path).display().to_string());
+                }
+            }
+            out
+        })
+        .collect()
 }
 
 fn resolve_inputs_to_values(
