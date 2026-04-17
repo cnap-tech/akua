@@ -32,6 +32,8 @@
 
 pub mod attest;
 pub mod engine;
+#[cfg(feature = "fetch")]
+pub mod fetch;
 pub mod hash;
 pub mod manifest;
 pub mod metadata;
@@ -46,6 +48,8 @@ pub mod values;
 
 pub use hash::hash_to_suffix;
 pub use attest::{build_provenance, SlsaProvenance};
+#[cfg(feature = "fetch")]
+pub use fetch::{fetch_dependencies, FetchError};
 pub use manifest::{load_manifest, PackageManifest};
 pub use metadata::{build_metadata, AkuaMetadata};
 #[cfg(feature = "publish")]

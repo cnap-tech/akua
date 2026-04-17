@@ -15,7 +15,9 @@ helm-cli = ["dep:tempfile"]
 # wasmtime). Kills the helm CLI dep for template rendering. Remote-dep
 # fetching still requires a separate tool until a native oras-based
 # fetcher lands.
-helm-wasm = ["dep:helm-engine-wasm", "dep:tar", "dep:flate2"]
+helm-wasm = ["dep:helm-engine-wasm", "dep:tar", "dep:flate2", "fetch"]
+# Native HTTP + OCI chart dep fetcher — replaces `helm dependency update`.
+fetch = ["dep:oci-client", "dep:tar", "dep:flate2", "dep:tokio", "dep:tempfile"]
 # Native OCI publish via oci-client. No helm CLI needed for `akua publish`.
 publish = ["dep:oci-client", "dep:tar", "dep:flate2", "dep:tokio", "dep:tempfile"]
 # KCL engine — native Rust via kcl-lang/lib (git dep). Not WASM-safe;

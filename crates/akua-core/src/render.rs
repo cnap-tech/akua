@@ -99,9 +99,8 @@ pub fn render_umbrella_embedded(
     use helm_engine_wasm::{render_dir, Release};
 
     write_umbrella(chart, chart_dir)?;
-    // Clean `charts/` first: stale subchart directories from a previous run
-    // would otherwise shadow a new `helm dependency update` (Helm only
-    // refreshes .tgz files, not existing extracted dirs).
+    // Native HTTP + OCI dep fetcher — no `helm dependency update` call,
+    // no subprocess. Writes directly as extracted dirs under charts/.
     let charts_dir = chart_dir.join("charts");
     if charts_dir.exists() {
         std::fs::remove_dir_all(&charts_dir).map_err(|source| RenderError::Write {
@@ -109,10 +108,13 @@ pub fn render_umbrella_embedded(
             source,
         })?;
     }
-    helm_dependency_update(chart_dir, &opts.helm_bin)?;
-    // Helm's dep update stores subcharts as .tgz files. The embedded loader
-    // expects directories — extract in place.
-    expand_subchart_tgzs(&charts_dir)?;
+    crate::fetch::fetch_dependencies(&chart.chart_yaml.dependencies, &charts_dir).map_err(
+        |e| RenderError::HelmFailed {
+            cmd: "akua fetch".to_string(),
+            status: -1,
+            stderr: e.to_string(),
+        },
+    )?;
 
     // Values fed to the embedded engine: umbrella's values.yaml + any
     // override values passed in RenderOptions (from CEL-resolved inputs).
@@ -150,44 +152,6 @@ pub fn render_umbrella_embedded(
         }
     }
     Ok(out)
-}
-
-/// Extract every `<name>-<version>.tgz` in `charts_dir` into `<name>/`, then
-/// remove the original tarball. Matches the on-disk layout `helm template`
-/// expects when charts/ is a dir of subchart directories.
-#[cfg(feature = "helm-wasm")]
-fn expand_subchart_tgzs(charts_dir: &Path) -> Result<(), RenderError> {
-    if !charts_dir.is_dir() {
-        return Ok(());
-    }
-    let entries = std::fs::read_dir(charts_dir).map_err(|source| RenderError::Write {
-        path: charts_dir.to_path_buf(),
-        source,
-    })?;
-    for entry in entries {
-        let entry = entry.map_err(|source| RenderError::Write {
-            path: charts_dir.to_path_buf(),
-            source,
-        })?;
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("tgz") {
-            continue;
-        }
-        let file = std::fs::File::open(&path).map_err(|source| RenderError::Write {
-            path: path.clone(),
-            source,
-        })?;
-        let gz = flate2::read::GzDecoder::new(file);
-        let mut archive = tar::Archive::new(gz);
-        archive
-            .unpack(charts_dir)
-            .map_err(|source| RenderError::Write {
-                path: path.clone(),
-                source,
-            })?;
-        let _ = std::fs::remove_file(&path);
-    }
-    Ok(())
 }
 
 #[cfg(feature = "helm-wasm")]
