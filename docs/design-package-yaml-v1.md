@@ -1,194 +1,161 @@
-# `package.yaml` v1 — design for review
+# `package.yaml` v1alpha1 — final design
 
-> **Status:** proposal, not implemented. User feedback wanted before the
-> breaking change lands. No published packages exist yet → migration cost
-> is ~zero **right now** and rises fast once external users adopt.
+> **Status:** design locked, pending implementation. No code yet.
+> **Confidence:** ~90% on shipped surface; see "Deferred" section for the
+> 55–65% ideas we're *not* shipping in v1alpha1.
+> **Companion:** [`design-package-yaml-research.md`](./design-package-yaml-research.md)
+> captures the raw findings from helmfile, kustomize, Flux, Argo, Timoni, Porter.
 
-## Why change the current format
-
-Current shape (shipped):
+## Final shape
 
 ```yaml
+apiVersion: akua.tech/v1alpha1
+
 name: hello-package
 version: 0.1.0
-sources:
-  - id: app
-    engine: helm
-    chart:
-      repoUrl: https://charts.bitnami.com/bitnami
-      chart: nginx
-      targetRevision: 18.1.0
-    values:
-      replicaCount: 1
-```
+description: Optional human-readable description.
 
-**Problems** surfaced by researching helmfile, kustomize, Flux HelmRelease,
-ArgoCD Application, Timoni, and Porter (summary in
-[`design-package-yaml-research.md`](./design-package-yaml-research.md)):
-
-1. **Shoehorned per-engine config.** KCL sources abuse `chart.repoUrl` to
-   mean "path to `.k` file". helmfile sources do the same with
-   `helmfile.yaml`. Bad abstraction — `chart:` is meaningful only for the
-   `helm` engine. Every well-designed tool (Argo, Timoni, Porter) has
-   per-type sub-blocks.
-2. **ArgoCD terminology leak.** `targetRevision` is Argo-specific; means
-   nothing for KCL / helmfile / any future engine.
-3. **No environments / overlays.** Kustomize added its `components`
-   concept after 4 years of "we wish we'd designed for two composition
-   axes upfront." We can bake that in free right now.
-4. **No cross-source value wiring.** Porter's `dependencies` DAG is complex
-   enough that v2 is a rewrite; Timoni punts entirely to runtime (cluster
-   ConfigMaps). Build-time CEL refs (`${sources.<id>.values.<field>}`)
-   would be a genuine improvement over both.
-
-## Proposed v1 shape
-
-```yaml
-# Simple version string. NOT apiVersion: akua.tech/v1beta1.
-# Kustomize spent ~7 years stuck on v1beta1. Helmfile went with
-# plain `version: "1"` for their 1.0. We'll do the same.
-version: "1"
-
-# Optional. Defaults to Package. Present only to match the familiar
-# apiVersion/kind/metadata/spec shape without pretending to be a K8s CR
-# (which would confuse users trying to `kubectl apply -f package.yaml`).
-kind: Package
-
-metadata:
-  name: hello-package
-  version: 0.1.0
-  description: Optional human-readable description.
-
-# Separate schema file — already conventional. Keeps the YAML focused
-# on composition; all customer-input definition stays in JSON Schema.
 schema: ./values.schema.json
 
-# ── The composition layer ──────────────────────────────────────────────
-
 sources:
-  - id: app                        # Stable handle. Used for alias + CEL refs.
-    engine: helm                   # Which engine block to consume below.
-    helm:                          # helm-engine block (typed fields, not raw chart.*)
+  - name: app                                       # required, immutable-by-convention
+    helm:                                           # engine discriminated by block presence
       repo: https://charts.bitnami.com/bitnami
-      # For OCI: repo: oci://ghcr.io/acme/charts
       chart: nginx
       version: 18.1.0
-    values:                        # Typed YAML, NOT a string-of-YAML.
+    values:
       replicaCount: 1
 
-  - id: custom
-    engine: kcl
-    kcl:                           # kcl-engine block
+  - name: custom
+    kcl:
       entrypoint: ./app.k
-      # Chart version for the generated subchart wrapper:
       version: 0.1.0
 
-  - id: stack
-    engine: helmfile
-    helmfile:                      # helmfile-engine block
+  - name: stack
+    helmfile:
       path: ./helmfile.yaml
       version: 0.1.0
-
-# ── Hierarchical axis (dev / staging / prod) ───────────────────────────
-# Inspired by helmfile's `environments:`. Selected at CLI via
-# `akua build --env prod`. Values merge on top of each source's `values:`
-# using the same deep-merge-maps / replace-arrays semantics as Helm.
-
-environments:
-  default: {}                      # Always present, always empty by default.
-  prod:
-    sources:
-      app:
-        values:
-          replicaCount: 3
-
-# ── Orthogonal axis (features / mixins) ───────────────────────────────
-# Inspired by kustomize's Components. Can be combined freely in any
-# order: `akua build --env prod --component tls,monitoring`.
-
-components:
-  tls:
-    sources:
-      app:
-        values:
-          tls:
-            enabled: true
-  monitoring:
-    # A component may ADD sources to the umbrella, not just patch values.
-    sources:
-      - id: prometheus
-        engine: helm
-        helm:
-          repo: https://prometheus-community.github.io/helm-charts
-          chart: prometheus
-          version: 25.x
 ```
 
-## Design decisions — up for review
+That's the whole format.
 
-| Decision | Proposed | Alternative | Rationale |
-|---|---|---|---|
-| Version discriminator | `version: "1"` | `apiVersion: akua.tech/v1alpha1` | Kustomize stuck on v1beta1 for 7 years; Helmfile went plain. Akua is a build file, not a K8s CR. |
-| `kind: Package` | Optional, defaults to `Package` | Drop entirely | Familiarity without kubectl-apply confusion. Cheap to keep. |
-| Per-engine blocks (`helm:`, `kcl:`, `helmfile:`) | Yes | Keep `chart:` + engine-specific flags | Fixes the KCL shoehorn. Every serious tool has this shape. |
-| `version:` instead of `targetRevision:` | Yes | Keep Argo terminology | Argo's word only makes sense for Argo. Helm/KCL/helmfile all use `version`. |
-| Environments + components as two axes | Both upfront | Only environments (defer components) | Kustomize added components late → painful retrofit. Cost is ~nothing now. |
-| `${sources.<id>.values.<field>}` in CEL | Yes | No cross-source refs | Real improvement over Porter's DAG + Timoni's runtime-lookup. Natural extension of existing CEL. |
-| Values are typed YAML only | Yes | Allow string-YAML as alternative | ArgoCD shipped `values` (string) then `valuesObject` (typed); the string form was the #1 complaint. Skip the mistake. |
-| Formal `parameters:` block in package.yaml | **No** — stays in `values.schema.json` via `x-user-input` | Duplicate in package.yaml | Already works. Don't duplicate. |
-| Multi-file (`package.d/`) | Deferred | Support upfront | Single file scales surprisingly far (both helmfile and kustomize confirm). Add when users hit the wall. |
+## Decisions (all settled)
 
-## What we explicitly reject
+| Decision | Final | Rationale |
+|---|---|---|
+| Schema discriminator | `apiVersion: akua.tech/v1alpha1` | Chart.yaml precedent. Group scopes ownership. `v1alpha1` carries the "expect changes" social contract. |
+| `kind:` / `metadata:` / `spec:` wrappers | **None.** Flat fields at top level. | Chart.yaml, Cargo.toml, package.json, Porter — every build-time manifest goes flat. CRD wrappers are for cluster resources. |
+| Package identity | `name:`, `version:`, `description:` at top | Flat like Chart.yaml. |
+| Customer-input schema | `schema: ./values.schema.json` (separate file) | Already conventional. Keeps YAML focused on composition. |
+| Source identifier | `name:` (required, immutable-by-convention) | K8s `metadata.name` convention. Previously `id: Option<String>` — making it required simplifies alias computation and matches downstream expectations. |
+| Engine discrimination | **Block presence.** No `engine:` field. | DRY — `engine: helm` + `helm: {...}` repeated the info. Argo and Cargo both discriminate by key presence. Strict parse-time validation catches typos. |
+| Per-engine config | Typed block per engine (`helm:` / `kcl:` / `helmfile:`) | Fixes the prior shoehorning of `chart.repoUrl` = `file://./app.k` for KCL. |
+| Version field name | `version:` (Helm/KCL/helmfile convention) | Not Argo's `targetRevision:`. |
+| Values format | Typed YAML only. Deep-merge maps, replace arrays. | ArgoCD shipped `values` (string) → `valuesObject` (typed); the string form was the #1 complaint. Skip the mistake. |
+| File structure | Single `package.yaml`. `package.d/` deferred. | Both helmfile and kustomize confirm single-file scales surprisingly far. Easy to add later; annoying to remove. |
+| Graduation policy | `v1alpha1` → `v1`. Skip `beta` unless genuinely needed. | Kustomize-stuck-at-beta is a failure of graduation scheduling, not of the shape. |
 
-- **Flux's `spec.chart.spec.*` double-nest.** Historical artifact; universally complained about.
-- **Porter's mixin-as-binary contract.** Ecosystem fragmented; every mixin reinvents its own schema.
-- **Timoni's CUE-only schema.** CUE learning cliff is cited in every HN thread. Akua uses JSON Schema (easier onramp, mature tooling).
-- **Helmfile's Go-template-the-YAML pattern.** Non-determinism via `now`/`exec` is exactly what Akua's determinism thesis rules out. CEL expressions inside `x-input` are the principled alternative.
-- **Multiple patch dialects (Kustomize's mistake).** One merge semantic: deep-merge maps, replace arrays.
+## Immutability of `name`
 
-## Migration path
+Treated as immutable after a package's first publish. Technically mutable, but
+changing it changes the identity of the source downstream:
 
-One-time breaking change. No published packages exist yet, so cost is ~zero.
-We'd:
+- **Per-source alias** (`<chart-name>-<hash-of-name>`) changes — subchart
+  references and umbrella dep entries shift.
+- **Cross-source refs** (once added — see "Deferred") break.
+- **Schema paths** reference sources by `name`; customer-facing forms break.
 
-1. Add a `akua migrate-v1` subcommand that converts the current format
-   mechanically.
-2. Ship with both readers for one release so anyone with an in-flight
-   package.yaml isn't blocked.
-3. Remove the v0 reader in the release after — by which point migrate
-   has been available for weeks.
+Same semantics as Chart.yaml's `name:` or a k8s resource's `metadata.name`.
+Tooling warnings will surface this when a user tries to rename.
 
-## Open questions for you
+## Strict validation rules
 
-1. **Do we want `kind: Package` at all, or drop it?** I lean "keep, optional"
-   for future-proofing (e.g., a future `kind: Bundle` that composes many
-   packages). But it's cosmetic.
-2. **Components block — values-only patches, or can components add whole
-   sources?** Proposed allows both (see the `monitoring` example above).
-   Kustomize's equivalent (`component`) does allow adding resources, so
-   precedent supports the broader power.
-3. **CEL cross-source refs — resolve at schema-extraction time or a separate
-   build-time pass?** Leaning "extract-time" so `akua preview` can show
-   resolved values with cross-source data. Implementation detail but affects
-   the mental model in docs.
-4. **`environments:` default vs. no-default?** Currently proposed to always
-   have `default: {}`. Alternative: no environment unless `--env` is passed.
-   First is friendlier; second is more explicit.
-5. **File structure — allow `package.d/*.yaml` for splitting, or require
-   single file until users complain?** Proposed to defer. Easy to add later;
-   annoying to remove.
+Enforced at parse time, with actionable errors:
 
-## What's not in this doc
+- **Exactly one engine block per source.** Zero → `source "app" declares no engine (expected one of: helm, kcl, helmfile)`. Two → `source "app" declares both helm and kcl; exactly one allowed`.
+- **Unknown keys rejected, not silently dropped.** `source "app" has unknown field "hlem" (did you mean "helm"?)`.
+- **Required fields enforced.** `source missing required field "name"`.
+- **Name uniqueness within a package.** Two sources named `app` is an error.
+- **API version recognised.** Unknown `apiVersion:` → `unknown apiVersion "akua.tech/v2"; this akua version supports: akua.tech/v1alpha1`.
 
-- **Secret-field routing** (`x-secret: true` → Sealed Secrets / ESO /
-  Infisical). Orthogonal — stays in the schema file alongside other
-  `x-*` extensions.
-- **`uniqueIn` registry protocol.** Also orthogonal; the package.yaml
-  shape doesn't change.
+## Deferred to v1alpha2+ (all additive)
 
----
+Each of these was in the earlier proposal but at 55–65% confidence — not
+enough to commit the surface area before real user friction tells us what
+shape users actually want. All are *additive* top-level fields that land
+cleanly in a later alpha without breaking v1alpha1 packages.
 
-**Review:** comments welcome on any of the "Design decisions" table rows or
-the five open questions. Once agreed, implementation is probably 2–3 focused
-days: migrate reader, new types + parser, CLI flag wiring, doc sync,
-migrate command.
+### `environments:` (hierarchical axis)
+
+Workaround today: maintain separate package.yaml files per env, or pass
+`--values prod.yaml` at build time. Add when the first user complains about
+duplication.
+
+### `components:` (orthogonal axis)
+
+Workaround today: separate package.yaml files or inline `values:` overrides.
+Add when the second user asks about optional feature flags (tls, monitoring,
+hpa).
+
+### Cross-source CEL refs `${sources.<name>.values.<field>}`
+
+Neither Porter's dependency DAG nor Timoni's runtime-lookup got this right,
+which is evidence the problem is *hard*, not that our specific design is
+correct. Ship when a concrete use case validates the evaluation semantics
+(see "Semantics when we add it" below).
+
+**Semantics when we add it:**
+- Evaluation is topologically ordered by ref dependency — error on cycles.
+- Refs see the *fully-merged* values of the referenced source (user input →
+  CEL → environment patches → component patches), not raw input.
+- Missing ref → error (never silent empty string).
+
+## Explicitly rejected (not deferred — rejected on design grounds)
+
+- **Flux's `spec.chart.spec.*` double-nest.** Historical artifact.
+- **Porter's mixin-as-binary contract.** Fragmented ecosystem.
+- **Timoni's CUE-only schema.** CUE learning cliff. Akua uses JSON Schema.
+- **Helmfile's Go-template-the-YAML.** Non-determinism is exactly what
+  Akua's thesis rules out.
+- **Multiple patch dialects.** One merge semantic: deep-merge maps, replace
+  arrays.
+- **Values as string-of-YAML.** Only typed YAML, ever.
+
+## Migration
+
+`akua migrate-v1` mechanically converts the current format:
+
+| v0 field | → | v1alpha1 field |
+|---|---|---|
+| `source.id` | → | `source.name` (required) |
+| `source.engine: helm` + `chart.repoUrl` + `chart.chart` + `chart.targetRevision` | → | `source.helm.{repo, chart, version}` |
+| `source.engine: kcl` + `chart.repoUrl` (file://) | → | `source.kcl.{entrypoint, version}` |
+| `source.engine: helmfile` + `chart.repoUrl` (file://) | → | `source.helmfile.{path, version}` |
+| No top-level `apiVersion` | → | `apiVersion: akua.tech/v1alpha1` prepended |
+
+One-time breaking change. No published packages exist yet → migration cost
+is effectively zero. Ship with both readers for one release as a safety net;
+remove v0 reader in the release after.
+
+## What's *not* changing
+
+- The `values.schema.json` schema file shape (JSON Schema + `x-user-input` +
+  `x-input.cel`). Orthogonal to package.yaml.
+- Engine plugin internals (trait, dispatch, render path). The rename from
+  `id` → `name` touches the Rust `HelmSource` struct but doesn't change
+  behavior.
+- Output: akua still produces a Helm chart, pushes via OCI, attests via
+  SLSA. Build tool contract unchanged.
+- Helm v4 template engine embedding, native dep fetching, native OCI push.
+
+## Implementation steps (post-approval)
+
+1. Rewrite `akua-core::manifest` types to v1alpha1 shape.
+2. Add `akua-core::manifest::v0` with the old types behind a feature flag;
+   auto-upgrade on load with a deprecation warning.
+3. Update `examples/{hello,kcl,helmfile}-package` to v1alpha1.
+4. Write `akua migrate-v1` subcommand.
+5. Sync docs (README, use-cases, getting-started) to the new shape.
+6. One release cycle later: remove v0 reader.
+
+Estimate: 2–3 focused days.
