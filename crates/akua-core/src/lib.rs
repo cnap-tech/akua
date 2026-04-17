@@ -16,6 +16,7 @@
 //! - [`source`] — helm source representation, chart-name extraction, alias computation
 //! - [`values`] — value merging with umbrella alias nesting, dot-notation paths, deep merge
 //! - [`schema`] — JSON Schema merging with x-user-input extensions, field extraction, transforms
+//! - [`umbrella`] — umbrella Helm chart assembly (Chart.yaml + merged values.yaml)
 //!
 //! ## Intentionally out of scope (Phase 0)
 //!
@@ -30,16 +31,20 @@
 #![allow(dead_code)]
 
 pub mod hash;
+pub mod manifest;
 pub mod schema;
 pub mod source;
+pub mod umbrella;
 pub mod values;
 
 pub use hash::hash_to_suffix;
+pub use manifest::{load_manifest, PackageManifest};
 pub use schema::{
     apply_install_transforms, extract_install_fields, merge_values_schemas, validate_values_schema,
     ExtractedInstallField, JsonSchema,
 };
 pub use source::{extract_chart_name_from_oci, get_source_alias, is_oci, HelmSource};
+pub use umbrella::{build_umbrella_chart, ChartYaml, Dependency, UmbrellaChart};
 pub use values::{deep_merge_values, merge_helm_source_values, set_nested_value};
 
 /// Top-level error type for the pipeline.
@@ -53,23 +58,6 @@ pub enum Error {
     Validation(String),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
-}
-
-/// A package under construction, assembled by the pipeline.
-///
-/// Phase 0 stub: the shape will evolve as Phase 1 pipeline stages come online.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Package {
-    pub name: String,
-    pub version: String,
-    pub components: Vec<Component>,
-    pub user_inputs: Option<serde_json::Value>, // JSON Schema with x-user-input
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Component {
-    pub name: String,
-    pub source: HelmSource,
 }
 
 #[cfg(test)]

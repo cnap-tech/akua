@@ -9,7 +9,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use clap::{ArgGroup, Parser, Subcommand};
 
-use akua_core::{apply_install_transforms, extract_install_fields, validate_values_schema};
+use akua_core::{
+    apply_install_transforms, build_umbrella_chart, extract_install_fields, load_manifest,
+    validate_values_schema,
+};
 
 #[derive(Parser)]
 #[command(name = "akua")]
@@ -48,6 +51,11 @@ enum Commands {
         #[arg(long)]
         compact: bool,
     },
+    /// Print the resolved dependency tree (umbrella Chart.yaml structure).
+    Tree {
+        #[arg(long, default_value = ".")]
+        package: PathBuf,
+    },
     /// Run package tests (`resolve.test.*`, schema validation, etc.).
     Test,
     /// Lint the package (schema validation, transform wiring).
@@ -79,6 +87,7 @@ fn main() -> Result<()> {
             run_preview(&package, inputs.as_deref(), inputs_file.as_deref(), compact)
         }
         Commands::Lint { package } => run_lint(&package),
+        Commands::Tree { package } => run_tree(&package),
         Commands::Init { .. } => stub("init"),
         Commands::Test => stub("test"),
         Commands::Build { .. } => stub("build"),
@@ -156,6 +165,47 @@ fn run_preview(
         serde_json::to_string_pretty(&resolved)?
     };
     println!("{out}");
+    Ok(())
+}
+
+fn run_tree(package_dir: &Path) -> Result<()> {
+    let manifest = load_manifest(package_dir)
+        .with_context(|| format!("loading package manifest from {}", package_dir.display()))?;
+    let umbrella = build_umbrella_chart(&manifest.name, &manifest.version, &manifest.sources);
+
+    println!(
+        "{} {} ({} sources)",
+        umbrella.chart_yaml.name,
+        umbrella.chart_yaml.version,
+        manifest.sources.len()
+    );
+    if umbrella.chart_yaml.dependencies.is_empty() && umbrella.git_sources.is_empty() {
+        println!("  (no dependencies)");
+        return Ok(());
+    }
+    for dep in &umbrella.chart_yaml.dependencies {
+        let alias = dep
+            .alias
+            .as_deref()
+            .map(|a| format!(" as {a}"))
+            .unwrap_or_default();
+        println!(
+            "  - {name}@{version}{alias}  [{repo}]",
+            name = dep.name,
+            version = dep.version,
+            alias = alias,
+            repo = dep.repository
+        );
+    }
+    for git in &umbrella.git_sources {
+        let path = git.chart.path.as_deref().unwrap_or(".");
+        println!(
+            "  - (git) {repo}@{rev} path={path}",
+            repo = git.chart.repo_url,
+            rev = git.chart.target_revision,
+            path = path
+        );
+    }
     Ok(())
 }
 

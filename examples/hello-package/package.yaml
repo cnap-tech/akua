@@ -1,0 +1,12 @@
+name: hello-package
+version: 0.1.0
+description: Minimal Akua package — one Helm chart, two user-input fields.
+
+sources:
+  - id: app
+    chart:
+      repoUrl: https://charts.bitnami.com/bitnami
+      chart: nginx
+      targetRevision: 18.1.0
+    values:
+      replicaCount: 1
