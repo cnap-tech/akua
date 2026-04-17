@@ -37,6 +37,8 @@ import (
 	"unsafe"
 
 	ci "helm.sh/helm/v4/pkg/chart"
+	"helm.sh/helm/v4/pkg/chart/common"
+	"helm.sh/helm/v4/pkg/chart/common/util"
 	"helm.sh/helm/v4/pkg/chart/v2/loader"
 	"helm.sh/helm/v4/pkg/engine"
 	"sigs.k8s.io/yaml"
@@ -123,12 +125,29 @@ func renderInternal(inputBytes []byte) renderOutput {
 	if err != nil {
 		return renderOutput{Error: fmt.Sprintf("parsing values YAML: %s", err)}
 	}
-	scope := map[string]any{
-		"Values":  values,
-		"Release": buildReleaseValues(in.Release),
-		"Chart":   ch.Metadata,
+	// util.ToRenderValues performs the chart-hierarchy value coalescing
+	// (subchart defaults, alias scoping) that engine.Render relies on.
+	releaseOpts := common.ReleaseOptions{
+		Name:      in.Release.Name,
+		Namespace: in.Release.Namespace,
+		Revision:  in.Release.Revision,
+		IsInstall: true,
+		IsUpgrade: false,
 	}
-	rendered, err := engine.Render(ci.Charter(ch), scope)
+	if releaseOpts.Name == "" {
+		releaseOpts.Name = "release"
+	}
+	if releaseOpts.Namespace == "" {
+		releaseOpts.Namespace = "default"
+	}
+	if releaseOpts.Revision == 0 {
+		releaseOpts.Revision = 1
+	}
+	renderScope, err := util.ToRenderValues(ci.Charter(ch), values, releaseOpts, nil)
+	if err != nil {
+		return renderOutput{Error: fmt.Sprintf("preparing render values: %s", err)}
+	}
+	rendered, err := engine.Render(ci.Charter(ch), renderScope)
 	if err != nil {
 		return renderOutput{Error: fmt.Sprintf("helm engine: %s", err)}
 	}

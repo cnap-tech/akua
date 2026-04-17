@@ -8,9 +8,14 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-default = ["helm-cli", "engine-kcl", "engine-helmfile", "publish"]
+default = ["helm-cli", "engine-kcl", "engine-helmfile", "publish", "helm-wasm"]
 # Shell-to-helm rendering (not WASM-safe — requires std::process and tempfile).
 helm-cli = ["dep:tempfile"]
+# Embedded Helm v4 template engine via helm-engine-wasm (Go→wasip1 +
+# wasmtime). Kills the helm CLI dep for template rendering. Remote-dep
+# fetching still requires a separate tool until a native oras-based
+# fetcher lands.
+helm-wasm = ["dep:helm-engine-wasm", "dep:tar", "dep:flate2"]
 # Native OCI publish via oci-client. No helm CLI needed for `akua publish`.
 publish = ["dep:oci-client", "dep:tar", "dep:flate2", "dep:tokio", "dep:tempfile"]
 # KCL engine — native Rust via kcl-lang/lib (git dep). Not WASM-safe;
@@ -39,3 +44,4 @@ kcl-lang = { git = "https://github.com/kcl-lang/lib", optional = true }
 oci-client = { version = "0.16", default-features = false, features = ["rustls-tls"], optional = true }
 tar = { version = "0.4", optional = true }
 flate2 = { version = "1", optional = true }
+helm-engine-wasm = { path = "../helm-engine-wasm", optional = true }

@@ -52,6 +52,8 @@ pub use metadata::{build_metadata, AkuaMetadata};
 pub use publish::{publish_chart, PublishError, PublishOptions, PublishOutcome};
 #[cfg(feature = "helm-cli")]
 pub use render::{render_umbrella, write_metadata, write_umbrella, RenderError, RenderOptions};
+#[cfg(feature = "helm-wasm")]
+pub use render::render_umbrella_embedded;
 pub use schema::{
     apply_install_transforms, extract_install_fields, merge_values_schemas, validate_values_schema,
     ExtractedInstallField, JsonSchema,

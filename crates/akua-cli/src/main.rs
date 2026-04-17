@@ -11,9 +11,9 @@ use clap::{ArgGroup, Parser, Subcommand};
 
 use akua_core::{
     apply_install_transforms, build_metadata, build_provenance, build_umbrella_chart_in,
-    extract_install_fields, load_manifest, publish_chart, render_umbrella, validate_values_schema,
-    write_metadata, write_umbrella, AkuaMetadata, PackageManifest, PublishOptions, RenderOptions,
-    UmbrellaChart,
+    extract_install_fields, load_manifest, publish_chart, render_umbrella,
+    render_umbrella_embedded, validate_values_schema, write_metadata, write_umbrella,
+    AkuaMetadata, PackageManifest, PublishOptions, RenderOptions, UmbrellaChart,
 };
 
 #[derive(Parser)]
@@ -95,10 +95,13 @@ enum Commands {
         #[arg(long, default_value = "./dist/attestation.json")]
         out: PathBuf,
     },
-    /// Render the umbrella chart to Kubernetes manifests via the `helm` CLI.
+    /// Render the umbrella chart to Kubernetes manifests.
     ///
-    /// Shells to `helm dependency update` + `helm template`. Requires `helm`
-    /// on `$PATH` (override with `--helm-bin`).
+    /// Two engines:
+    /// - `--engine helm-wasm` (default) uses the embedded Helm v4 template
+    ///   engine. Still calls `helm dependency update` if the umbrella has
+    ///   remote deps; the template phase itself needs no `helm` on `$PATH`.
+    /// - `--engine helm-cli` shells to `helm template`. Legacy path.
     #[command(group(ArgGroup::new("render_inputs").args(["inputs", "inputs_file"])))]
     Render {
         #[arg(long, default_value = ".")]
@@ -109,6 +112,11 @@ enum Commands {
         release: String,
         #[arg(long, default_value = "default")]
         namespace: String,
+        /// Render engine: `helm-wasm` (embedded, default) or `helm-cli`.
+        #[arg(long, default_value = "helm-wasm")]
+        engine: String,
+        /// Path to the `helm` CLI (only used with `--engine helm-cli` and for
+        /// dep resolution with `helm-wasm` when remote deps are present).
         #[arg(long, default_value = "helm")]
         helm_bin: PathBuf,
         /// JSON user inputs (path → value) applied via schema transforms.
@@ -160,6 +168,7 @@ fn main() -> Result<()> {
             out,
             release,
             namespace,
+            engine,
             helm_bin,
             inputs,
             inputs_file,
@@ -168,6 +177,7 @@ fn main() -> Result<()> {
             out: &out,
             release: &release,
             namespace: &namespace,
+            engine: &engine,
             helm_bin: &helm_bin,
             inputs_inline: inputs.as_deref(),
             inputs_file: inputs_file.as_deref(),
@@ -410,6 +420,7 @@ struct RenderArgs<'a> {
     out: &'a Path,
     release: &'a str,
     namespace: &'a str,
+    engine: &'a str,
     helm_bin: &'a Path,
     inputs_inline: Option<&'a str>,
     inputs_file: Option<&'a Path>,
@@ -427,8 +438,14 @@ fn run_render(args: RenderArgs<'_>) -> Result<()> {
         namespace: args.namespace.to_string(),
         override_values,
     };
-    let manifest_yaml =
-        render_umbrella(&umbrella, args.out, &opts).context("rendering umbrella chart")?;
+    let manifest_yaml = match args.engine {
+        "helm-cli" => render_umbrella(&umbrella, args.out, &opts).context("helm-cli render")?,
+        "helm-wasm" => render_umbrella_embedded(&umbrella, args.out, &opts)
+            .context("helm-wasm (embedded) render")?,
+        other => anyhow::bail!(
+            "unknown --engine `{other}`; expected `helm-wasm` or `helm-cli`"
+        ),
+    };
     print!("{manifest_yaml}");
     Ok(())
 }

@@ -48,6 +48,7 @@ dependencies = [
  "async-trait",
  "cel-interpreter",
  "flate2",
+ "helm-engine-wasm",
  "kcl-lang",
  "oci-client 0.16.1",
  "reqwest 0.12.28",
