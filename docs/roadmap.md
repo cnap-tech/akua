@@ -19,8 +19,10 @@ Akua is being extracted from CNAP's internal chart generation service. See
 | **4a — OCI publish** | ✅ Landed | `akua publish` via `oci-client` (pure Rust, no `helm` CLI); Helm-compat media types + annotations; returns OCI digest |
 | **4b — SLSA attestation** | ✅ Landed | `akua attest` emits SLSA v1 predicate for cosign + adjacent OCI push |
 | **5 — KCL as native Rust** | ✅ Landed | `engine: kcl` now calls the native `kcl-lang` Rust crate (git dep). No subprocess, no fetch, 4 ms eval. Browser renders via `@kcl-lang/wasm-lib` + JS glue (akua-wasm doesn't compile a KCL engine). |
-| **6 — Install UI reference** | 🔮 Near-term | React + rjsf + WASM bindings; demos the customer-facing flow end-to-end |
-| **7 — Helm-engine WASM** | 🔮 Multi-quarter | Go→WASM wrapper around `helm/v3/pkg/engine`, hosted via wasmtime |
+| **7a — Helm-engine WASM** | ✅ Landed | Go→wasip1 wrapper around `helm/v4/pkg/engine` hosted via wasmtime. `akua render --engine helm-wasm` is the default. Kills `helm template` shell-out. |
+| **7b — Native dep fetching** | ✅ Landed | `akua-core::fetch` pulls OCI + HTTP chart deps in-process (oci-client + reqwest). Replaces `helm dependency update`. Default render now has zero `helm` CLI dep. |
+| **7c — Library hardening** | ✅ Landed | Dropped `std::env::set_current_dir` in `load_package`; source paths absolutised up-front so engines are CWD-independent. Safe for concurrent / multi-threaded library use. |
+| **8 — Install UI reference** | 🔮 Near-term | React + rjsf + WASM bindings; demos the customer-facing flow end-to-end |
 | **9 — Package Studio IDE** | 🔮 Multi-quarter | Full in-browser authoring IDE |
 | **10 — Upstream** | 🔮 Ongoing | HIP proposals to Helm (template-function plugins), Extism contributions |
 
@@ -52,15 +54,35 @@ directly is cleaner than embedding `kcl.wasm` via wasmtime.
       (or, for Model A, just writes values into ArgoCD Application).
 - [ ] Published as `examples/install-ui/` — not a product, a template.
 
-## Phase 7 — Helm-engine WASM (multi-quarter)
+## Phase 7 — Single-binary rendering (landed)
 
-The honest gap: `akua render` still shells to `helm`. The viable path
-is a tiny Go wrapper around `helm.sh/helm/v3/pkg/engine.Render`
-compiled to `wasip1`, hosted via wasmtime from Rust. Keeps full Helm
-semantics (Sprig, named templates, subcharts, `.Files`,
-`.Capabilities`) without the CLI.
+The thesis: `akua render` has **zero external CLI dependencies** for
+the default flow. Three pieces shipped:
 
-Not prioritized until demand materialises — the CLI shell-out works.
+- **7a** — [`crates/helm-engine-wasm`](../crates/helm-engine-wasm/README.md):
+  Go wrapper around `helm.sh/helm/v4/pkg/engine.Render` compiled to
+  wasip1 (reactor module via `-buildmode=c-shared`), embedded into the
+  akua binary via `include_bytes!`, hosted via wasmtime. Full Helm
+  semantics (Sprig, named templates, subcharts, `.Files`,
+  `.Capabilities`) with no `helm template` shell-out.
+- **7b** — `akua-core::fetch`: native OCI + HTTP Helm-repo chart
+  fetcher (oci-client + reqwest). Replaces `helm dependency update`.
+- **7c** — `load_package` no longer mutates the process CWD. Source
+  paths absolutised up-front. Safe for concurrent library use (CNAP
+  backend, server embedding, etc.).
+
+**Size optimisation (backlog):** the embedded `helm-engine.wasm` is
+~75 MB because Go's linker can't prune types exposed through
+`pkg/engine`'s public API (e.g., `rest.Config`). A forked build that
+vendors just the template engine + strips the `k8s.io/client-go`
+import would land at ~15 MB. Not worth the upstream-sync burden
+until users complain about binary size. See
+[`crates/helm-engine-wasm/README.md`](../crates/helm-engine-wasm/README.md)
+"Option 2" for the detailed plan.
+
+**Legacy:** `--engine helm-cli` remains for users who prefer shelling
+to their installed Helm. Helmfile engine still shells to `helmfile`
+(its whole point is orchestrating helm — embedding doesn't make sense).
 
 ## Explicit non-goals
 
