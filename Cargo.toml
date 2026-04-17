@@ -4,6 +4,7 @@ members = [
 	"crates/akua-core",
 	"crates/akua-cli",
 	"crates/akua-wasm",
+	"crates/helm-engine-wasm",
 ]
 
 [workspace.package]

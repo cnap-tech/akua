@@ -42,6 +42,10 @@ packages/core-wasm/package.json
 # akua dist / test artifacts
 dist/
 
+# helm-engine wasm artifact (built via `task build:helm-engine-wasm`)
+crates/helm-engine-wasm/assets/helm-engine.wasm
+crates/helm-engine-wasm/go-src/go.sum
+
 # Coverage
 coverage/
 *.lcov

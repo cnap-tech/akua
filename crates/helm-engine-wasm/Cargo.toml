@@ -1,0 +1,21 @@
+[package]
+name = "helm-engine-wasm"
+description = "Embedded Helm v4 template engine — Go→wasip1 module hosted via Extism"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+wasmtime = "39"
+wasmtime-wasi = "39"
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = "0.22"
+thiserror = { workspace = true }
+flate2 = "1"
+tar = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

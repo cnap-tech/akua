@@ -57,6 +57,17 @@ tasks:
 
   # ---------- WASM bindings ----------
 
+  build:helm-engine-wasm:
+    desc: Build the embedded Helm v4 template engine (Go→wasip1, Extism plugin)
+    dir: crates/helm-engine-wasm/go-src
+    cmds:
+      - go mod tidy
+      # -buildmode=c-shared produces a *reactor* module: Go runtime + package
+      # init()s run on `_initialize`, then exports stay callable. Without it,
+      # `runtime.main()` exits after init and exports can't be invoked.
+      - GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o ../assets/helm-engine.wasm .
+      - ls -lh ../assets/helm-engine.wasm
+
   wasm:build:
     desc: Build WASM bindings for bundler targets
     cmds:
