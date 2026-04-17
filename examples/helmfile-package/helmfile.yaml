@@ -1,0 +1,11 @@
+# Minimal helmfile — one release of a public chart.
+# Akua's helmfile engine runs `helmfile template` and captures the
+# concatenated manifests as a single subchart.
+
+releases:
+  - name: podinfo
+    namespace: default
+    chart: oci://ghcr.io/stefanprodan/charts/podinfo
+    version: 6.7.1
+    values:
+      - replicaCount: 1

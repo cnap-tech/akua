@@ -8,7 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-default = ["helm-cli", "engine-kcl"]
+default = ["helm-cli", "engine-kcl", "engine-helmfile"]
 # Shell-to-helm rendering (not WASM-safe — requires std::process and tempfile).
 helm-cli = ["dep:tempfile"]
 # KCL engine plugin — shells to the `kcl` CLI. Not WASM-safe.
