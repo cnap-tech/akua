@@ -42,7 +42,13 @@ pub struct ExtractedInstallField {
     pub path: String,
     pub schema: JsonSchema,
     pub required: bool,
+    /// Legacy `{{value}}` template. Preserved as sugar — at transform time
+    /// it auto-rewrites to the CEL expression `value` (optionally wrapped).
     pub hostname_template: Option<String>,
+    /// CEL expression evaluated with `value` (this field's raw input) and
+    /// `values` (the resolved-so-far object) in scope. Replaces
+    /// `hostname_template` — if both are set, `cel` wins.
+    pub cel: Option<String>,
     pub slugify: bool,
     pub unique_in: Option<String>,
     pub order: Option<i64>,
@@ -77,6 +83,13 @@ fn get_install_order(prop: &Value) -> Option<i64> {
 fn get_template(prop: &Value) -> Option<String> {
     let ext = prop.get("x-input").or_else(|| prop.get("x-hostname"))?;
     ext.get("template")?.as_str().map(String::from)
+}
+
+/// Extract the CEL expression from `x-input.cel`. Takes precedence over
+/// `x-input.template` at transform time. See `docs/design-notes.md` §6.
+fn get_cel(prop: &Value) -> Option<String> {
+    let ext = prop.get("x-input")?;
+    ext.get("cel")?.as_str().map(String::from)
 }
 
 /// Extract the `slugify` flag. Legacy `x-hostname` implies `slugify: true`
@@ -251,6 +264,7 @@ fn walk_schema(
         if has_user_input_marker(prop) {
             let order = get_install_order(prop);
             let hostname_template = get_template(prop);
+            let cel = get_cel(prop);
             let slugify = get_slugify(prop);
             let unique_in = get_unique_in(prop);
             let required = parent_required.iter().any(|r| r == key);
@@ -260,6 +274,7 @@ fn walk_schema(
                 schema: prop.clone(),
                 required,
                 hostname_template,
+                cel,
                 slugify,
                 unique_in,
                 order,
@@ -295,11 +310,12 @@ fn walk_schema(
 
 /// Apply install-time transforms to user-provided string values.
 ///
-/// For each field:
+/// For each field (in `order`):
 /// - Required but missing/empty → returns an error.
 /// - Optional and empty → skipped.
-/// - Has a template → slugify input (if requested) and substitute into
-///   the template via `{{value}}` replacement.
+/// - `cel` set → evaluate CEL with `value` (raw input, post-slugify if flagged)
+///   and `values` (resolved-so-far) in scope. Result must be a string.
+/// - `hostname_template` set → legacy `{{value}}` substitution (kept as sugar).
 /// - Otherwise → pass through (trimmed).
 ///
 /// Uniqueness checks are **not** performed here — the caller handles those
@@ -327,21 +343,51 @@ pub fn apply_install_transforms(
             continue;
         }
 
-        let resolved = if let Some(template) = &field.hostname_template {
-            let source_str = if field.slugify {
-                slugify(trimmed)
-            } else {
-                trimmed.to_string()
-            };
-            template.replace("{{value}}", &source_str)
+        let source_str = if field.slugify {
+            slugify(trimmed)
         } else {
             trimmed.to_string()
+        };
+
+        let resolved = if let Some(expr) = &field.cel {
+            eval_cel(expr, &source_str, &overrides, &field.path)?
+        } else if let Some(template) = &field.hostname_template {
+            template.replace("{{value}}", &source_str)
+        } else {
+            source_str
         };
 
         set_nested_value(&mut overrides, &field.path, Value::String(resolved));
     }
 
     Ok(overrides)
+}
+
+/// Evaluate a CEL expression with `value` (this field's input, post-slugify)
+/// and `values` (the resolved-so-far object) bound in scope.
+fn eval_cel(
+    expression: &str,
+    value: &str,
+    values_so_far: &Value,
+    path: &str,
+) -> Result<String, String> {
+    use cel_interpreter::{Context, Program, Value as CelValue};
+
+    let program = Program::compile(expression)
+        .map_err(|e| format!("field `{path}`: invalid CEL expression: {e}"))?;
+
+    let mut ctx = Context::default();
+    ctx.add_variable_from_value("value", value.to_string());
+    ctx.add_variable("values", values_so_far.clone())
+        .map_err(|e| format!("field `{path}`: binding `values`: {e}"))?;
+
+    match program.execute(&ctx) {
+        Ok(CelValue::String(s)) => Ok(s.to_string()),
+        Ok(other) => Err(format!(
+            "field `{path}`: CEL expression must return a string, got {other:?}"
+        )),
+        Err(e) => Err(format!("field `{path}`: CEL evaluation failed: {e}")),
+    }
 }
 
 /// Slugify a string for use as a DNS label (RFC 1123): lowercase, replace
@@ -659,6 +705,121 @@ mod tests {
         let fields = extract_install_fields(&schema);
         let result = apply_install_transforms(&fields, &inputs(&[("sub", "My Clinic")])).unwrap();
         assert_eq!(result, json!({"sub": "my-clinic.lando.health"}));
+    }
+
+    #[test]
+    fn transform_cel_expression_passes_value_through() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "x-user-input": true,
+                    "x-input": {"cel": "value"}
+                }
+            }
+        });
+        let fields = extract_install_fields(&schema);
+        let result =
+            apply_install_transforms(&fields, &inputs(&[("email", "admin@example.com")])).unwrap();
+        assert_eq!(result, json!({"email": "admin@example.com"}));
+    }
+
+    #[test]
+    fn transform_cel_expression_composes_fields() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "env": {
+                    "type": "string",
+                    "x-user-input": {"order": 1}
+                },
+                "subdomain": {
+                    "type": "string",
+                    "x-user-input": {"order": 2},
+                    "x-input": {"cel": "value + '.' + values.env + '.apps.example.com'"}
+                }
+            }
+        });
+        let fields = extract_install_fields(&schema);
+        let result = apply_install_transforms(
+            &fields,
+            &inputs(&[("env", "staging"), ("subdomain", "acme")]),
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            json!({"env": "staging", "subdomain": "acme.staging.apps.example.com"})
+        );
+    }
+
+    #[test]
+    fn transform_cel_with_slugify_slugifies_before_binding() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "x-user-input": true,
+                    "x-input": {"slugify": true, "cel": "value + '-prod'"}
+                }
+            }
+        });
+        let fields = extract_install_fields(&schema);
+        let result =
+            apply_install_transforms(&fields, &inputs(&[("name", "My App!")])).unwrap();
+        assert_eq!(result, json!({"name": "my-app-prod"}));
+    }
+
+    #[test]
+    fn transform_cel_takes_precedence_over_template() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "x": {
+                    "type": "string",
+                    "x-user-input": true,
+                    "x-input": {"template": "{{value}}.OLD", "cel": "value + '.NEW'"}
+                }
+            }
+        });
+        let fields = extract_install_fields(&schema);
+        let result = apply_install_transforms(&fields, &inputs(&[("x", "foo")])).unwrap();
+        assert_eq!(result, json!({"x": "foo.NEW"}));
+    }
+
+    #[test]
+    fn transform_cel_invalid_expression_errors() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "x": {
+                    "type": "string",
+                    "x-user-input": true,
+                    "x-input": {"cel": "this is not valid CEL @#$"}
+                }
+            }
+        });
+        let fields = extract_install_fields(&schema);
+        let err = apply_install_transforms(&fields, &inputs(&[("x", "foo")])).unwrap_err();
+        assert!(err.contains("invalid CEL"));
+    }
+
+    #[test]
+    fn transform_cel_non_string_result_errors() {
+        let schema = json!({
+            "type": "object",
+            "properties": {
+                "x": {
+                    "type": "string",
+                    "x-user-input": true,
+                    "x-input": {"cel": "42"}
+                }
+            }
+        });
+        let fields = extract_install_fields(&schema);
+        let err = apply_install_transforms(&fields, &inputs(&[("x", "foo")])).unwrap_err();
+        assert!(err.contains("must return a string"));
     }
 
     #[test]

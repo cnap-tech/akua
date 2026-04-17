@@ -37,7 +37,7 @@
           },
           "x-input": {
             "slugify": true,
-            "template": "{{value}}.apps.example.com"
+            "cel": "value + '.apps.example.com'"
           }
         }
       },

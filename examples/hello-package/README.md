@@ -38,7 +38,9 @@ cargo run -p akua-cli -- preview \
 The `hostname` input demonstrates:
 
 - **`slugify: true`** — `"My App!"` → `"my-app"` (RFC 1123 DNS label)
-- **`template: "{{value}}.apps.example.com"`** — wraps the slug into a full hostname
+- **`cel: "value + '.apps.example.com'"`** — CEL expression; `value` is the
+  (post-slugify) input, `values` is the resolved-so-far object for
+  cross-field references.
 
 ## Status
 
