@@ -10,7 +10,7 @@ use anyhow::{bail, Context, Result};
 use clap::{ArgGroup, Parser, Subcommand};
 
 use akua_core::{
-    apply_install_transforms, build_metadata, build_umbrella_chart, extract_install_fields,
+    apply_install_transforms, build_metadata, build_umbrella_chart_in, extract_install_fields,
     load_manifest, render_umbrella, validate_values_schema, write_metadata, write_umbrella,
     PackageManifest, RenderOptions, UmbrellaChart,
 };
@@ -228,11 +228,29 @@ fn run_preview(
     Ok(())
 }
 
-fn load_package(package_dir: &Path) -> Result<(PackageManifest, UmbrellaChart)> {
+fn load_package(
+    package_dir: &Path,
+    work_dir: &Path,
+) -> Result<(PackageManifest, UmbrellaChart)> {
     let manifest = load_manifest(package_dir)
         .with_context(|| format!("loading package manifest from {}", package_dir.display()))?;
-    let umbrella = build_umbrella_chart(&manifest.name, &manifest.version, &manifest.sources)
-        .context("assembling umbrella chart")?;
+
+    // Canonicalize before we chdir — otherwise relative paths would resolve
+    // against the new cwd and land in the wrong place.
+    let abs_work = work_dir
+        .canonicalize()
+        .with_context(|| format!("resolving work dir {}", work_dir.display()))?;
+
+    // Engines that read local files (KCL entrypoints, helmfile.yaml) resolve
+    // paths relative to the package dir. Change into it so `file://./app.k`
+    // works regardless of where the CLI was invoked from.
+    let prev_cwd = std::env::current_dir()?;
+    std::env::set_current_dir(package_dir)
+        .with_context(|| format!("changing into {}", package_dir.display()))?;
+    let result = build_umbrella_chart_in(&manifest.name, &manifest.version, &manifest.sources, &abs_work)
+        .context("assembling umbrella chart");
+    std::env::set_current_dir(prev_cwd)?;
+    let umbrella = result?;
     Ok((manifest, umbrella))
 }
 
@@ -254,7 +272,9 @@ fn resolve_inputs_to_values(
 }
 
 fn run_build(package_dir: &Path, out: &Path, strip_metadata: bool) -> Result<()> {
-    let (manifest, umbrella) = load_package(package_dir)?;
+    std::fs::create_dir_all(out)
+        .with_context(|| format!("creating output dir {}", out.display()))?;
+    let (manifest, umbrella) = load_package(package_dir, out)?;
     write_umbrella(&umbrella, out).context("writing umbrella chart")?;
     println!("wrote {}/Chart.yaml + values.yaml", out.display());
 
@@ -299,7 +319,9 @@ struct RenderArgs<'a> {
 }
 
 fn run_render(args: RenderArgs<'_>) -> Result<()> {
-    let (_, umbrella) = load_package(args.package_dir)?;
+    std::fs::create_dir_all(args.out)
+        .with_context(|| format!("creating output dir {}", args.out.display()))?;
+    let (_, umbrella) = load_package(args.package_dir, args.out)?;
     let override_values =
         resolve_inputs_to_values(args.package_dir, args.inputs_inline, args.inputs_file)?;
     let opts = RenderOptions {
@@ -315,7 +337,10 @@ fn run_render(args: RenderArgs<'_>) -> Result<()> {
 }
 
 fn run_tree(package_dir: &Path) -> Result<()> {
-    let (manifest, umbrella) = load_package(package_dir)?;
+    // Engines that materialise subcharts write to a temp dir we throw away —
+    // `tree` only cares about the umbrella shape, not the rendered output.
+    let scratch = tempfile::tempdir().context("creating scratch work dir")?;
+    let (manifest, umbrella) = load_package(package_dir, scratch.path())?;
 
     println!(
         "{} {} ({} sources)",

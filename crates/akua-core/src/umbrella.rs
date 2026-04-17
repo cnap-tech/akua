@@ -12,7 +12,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::engine::{self, PreparedSource, DEFAULT_ENGINE};
+use std::path::Path;
+
+use crate::engine::{self, EngineError, PrepareContext, PreparedSource, DEFAULT_ENGINE};
 use crate::source::HelmSource;
 use crate::values::merge_helm_source_values;
 
@@ -59,18 +61,37 @@ pub struct Dependency {
 pub enum BuildError {
     #[error("source `{source_id}` specifies unknown engine `{engine}`")]
     UnknownEngine { source_id: String, engine: String },
+    #[error(transparent)]
+    Engine(#[from] EngineError),
 }
 
 /// Build an umbrella chart from a set of sources. Each source's `engine` field
-/// selects the [`Engine`] impl that prepares its umbrella entry; unknown
-/// engines surface as [`BuildError::UnknownEngine`].
+/// selects the [`Engine`] impl that prepares its umbrella entry.
+///
+/// Engines that need to write materialised chart directories (KCL, helmfile)
+/// use `work_dir`. The pure-helm default uses a placeholder path that's never
+/// written to — prefer [`build_umbrella_chart_in`] when any non-helm source
+/// is present.
 pub fn build_umbrella_chart(
     name: &str,
     version: &str,
     sources: &[HelmSource],
 ) -> Result<UmbrellaChart, BuildError> {
+    // HelmEngine ignores work_dir; other engines must use `build_umbrella_chart_in`.
+    build_umbrella_chart_in(name, version, sources, Path::new("."))
+}
+
+/// Like [`build_umbrella_chart`] but accepts a `work_dir` where engines that
+/// materialise local charts (KCL, helmfile) write their output.
+pub fn build_umbrella_chart_in(
+    name: &str,
+    version: &str,
+    sources: &[HelmSource],
+    work_dir: &Path,
+) -> Result<UmbrellaChart, BuildError> {
     let mut dependencies = Vec::new();
     let mut git_sources = Vec::new();
+    let ctx = PrepareContext { work_dir };
 
     for source in sources {
         let engine_name = source.engine.as_deref().unwrap_or(DEFAULT_ENGINE);
@@ -78,7 +99,7 @@ pub fn build_umbrella_chart(
             source_id: source.id.clone().unwrap_or_else(|| "<unnamed>".to_string()),
             engine: engine_name.to_string(),
         })?;
-        match engine.prepare(source) {
+        match engine.prepare(source, &ctx)? {
             PreparedSource::Dependency(dep) => dependencies.push(dep),
             PreparedSource::Git => git_sources.push(source.clone()),
             PreparedSource::LocalChart(path) => dependencies.push(Dependency {
