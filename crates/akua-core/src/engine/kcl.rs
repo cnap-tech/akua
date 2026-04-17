@@ -1,40 +1,44 @@
-//! KCL engine — runs the `kcl` CLI to evaluate a `.k` program, captures the
-//! rendered Kubernetes YAML, and wraps it as a static Helm chart dir.
+//! KCL engine — native Rust via `kcl-lang` (the official Rust SDK from
+//! [`kcl-lang/lib`](https://github.com/kcl-lang/lib)).
 //!
-//! Source shape:
+//! No subprocess, no fetch, no `kcl` binary on `$PATH` — just a Rust crate
+//! call that evaluates the `.k` program and returns rendered YAML. This is
+//! the CLI default; `engine-kcl-wasm` exists for the browser path where
+//! heavy Rust deps can't compile to wasm32.
+//!
+//! Source shape is identical to the wasm variant:
 //!
 //! ```yaml
 //! sources:
 //!   - id: app
 //!     engine: kcl
 //!     chart:
-//!       repoUrl: file://./app.k      # path to the .k entrypoint
-//!       targetRevision: 0.1.0        # chart version for the output
+//!       repoUrl: file://./app.k
+//!       targetRevision: 0.1.0
 //! ```
 //!
-//! The entrypoint is read from `chart.repo_url` (treating `file://` prefix as
-//! optional) or `chart.path`. The chart version is `chart.target_revision`.
-//! The chart name is `source.id`.
+//! ## Trade-offs
 //!
-//! Output is an "early-binding" static chart: `Chart.yaml` + a single
-//! `templates/rendered.yaml` containing the KCL output. No late-bindable
-//! templates — customers can't `--set` values post-build.
-//!
-//! Requires `kcl` on `$PATH`. Pin the version via `mise`.
+//! - **+** Fast (~4 ms per eval vs ~1 s wasmtime JIT).
+//! - **+** 12 MB native bin vs 22 MB (wasmtime + kcl.wasm).
+//! - **+** Zero ambient authority — no `$PATH` lookup, no env leakage.
+//! - **−** First compile ~3.5 min (deps are heavy; cached thereafter).
+//! - **−** Doesn't cross-compile to wasm32 for `akua-wasm`.
 
 use std::path::PathBuf;
-use std::process::Command;
 
 use super::{Engine, EngineError, PrepareContext, PreparedSource};
 use crate::source::HelmSource;
 use crate::umbrella::ChartYaml;
+
+pub const ENGINE_NAME: &str = "kcl";
 
 #[derive(Debug, Clone, Default)]
 pub struct KclEngine;
 
 impl Engine for KclEngine {
     fn name(&self) -> &'static str {
-        "kcl"
+        ENGINE_NAME
     }
 
     fn prepare(
@@ -43,39 +47,37 @@ impl Engine for KclEngine {
         ctx: &PrepareContext<'_>,
     ) -> Result<PreparedSource, EngineError> {
         let entrypoint = resolve_entrypoint(source)?;
+        let source_bytes = std::fs::read(&entrypoint).map_err(|e| EngineError::Write {
+            engine: ENGINE_NAME,
+            path: entrypoint.clone(),
+            source: e,
+        })?;
+        let source_code = String::from_utf8(source_bytes).map_err(|_| EngineError::Write {
+            engine: ENGINE_NAME,
+            path: entrypoint.clone(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "KCL source is not valid UTF-8",
+            ),
+        })?;
+
+        let rendered = eval_kcl(&entrypoint, &source_code)?;
+
         let source_id = source.id.clone().unwrap_or_else(|| "kcl-source".to_string());
         let chart_dir = ctx.work_dir.join(&source_id);
         let templates_dir = chart_dir.join("templates");
-
         std::fs::create_dir_all(&templates_dir).map_err(|e| EngineError::Write {
-            engine: "kcl",
+            engine: ENGINE_NAME,
             path: templates_dir.clone(),
             source: e,
         })?;
-
-        let output = Command::new("kcl")
-            .arg("run")
-            .arg(&entrypoint)
-            .output()
-            .map_err(|source| EngineError::Spawn {
-                engine: "kcl",
-                cmd: format!("kcl run {}", entrypoint.display()),
-                source,
-            })?;
-
-        if !output.status.success() {
-            return Err(EngineError::CliFailed {
-                engine: "kcl",
-                cmd: "kcl run".to_string(),
-                status: output.status.code().unwrap_or(-1),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            });
-        }
-
-        write(
-            templates_dir.join("rendered.yaml"),
-            &output.stdout,
-        )?;
+        std::fs::write(templates_dir.join("rendered.yaml"), rendered.as_bytes()).map_err(|e| {
+            EngineError::Write {
+                engine: ENGINE_NAME,
+                path: templates_dir.join("rendered.yaml"),
+                source: e,
+            }
+        })?;
 
         let chart_yaml = ChartYaml {
             api_version: "v2".to_string(),
@@ -85,11 +87,47 @@ impl Engine for KclEngine {
             chart_type: Some("application".to_string()),
             dependencies: Vec::new(),
         };
-        let chart_yaml_bytes =
-            serde_yaml::to_string(&chart_yaml).expect("ChartYaml serializes to YAML");
-        write(chart_dir.join("Chart.yaml"), chart_yaml_bytes.as_bytes())?;
+        let chart_yaml_str =
+            serde_yaml::to_string(&chart_yaml).expect("ChartYaml serializes deterministically");
+        std::fs::write(chart_dir.join("Chart.yaml"), chart_yaml_str).map_err(|e| {
+            EngineError::Write {
+                engine: ENGINE_NAME,
+                path: chart_dir.join("Chart.yaml"),
+                source: e,
+            }
+        })?;
 
         Ok(PreparedSource::LocalChart(chart_dir))
+    }
+}
+
+fn eval_kcl(filename: &std::path::Path, code: &str) -> Result<String, EngineError> {
+    use kcl_lang::{ExecProgramArgs, API};
+
+    let api = API::default();
+    let args = ExecProgramArgs {
+        k_filename_list: vec![filename.to_string_lossy().into_owned()],
+        k_code_list: vec![code.to_string()],
+        ..Default::default()
+    };
+    match api.exec_program(&args) {
+        Ok(result) => {
+            if !result.err_message.is_empty() {
+                return Err(EngineError::CliFailed {
+                    engine: ENGINE_NAME,
+                    cmd: "kcl-lang exec_program".to_string(),
+                    status: 1,
+                    stderr: result.err_message,
+                });
+            }
+            Ok(result.yaml_result)
+        }
+        Err(e) => Err(EngineError::CliFailed {
+            engine: ENGINE_NAME,
+            cmd: "kcl-lang exec_program".to_string(),
+            status: -1,
+            stderr: e.to_string(),
+        }),
     }
 }
 
@@ -100,7 +138,7 @@ fn resolve_entrypoint(source: &HelmSource) -> Result<PathBuf, EngineError> {
         p
     } else {
         return Err(EngineError::MissingField {
-            engine: "kcl",
+            engine: ENGINE_NAME,
             source_id: source.id.clone().unwrap_or_default(),
             field: "chart.repoUrl or chart.path (KCL entrypoint file)",
         });
@@ -109,57 +147,12 @@ fn resolve_entrypoint(source: &HelmSource) -> Result<PathBuf, EngineError> {
     Ok(PathBuf::from(stripped))
 }
 
-fn write(path: PathBuf, bytes: &[u8]) -> Result<(), EngineError> {
-    std::fs::write(&path, bytes).map_err(|e| EngineError::Write {
-        engine: "kcl",
-        path,
-        source: e,
-    })
-}
-
 pub(crate) static KCL_ENGINE: KclEngine = KclEngine;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::source::ChartRef;
-
-    fn src(entry: &str) -> HelmSource {
-        HelmSource {
-            id: Some("my-app".to_string()),
-            engine: Some("kcl".to_string()),
-            chart: ChartRef {
-                repo_url: format!("file://{entry}"),
-                chart: None,
-                target_revision: "0.1.0".to_string(),
-                path: None,
-            },
-            values: None,
-        }
-    }
-
-    #[test]
-    fn missing_kcl_binary_surfaces_spawn_error() {
-        let tmp = tempfile::tempdir().unwrap();
-        // Write a trivial KCL file (we don't care about its contents — kcl
-        // binary won't exist in most CI environments).
-        let k = tmp.path().join("app.k");
-        std::fs::write(&k, "foo = 1\n").unwrap();
-        let s = src(k.to_str().unwrap());
-        let ctx = PrepareContext { work_dir: tmp.path() };
-
-        let engine = KclEngine;
-        let result = engine.prepare(&s, &ctx);
-        // Either kcl isn't installed → Spawn, or it is installed and we get
-        // CliFailed or Ok. All three are legitimate; the trait contract is
-        // satisfied.
-        match result {
-            Ok(PreparedSource::LocalChart(_)) => {}
-            Err(EngineError::Spawn { .. }) => {}
-            Err(EngineError::CliFailed { .. }) => {}
-            other => panic!("unexpected: {other:?}"),
-        }
-    }
 
     #[test]
     fn missing_entrypoint_errors() {
@@ -177,6 +170,34 @@ mod tests {
         };
         let ctx = PrepareContext { work_dir: tmp.path() };
         let err = KclEngine.prepare(&s, &ctx).unwrap_err();
-        assert!(matches!(err, EngineError::MissingField { engine: "kcl", .. }));
+        assert!(matches!(err, EngineError::MissingField { .. }));
+    }
+
+    #[test]
+    fn renders_simple_kcl_program() {
+        let tmp = tempfile::tempdir().unwrap();
+        let k_file = tmp.path().join("t.k");
+        std::fs::write(&k_file, "a = 1\nb = a + 2\n").unwrap();
+        let s = HelmSource {
+            id: Some("t".to_string()),
+            engine: Some("kcl".to_string()),
+            chart: ChartRef {
+                repo_url: format!("file://{}", k_file.display()),
+                chart: None,
+                target_revision: "0.1.0".to_string(),
+                path: None,
+            },
+            values: None,
+        };
+        let ctx = PrepareContext { work_dir: tmp.path() };
+        let result = KclEngine.prepare(&s, &ctx).unwrap();
+        match result {
+            PreparedSource::LocalChart(path) => {
+                let yaml = std::fs::read_to_string(path.join("templates/rendered.yaml")).unwrap();
+                assert!(yaml.contains("a: 1"));
+                assert!(yaml.contains("b: 3"));
+            }
+            other => panic!("expected LocalChart, got {other:?}"),
+        }
     }
 }

@@ -18,27 +18,32 @@ Akua is being extracted from CNAP's internal chart generation service. See
 | **3b — helmfile engine** | ✅ Landed | Shells to `helmfile template`; static subchart; `examples/helmfile-package` |
 | **4a — OCI publish** | ✅ Landed | `akua publish` via `helm push`; returns OCI digest |
 | **4b — SLSA attestation** | ✅ Landed | `akua attest` emits SLSA v1 predicate for cosign + adjacent OCI push |
-| **5 — KCL as embedded WASM** | 🚧 Next | Replace CLI shell-out with official `kcl.wasm` via wasmtime — real determinism + browser portability |
+| **5 — KCL as native Rust** | ✅ Landed | `engine: kcl` now calls the native `kcl-lang` Rust crate (git dep). No subprocess, no fetch, 4 ms eval. Browser renders via `@kcl-lang/wasm-lib` + JS glue (akua-wasm doesn't compile a KCL engine). |
 | **6 — Install UI reference** | 🔮 Near-term | React + rjsf + WASM bindings; demos the customer-facing flow end-to-end |
 | **7 — MCP server** | 🔮 Near-term | `akua mcp` — tools for AI coding agents |
 | **8 — Helm-engine WASM** | 🔮 Multi-quarter | Go→WASM wrapper around `helm/v3/pkg/engine`, hosted via wasmtime |
 | **9 — Package Studio IDE** | 🔮 Multi-quarter | Full in-browser authoring IDE |
 | **10 — Upstream** | 🔮 Ongoing | HIP proposals to Helm (template-function plugins), Extism contributions |
 
-## Phase 5 — KCL as embedded WASM (next)
+## Phase 5 — KCL as native Rust (landed)
 
-The research in [`design-notes.md §12`](./design-notes.md#12-engine-determinism-reality-check)
-showed KCL is the only engine with a real path to in-process / WASM
-execution today. Plan:
+Research into Rust/WASM embedding paths ([design-notes.md §11](./design-notes.md#11-engine-determinism-reality-check))
+surfaced the right call: KCL's evaluator is already Rust. Linking it
+directly is cleaner than embedding `kcl.wasm` via wasmtime.
 
-- [ ] Add a `wasmtime` dep behind a new `engine-kcl-wasm` feature.
-- [ ] Pin `kcl.wasm` as a build artifact (SHA-locked).
-- [ ] Rewrite `engine::kcl` to load the module, call `kcl_run`, capture
-      output without a subprocess.
-- [ ] Make WASM the default; `engine-kcl-cli` remains as a fallback for
-      contributors who don't want the wasm runtime.
-- [ ] Verify the same `kcl.wasm` drops into `akua-wasm` so the browser
-      can render KCL packages live.
+**Shipped:**
+- `engine: kcl` uses the `kcl-lang` crate (git dep, no crates.io publish yet).
+- No subprocess, no kcl binary on `$PATH`, no wasm blob to fetch.
+- Native perf (~4ms per eval, 12MB binary).
+- First build ~3.5min; cached thereafter.
+
+**Browser handling (composed, not unified):**
+- akua-wasm does NOT include a KCL engine (heavy Rust deps can't
+  compile to wasm32).
+- Browser apps render KCL via upstream's `@kcl-lang/wasm-lib` npm
+  package and pass the rendered YAML into akua-wasm's umbrella
+  assembler via the Engine trait boundary.
+- One spec, two implementations, identical behavior.
 
 ## Phase 6 — Install UI reference
 

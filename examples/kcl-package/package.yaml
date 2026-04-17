@@ -4,7 +4,7 @@ description: Akua package authored in KCL. Engine compiles .k → static Helm ch
 
 sources:
   - id: hello
-    engine: kcl
+    engine: kcl                  # native Rust via kcl-lang/lib crate — no subprocess, no fetch
     chart:
-      repoUrl: file://./app.k      # KCL entrypoint
-      targetRevision: 0.1.0        # Chart version for the generated subchart
+      repoUrl: file://./app.k    # KCL entrypoint
+      targetRevision: 0.1.0      # Chart version for the generated subchart

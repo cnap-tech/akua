@@ -11,9 +11,11 @@ authors.workspace = true
 default = ["helm-cli", "engine-kcl", "engine-helmfile"]
 # Shell-to-helm rendering (not WASM-safe — requires std::process and tempfile).
 helm-cli = ["dep:tempfile"]
-# KCL engine plugin — shells to the `kcl` CLI. Not WASM-safe.
-engine-kcl = []
-# helmfile engine plugin — shells to `helmfile`. Not WASM-safe.
+# KCL engine — native Rust via kcl-lang/lib (git dep). Not WASM-safe;
+# browser consumers use @kcl-lang/wasm-lib on the JS side and pass rendered
+# YAML into akua-wasm's umbrella assembler separately.
+engine-kcl = ["dep:kcl-lang"]
+# helmfile engine — shells to `helmfile`. Not WASM-safe.
 engine-helmfile = []
 
 [dependencies]
@@ -31,3 +33,4 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 reqwest = { workspace = true }
 tempfile = { version = "3", optional = true }
+kcl-lang = { git = "https://github.com/kcl-lang/lib", optional = true }
