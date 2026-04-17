@@ -30,6 +30,7 @@
 
 #![allow(dead_code)]
 
+pub mod attest;
 pub mod engine;
 pub mod hash;
 pub mod manifest;
@@ -44,6 +45,7 @@ pub mod umbrella;
 pub mod values;
 
 pub use hash::hash_to_suffix;
+pub use attest::{build_provenance, SlsaProvenance};
 pub use manifest::{load_manifest, PackageManifest};
 pub use metadata::{build_metadata, AkuaMetadata};
 #[cfg(feature = "helm-cli")]

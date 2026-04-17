@@ -10,9 +10,10 @@ use anyhow::{bail, Context, Result};
 use clap::{ArgGroup, Parser, Subcommand};
 
 use akua_core::{
-    apply_install_transforms, build_metadata, build_umbrella_chart_in, extract_install_fields,
-    load_manifest, publish_chart, render_umbrella, validate_values_schema, write_metadata,
-    write_umbrella, PackageManifest, PublishOptions, RenderOptions, UmbrellaChart,
+    apply_install_transforms, build_metadata, build_provenance, build_umbrella_chart_in,
+    extract_install_fields, load_manifest, publish_chart, render_umbrella, validate_values_schema,
+    write_metadata, write_umbrella, AkuaMetadata, PackageManifest, PublishOptions, RenderOptions,
+    UmbrellaChart,
 };
 
 #[derive(Parser)]
@@ -84,6 +85,16 @@ enum Commands {
         #[arg(long, default_value = "./dist/chart")]
         chart: PathBuf,
     },
+    /// Emit a SLSA v1 provenance attestation from a built chart directory.
+    ///
+    /// The output is an unsigned predicate. Sign + push with:
+    ///     cosign attest --predicate <out> --type slsaprovenance1 <image>
+    Attest {
+        #[arg(long, default_value = "./dist/chart")]
+        chart: PathBuf,
+        #[arg(long, default_value = "./dist/attestation.json")]
+        out: PathBuf,
+    },
     /// Render the umbrella chart to Kubernetes manifests via the `helm` CLI.
     ///
     /// Shells to `helm dependency update` + `helm template`. Requires `helm`
@@ -142,6 +153,7 @@ fn main() -> Result<()> {
             strip_metadata,
         } => run_build(&package, &out, strip_metadata),
         Commands::Inspect { chart } => run_inspect(&chart),
+        Commands::Attest { chart, out } => run_attest(&chart, &out),
         Commands::Render {
             package,
             out,
@@ -321,11 +333,57 @@ fn run_publish(chart_dir: &Path, to: &str, helm_bin: &Path) -> Result<()> {
     Ok(())
 }
 
+fn read_akua_metadata(chart_dir: &Path) -> Result<AkuaMetadata> {
+    let path = chart_dir.join(".akua").join("metadata.yaml");
+    let bytes = std::fs::read(&path)
+        .with_context(|| format!("reading {} (chart built with --strip-metadata?)", path.display()))?;
+    serde_yaml::from_slice(&bytes)
+        .with_context(|| format!("parsing {} as AkuaMetadata", path.display()))
+}
+
+fn read_chart_yaml(chart_dir: &Path) -> Result<(String, String)> {
+    let path = chart_dir.join("Chart.yaml");
+    let bytes = std::fs::read(&path)
+        .with_context(|| format!("reading {}", path.display()))?;
+    let v: serde_yaml::Value = serde_yaml::from_slice(&bytes)
+        .with_context(|| format!("parsing {}", path.display()))?;
+    let name = v
+        .get("name")
+        .and_then(|x| x.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Chart.yaml missing `name`"))?
+        .to_string();
+    let version = v
+        .get("version")
+        .and_then(|x| x.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Chart.yaml missing `version`"))?
+        .to_string();
+    Ok((name, version))
+}
+
 fn run_inspect(chart_dir: &Path) -> Result<()> {
     let path = chart_dir.join(".akua").join("metadata.yaml");
     let bytes = std::fs::read(&path)
         .with_context(|| format!("reading {} (chart built with --strip-metadata?)", path.display()))?;
     print!("{}", String::from_utf8_lossy(&bytes));
+    Ok(())
+}
+
+fn run_attest(chart_dir: &Path, out: &Path) -> Result<()> {
+    let metadata = read_akua_metadata(chart_dir)?;
+    let (name, version) = read_chart_yaml(chart_dir)?;
+    let prov = build_provenance(&name, &version, &metadata);
+    let json = serde_json::to_string_pretty(&prov)?;
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    std::fs::write(out, json).with_context(|| format!("writing {}", out.display()))?;
+    println!("wrote {}", out.display());
+    println!("sign + push with:");
+    println!(
+        "  cosign attest --predicate {} --type slsaprovenance1 <image>",
+        out.display()
+    );
     Ok(())
 }
 
