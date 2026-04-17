@@ -1,0 +1,23 @@
+{
+	"name": "@akua/core",
+	"version": "0.0.0",
+	"description": "Akua core — NAPI/WASM wrapper around the Rust pipeline. Low-level; most consumers should use @akua/sdk instead.",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/cnap-tech/akua",
+		"directory": "packages/core"
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"scripts": {
+		"build": "tsc",
+		"test": "echo 'no tests yet'",
+		"lint": "echo 'no lint yet'"
+	},
+	"files": ["dist", "README.md"],
+	"publishConfig": {
+		"access": "restricted"
+	},
+	"private": true
+}

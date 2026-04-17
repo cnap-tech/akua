@@ -1,0 +1,26 @@
+{
+	"name": "@akua/sdk",
+	"version": "0.0.0",
+	"description": "Akua SDK — high-level TypeScript API for building, previewing, and deploying cloud-native packages",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/cnap-tech/akua",
+		"directory": "packages/sdk"
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"scripts": {
+		"build": "tsc",
+		"test": "echo 'no tests yet'",
+		"lint": "echo 'no lint yet'"
+	},
+	"dependencies": {
+		"@akua/core": "workspace:*"
+	},
+	"files": ["dist", "README.md"],
+	"publishConfig": {
+		"access": "restricted"
+	},
+	"private": true
+}

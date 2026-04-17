@@ -1,0 +1,43 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"$id": "https://akua.sh/schemas/values-input.schema.json",
+	"title": "Akua User-Input Extensions for JSON Schema",
+	"description": "Documents the x-user-input and x-input extensions that Akua uses on JSON Schema property definitions to mark customer-configurable values and declare input-time transforms. Placeholder — formal spec lands in v4.",
+	"type": "object",
+	"additionalProperties": true,
+	"patternProperties": {
+		"^x-user-input$": {
+			"description": "Marks a property as customer-configurable at install time. Boolean true means render this field in the deploy form.",
+			"oneOf": [
+				{ "type": "boolean" },
+				{
+					"type": "object",
+					"properties": {
+						"order": {
+							"type": "integer",
+							"description": "Display order hint. Lower values render first."
+						}
+					}
+				}
+			]
+		},
+		"^x-input$": {
+			"description": "Input-time transform and validation config. Orthogonal fields, each opt-in.",
+			"type": "object",
+			"properties": {
+				"template": {
+					"type": "string",
+					"description": "Template applied to user input. Supports {{value}} (current field), {{fields.*}} (other user-input fields), {{install.*}} (install metadata like id, region, workspaceId)."
+				},
+				"slugify": {
+					"type": "boolean",
+					"description": "Apply RFC 1123 DNS-label slugification (lowercase, alphanumeric + hyphen, 63 char max)."
+				},
+				"uniqueIn": {
+					"type": "string",
+					"description": "Registry name for uniqueness check (e.g., 'hostname'). Empty means no uniqueness check."
+				}
+			}
+		}
+	}
+}

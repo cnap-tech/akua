@@ -1,0 +1,20 @@
+[package]
+name = "akua-cli"
+description = "Akua command-line tool — build, preview, test, publish cloud-native packages"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "akua"
+path = "src/main.rs"
+
+[dependencies]
+akua-core = { path = "../akua-core" }
+clap = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

@@ -1,0 +1,29 @@
+{
+	"name": "@akua/mcp",
+	"version": "0.0.0",
+	"description": "Akua MCP server — exposes package tools to Claude Code, Cursor, and any MCP-compatible AI agent",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/cnap-tech/akua",
+		"directory": "packages/mcp"
+	},
+	"bin": {
+		"akua-mcp": "./dist/bin/akua-mcp.js"
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"scripts": {
+		"build": "tsc",
+		"test": "echo 'no tests yet'",
+		"lint": "echo 'no lint yet'"
+	},
+	"dependencies": {
+		"@akua/sdk": "workspace:*"
+	},
+	"files": ["dist", "README.md"],
+	"publishConfig": {
+		"access": "restricted"
+	},
+	"private": true
+}

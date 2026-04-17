@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = [
+	"crates/akua-core",
+	"crates/akua-cli",
+	"crates/akua-wasm",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/cnap-tech/akua"
+authors = ["CNAP Tech <hello@cnap.tech>"]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# WASM / runtime (future)
+# extism = "1"
+# extism-pdk = "1"
+
+# OCI
+# oci-distribution = "0.11"
+
+# Git
+# git2 = "0.20"
+
+# HTTP
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

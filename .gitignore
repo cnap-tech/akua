@@ -1,0 +1,41 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Node
+node_modules/
+dist/
+build/
+.pnpm-store/
+.pnpm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+*.wasm.map
+pkg/
+
+# Coverage
+coverage/
+*.lcov
+
+# Claude Code worktrees
+.claude/worktrees/

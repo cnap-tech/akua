@@ -1,0 +1,26 @@
+{
+	"name": "@akua/ui",
+	"version": "0.0.0",
+	"description": "Akua UI components — Svelte primitives for editor, form preview, manifest viewer, diff",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/cnap-tech/akua",
+		"directory": "packages/ui"
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"scripts": {
+		"build": "tsc",
+		"test": "echo 'no tests yet'",
+		"lint": "echo 'no lint yet'"
+	},
+	"dependencies": {
+		"@akua/sdk": "workspace:*"
+	},
+	"files": ["dist", "README.md"],
+	"publishConfig": {
+		"access": "restricted"
+	},
+	"private": true
+}
