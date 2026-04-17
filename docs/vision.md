@@ -110,21 +110,28 @@ Manifest (mediaType: application/vnd.akua.package.v1+json)
 │     "abiVersion": "akua.tech/renderer-abi/v1",
 │     "packageName": "hello-app",
 │     "packageVersion": "0.1.0",
-│     "engine": { "name": "helm-v4", "digest": "sha256:<engine-digest>" },
-│     "schema": "sha256:<values-schema-digest>"   // refers to schema layer
+│     "celEvaluator": { "digest": "sha256:<cel-digest>" },
+│     "engine":       { "name": "helm-v4", "digest": "sha256:<engine-digest>" }
 │   }
-├── layer 0  (application/vnd.akua.engine.v1+wasm)
-│   → akua-engine.wasm  (deterministic digest; shared across all packages
-│                         using the same engine version)
-├── layer 1  (application/vnd.akua.sources.v1.tar+gzip)
-│   → chart tarball / KCL program / etc. (package-specific)
-├── layer 2  (application/vnd.akua.schema.v1+json)
-│   → values.schema.json with x-user-input + CEL
-├── layer 3  (application/vnd.akua.metadata.v1+yaml)
+├── layer 0  (application/vnd.akua.cel-evaluator.v1+wasm)
+│   → cel-evaluator.wasm  (small; shared-digest across most packages)
+├── layer 1  (application/vnd.akua.engine.v1+wasm)
+│   → akua-engine.wasm    (~75 MB helm; shared-digest across packages using
+│                           the same engine version)
+├── layer 2  (application/vnd.akua.sources.v1.tar+gzip)
+│   → chart tarball / KCL program / helmfile.yaml (package-specific)
+├── layer 3  (application/vnd.akua.schema.v1+json)
+│   → values.schema.json with x-user-input + x-input.cel
+├── layer 4  (application/vnd.akua.metadata.v1+yaml)
 │   → .akua/metadata.yaml provenance
 └── (optional)
     referrers: [in-toto SLSA attestation blob]
 ```
+
+The CEL evaluator and the engine are **both** shared-digest layers —
+both benefit from global dedup. A registry that hosts 1000 Akua
+packages using the same CEL v1 evaluator and the same helm-v4 engine
+stores each .wasm **once**, regardless of package count.
 
 ### Size + dedup math
 
@@ -138,47 +145,112 @@ registry (ghcr, DockerHub, Harbor, ECR, …) already deduplicates
 layers by digest. Client implementations (`containerd`, `oras`,
 `docker`) already cache layers locally. No new infrastructure.
 
+### Two-layer rendering — "values that template values" + "values that template templates"
+
+A key subtlety: the bundle doesn't just run a templating engine. It
+runs **two** stages — exactly the split helmfile pioneered with
+`values.yaml.gotmpl` + chart templates, but as a standardised,
+portable primitive.
+
+| Layer | Input | What it does | Akua primitive |
+|---|---|---|---|
+| 1 — raw user inputs | Customer form values | Literal, what the user typed | `{ subdomain: "acme", env: "prod" }` |
+| 2 — **values that template values** | Layer 1 + schema | CEL expressions compute *derived* values from raw inputs | `x-input.cel` in `values.schema.json` |
+| 3 — values that template manifests | Layer 2 output | Engine renders templates into Kubernetes YAML | `helm-engine.wasm`, KCL, helmfile |
+
+**Layer 2 is what "late binding of values" means.** Today in helmfile:
+
+```yaml
+# helmfile.yaml
+releases:
+  - name: api
+    values:
+      - values.yaml.gotmpl    # ← Go-templated file, sees env + other values
+```
+
+Today in Akua:
+
+```json
+// values.schema.json
+{
+  "subdomain": {
+    "type": "string",
+    "x-user-input": {},
+    "x-input": { "cel": "value.lowerAscii() + '.' + values.env + '.apps.example.com'" }
+  }
+}
+```
+
+Same pattern — derived values computed from raw inputs + cross-field
+references — expressed as CEL (sandboxed, deterministic, Kubernetes-native
+grammar) instead of Go templates (powerful but non-deterministic by default).
+
+**In a Gen 4 bundle, both layers ship together:**
+
+- A small `cel-evaluator.wasm` layer (shared-digest across all packages
+  using CEL v1 — dedup wins again)
+- The per-engine `.wasm` (helm / kcl / helmfile)
+- The schema declaring which fields have `x-input.cel` expressions
+
+The bundle's `render()` entrypoint internally:
+
+```
+render(raw_inputs) {
+    resolved = cel_evaluator.eval(schema, raw_inputs)     // layer 2
+    manifests = engine.render(resolved)                   // layer 3
+    return manifests
+}
+```
+
+Consumer sees one call. Doesn't know or care about the internal chain.
+
 ### The renderer ABI
 
 One exported function plus a minimal memory ABI:
 
 ```
 render(
-    values_ptr: i32, values_len: i32,      // JSON-encoded values
-    release_ptr: i32, release_len: i32,    // JSON: { name, namespace, revision }
-) -> i32                                     // C-string ptr to JSON result
+    raw_inputs_ptr: i32, raw_inputs_len: i32,   // JSON-encoded raw user inputs
+    release_ptr:   i32, release_len:   i32,     // JSON: { name, namespace, revision }
+) -> i32                                         // C-string ptr to JSON result
 
-result_len(ptr: i32) -> i32                  // length of the C-string result
+result_len(ptr: i32) -> i32                      // length of the C-string result
 
-free(ptr: i32)                               // release the buffer
+free(ptr: i32)                                   // release the buffer
 ```
 
 Result JSON:
 
 ```json
 {
-  "manifests": { "<template-path>": "<rendered yaml>" },
-  "error": ""
+  "resolvedValues": { /* layer 2 output, for provenance + debugging */ },
+  "manifests":      { "<template-path>": "<rendered yaml>" },
+  "error":          ""
 }
 ```
 
-That's the whole spec. ~30 lines of documentation.
+That's the whole spec. ~40 lines of documentation.
 
 ### Consumer contract
 
 A compliant deployer:
 
 1. Pulls the package manifest via OCI.
-2. Extracts the engine layer + sources layer + schema + metadata.
-3. Instantiates the engine as a wasip1 reactor module, `_initialize`.
-4. Feeds it user values (merged per environment, components, CEL
-   transforms already applied).
-5. Reads the rendered manifests.
-6. Applies to the cluster or packages for `helm install` or
-   whatever deploy mechanism fits.
+2. Extracts all layers (engine, sources, schema, CEL evaluator,
+   metadata).
+3. Instantiates the composite bundle as a wasip1 reactor module,
+   `_initialize`.
+4. Feeds it the **raw** user inputs (from ArgoCD Application
+   `spec.source.helm.values`, Flux HelmRelease `spec.values`, or
+   equivalent).
+5. Receives rendered manifests — CEL layer 2 resolution happened
+   inside the bundle.
+6. Applies to the cluster or packages for `helm install` or whatever
+   deploy mechanism fits.
 
-No knowledge of Helm, KCL, helmfile, Kustomize required. The engine
-inside the bundle handles its own semantics.
+No knowledge of Helm, KCL, helmfile, Kustomize, CEL semantics, or
+schema validation required at the consumer. The bundle handles its
+own rendering pipeline end-to-end.
 
 ### Determinism guarantee
 
