@@ -117,6 +117,7 @@ KCL engine compiled into the browser bindings.
 
 ## See also
 
+- [Vision](./vision.md) — Gen 4 thesis (WASM renderer as universal distribution primitive) + bundle format sketch
 - [Use Cases](./use-cases.md) — end-to-end user journeys (author → install → deploy); both shared-chart and per-customer OCI models with ArgoCD YAML
 - [Design Notes](./design-notes.md) — positioning, invariants, engine determinism reality check
 - [Roadmap](./roadmap.md) — phase-by-phase status

@@ -85,6 +85,16 @@ artifacts but don't author them. Akua fills the gap between "I have
 sources + a schema + transforms" and "I have a deployable Helm chart
 ready for any OCI-aware deployer."
 
+## Where this is going
+
+Akua today ships Gen 3: Helm charts on OCI. The ambition is **Gen 4** —
+shipping the renderer alongside the sources so any deployer that speaks
+WASM can consume any package, regardless of which engine (helm / kcl /
+helmfile / kustomize / future) the author used. See
+[`docs/vision.md`](docs/vision.md) for the full four-generations framing,
+the bundle format sketch (multi-layer OCI with engine layer dedup), and
+the adoption path. Not in v1; it's what v2+ is for.
+
 ## Relationship to [CNAP](https://github.com/cnap-tech)
 
 Akua is the **open-source build layer** of CNAP's package platform. CNAP's

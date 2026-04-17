@@ -1,7 +1,9 @@
 # Roadmap
 
 Akua is being extracted from CNAP's internal chart generation service. See
-[`design-notes.md`](design-notes.md) for the *why*; this doc is the *when*.
+[`design-notes.md`](design-notes.md) for the current-design *why*,
+[`vision.md`](vision.md) for the long-range Gen 4 *ambition*; this doc is
+the *when*.
 
 ## Phase status
 
@@ -23,8 +25,10 @@ Akua is being extracted from CNAP's internal chart generation service. See
 | **7b — Native dep fetching** | ✅ Landed | `akua-core::fetch` pulls OCI + HTTP chart deps in-process (oci-client + reqwest). Replaces `helm dependency update`. Default render now has zero `helm` CLI dep. |
 | **7c — Library hardening** | ✅ Landed | Dropped `std::env::set_current_dir` in `load_package`; source paths absolutised up-front so engines are CWD-independent. Safe for concurrent / multi-threaded library use. |
 | **8 — Install UI reference** | 🔮 Near-term | React + rjsf + WASM bindings; demos the customer-facing flow end-to-end |
-| **9 — Package Studio IDE** | 🔮 Multi-quarter | Full in-browser authoring IDE |
-| **10 — Upstream** | 🔮 Ongoing | HIP proposals to Helm (template-function plugins), Extism contributions |
+| **9 — Gen 4 bundle output** | 🔮 Post-v1 | `akua publish --bundle` emits multi-layer OCI: engine.wasm (shared digest) + sources + schema + attestation. Reference consumer `akua render-bundle <oci-ref>`. See [`vision.md`](vision.md). |
+| **10 — Gen 4 ecosystem bridges** | 🔮 Post-v1 | `akua-cmp` sidecar for ArgoCD, Flux post-renderer plugin, `helm install --wasm` plugin. De-facto spec before CNCF standardisation. |
+| **11 — Package Studio IDE** | 🔮 Multi-quarter | Full in-browser authoring IDE |
+| **12 — Upstream** | 🔮 Ongoing | HIP proposals to Helm (template-function plugins), Extism contributions, CNCF TAG App Delivery spec pitch |
 
 ## Phase 5 — KCL as native Rust (landed)
 
