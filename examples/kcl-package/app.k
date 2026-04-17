@@ -8,7 +8,7 @@ metadata = {
     namespace = "default"
     labels = {
         "app.kubernetes.io/name" = "hello-kcl"
-        "akua.tech/engine" = "kcl"
+        "akua.dev/engine" = "kcl"
     }
 }
 data = {

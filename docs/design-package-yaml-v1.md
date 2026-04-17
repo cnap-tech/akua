@@ -9,7 +9,7 @@
 ## Final shape
 
 ```yaml
-apiVersion: akua.tech/v1alpha1
+apiVersion: akua.dev/v1alpha1
 
 name: hello-package
 version: 0.1.0
@@ -43,7 +43,7 @@ That's the whole format.
 
 | Decision | Final | Rationale |
 |---|---|---|
-| Schema discriminator | `apiVersion: akua.tech/v1alpha1` | Chart.yaml precedent. Group scopes ownership. `v1alpha1` carries the "expect changes" social contract. |
+| Schema discriminator | `apiVersion: akua.dev/v1alpha1` | Chart.yaml precedent. Group scopes ownership. `v1alpha1` carries the "expect changes" social contract. |
 | `kind:` / `metadata:` / `spec:` wrappers | **None.** Flat fields at top level. | Chart.yaml, Cargo.toml, package.json, Porter — every build-time manifest goes flat. CRD wrappers are for cluster resources. |
 | Package identity | `name:`, `version:`, `description:` at top | Flat like Chart.yaml. |
 | Customer-input schema | `schema: ./values.schema.json` (separate file) | Already conventional. Keeps YAML focused on composition. |
@@ -76,7 +76,7 @@ Enforced at parse time, with actionable errors:
 - **Unknown keys rejected, not silently dropped.** `source "app" has unknown field "hlem" (did you mean "helm"?)`.
 - **Required fields enforced.** `source missing required field "name"`.
 - **Name uniqueness within a package.** Two sources named `app` is an error.
-- **API version recognised.** Unknown `apiVersion:` → `unknown apiVersion "akua.tech/v2"; this akua version supports: akua.tech/v1alpha1`.
+- **API version recognised.** Unknown `apiVersion:` → `unknown apiVersion "akua.dev/v2"; this akua version supports: akua.dev/v1alpha1`.
 
 ## Deferred to v1alpha2+ (all additive)
 
@@ -131,7 +131,7 @@ correct. Ship when a concrete use case validates the evaluation semantics
 | `source.engine: helm` + `chart.repoUrl` + `chart.chart` + `chart.targetRevision` | → | `source.helm.{repo, chart, version}` |
 | `source.engine: kcl` + `chart.repoUrl` (file://) | → | `source.kcl.{entrypoint, version}` |
 | `source.engine: helmfile` + `chart.repoUrl` (file://) | → | `source.helmfile.{path, version}` |
-| No top-level `apiVersion` | → | `apiVersion: akua.tech/v1alpha1` prepended |
+| No top-level `apiVersion` | → | `apiVersion: akua.dev/v1alpha1` prepended |
 
 One-time breaking change. No published packages exist yet → migration cost
 is effectively zero. Ship with both readers for one release as a safety net;

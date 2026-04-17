@@ -123,7 +123,7 @@ pub fn build_provenance(
 
     SlsaProvenance {
         build_definition: BuildDefinition {
-            build_type: "https://akua.tech/spec/v1/build-type".to_string(),
+            build_type: "https://akua.dev/spec/v1/build-type".to_string(),
             external_parameters: ExternalParameters {
                 source: format!("{package_name}@{package_version}"),
             },

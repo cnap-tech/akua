@@ -107,7 +107,7 @@ An Akua package bundle is an OCI artifact with multi-layer manifest:
 Manifest (mediaType: application/vnd.akua.package.v1+json)
 ├── config blob  (application/vnd.akua.package.config.v1+json)
 │   {
-│     "abiVersion": "akua.tech/renderer-abi/v1",
+│     "abiVersion": "akua.dev/renderer-abi/v1",
 │     "packageName": "hello-app",
 │     "packageVersion": "0.1.0",
 │     "celEvaluator": { "digest": "sha256:<cel-digest>" },
@@ -206,20 +206,29 @@ Consumer sees one call. Doesn't know or care about the internal chain.
 
 ### The renderer ABI
 
-One exported function plus a minimal memory ABI:
+Two exported functions plus a minimal memory ABI.
 
 ```
+// Produce rendered Kubernetes manifests from raw user inputs.
 render(
     raw_inputs_ptr: i32, raw_inputs_len: i32,   // JSON-encoded raw user inputs
     release_ptr:   i32, release_len:   i32,     // JSON: { name, namespace, revision }
 ) -> i32                                         // C-string ptr to JSON result
+
+// Return the (possibly dynamic) JSON Schema for inputs, given partial
+// values already entered. Install UIs call this iteratively as users
+// type — fields can appear/disappear/become required based on other
+// values the user has already provided.
+schema(
+    partial_inputs_ptr: i32, partial_inputs_len: i32,
+) -> i32                                         // C-string ptr to JSON Schema (string)
 
 result_len(ptr: i32) -> i32                      // length of the C-string result
 
 free(ptr: i32)                                   // release the buffer
 ```
 
-Result JSON:
+**`render` result JSON:**
 
 ```json
 {
@@ -229,11 +238,41 @@ Result JSON:
 }
 ```
 
-That's the whole spec. ~40 lines of documentation.
+**`schema` result:** a JSON Schema (Draft 7) reflecting the current
+shape of the user-input form given the partial values provided. The
+same JSON Schema that `values.schema.json` embeds, but dynamically
+evaluated — so conditional fields (`if db.type == external then
+require db.host`), minimum-value rules, and enum options can all
+depend on what the user has typed so far.
 
-### Consumer contract
+That's the whole spec. ~50 lines of documentation.
 
-A compliant deployer:
+### Dynamic schemas — why they matter
+
+Static `values.schema.json` is a hard ceiling on install UIs. The
+moment you need "show field B only if A is set," authors either:
+
+1. Ship a static schema with every possible field + mark most optional
+   (poor UX — users see irrelevant fields)
+2. Use JSON Schema's `if`/`then`/`oneOf` (technically works, painful
+   to render as a form — most form libraries don't support it well)
+3. Hand-code the conditional logic in every install UI (duplication,
+   drift, and the bundle loses single-source-of-truth)
+
+A procedural `schema(partial_values)` cuts the knot. Bundle authors
+write conditional logic using CEL (already the expression language for
+transforms), compile it into the bundle's schema layer, and expose it
+via the ABI. Install UIs become dumb: pull bundle, loop calling
+`schema(current_values)` + re-render form, call `render(final)` on
+submit. Zero conditional logic in the UI itself.
+
+This is the capability no other k8s packaging format offers today.
+JSON Schema's `if`/`then` exists; procedural dynamic schemas don't.
+Akua's CEL foundation makes it nearly free to add.
+
+### Consumer contracts
+
+**Deployer (ArgoCD CMP, Flux plugin, `helm install --wasm`, etc.):**
 
 1. Pulls the package manifest via OCI.
 2. Extracts all layers (engine, sources, schema, CEL evaluator,
@@ -248,9 +287,18 @@ A compliant deployer:
 6. Applies to the cluster or packages for `helm install` or whatever
    deploy mechanism fits.
 
-No knowledge of Helm, KCL, helmfile, Kustomize, CEL semantics, or
-schema validation required at the consumer. The bundle handles its
-own rendering pipeline end-to-end.
+**Install UI (Chart Studio, customer-facing install form):**
+
+1. Pulls the bundle (or fetches just the schema + cel-evaluator layers
+   — they're small).
+2. Calls `schema({})` → initial form.
+3. User types → calls `schema({partial})` → re-renders form.
+4. On submit → calls `render(final)` → obtains manifests or submits
+   inputs to a build worker that renders server-side.
+
+Neither consumer needs to know about Helm, KCL, helmfile, Kustomize,
+CEL semantics, or JSON Schema validation. The bundle handles its own
+rendering + validation pipeline end-to-end.
 
 ### Determinism guarantee
 
@@ -283,7 +331,7 @@ multi-layer bundle instead of a single Helm chart.
 ### Near term (within Akua, no ecosystem buy-in required)
 
 1. **Spec the ABI.** Single markdown file, <50 lines. Publish as
-   `akua.tech/renderer-abi/v1`.
+   `akua.dev/renderer-abi/v1`.
 2. **Ship `akua publish --bundle`.** Second output mode alongside the
    current Helm chart. Default stays Helm chart (compat).
 3. **Ship `akua render-bundle <oci-ref>`.** Reference consumer — fetches
