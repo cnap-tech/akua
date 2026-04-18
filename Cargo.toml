@@ -52,3 +52,16 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 lto = true
 codegen-units = 1
 strip = true
+
+# Release profile tuned for CI: prioritises build wall-clock over the
+# last ~5-10% of runtime throughput. Use via `cargo build --profile
+# ci-release`. Downstream binary release uses this (see
+# .github/workflows/cli-release.yml); local `cargo build --release`
+# stays on the maxed-out profile above.
+[profile.ci-release]
+inherits = "release"
+lto = false
+codegen-units = 16
+strip = "symbols"
+debug = "line-tables-only"
+incremental = false

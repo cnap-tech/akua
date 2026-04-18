@@ -42,6 +42,24 @@ jobs:
           install: true
           cache: true
 
+      # mold — dramatically faster link on Linux. No-op on macOS.
+      # Rust 1.90 ships rust-lld as default on x86_64-linux-gnu (mold
+      # still edges it); aarch64-linux-gnu still benefits substantially.
+      - if: runner.os == 'Linux'
+        uses: rui314/setup-mold@v1
+
+      # `~/.cargo/{registry,git}` + `target/` cache. Without this,
+      # every tag push repaid the full cold-compile cost (~6 min
+      # each for heavy git deps like kcl-lang). With it, warm runs
+      # collapse to link-only time (~1-2 min). One cache per target
+      # so the 4 matrix jobs don't stomp each other under the 10 GB
+      # per-repo limit.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.target }}
+          cache-on-failure: true
+          cache-all-crates: true
+
       - name: Cross-compile for linux/arm64
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
@@ -62,13 +80,16 @@ jobs:
         run: mise exec -- task sdk:wasm
 
       - name: Build akua CLI
-        run: mise exec -- cargo build -p akua-cli --release --target ${{ matrix.target }}
+        # `ci-release` profile: lto off, codegen-units=16, symbols
+        # stripped, line-tables-only debug. Trades ~5-10% runtime
+        # perf for ~25-40% compile-time reduction. See Cargo.toml.
+        run: mise exec -- cargo build -p akua-cli --profile ci-release --target ${{ matrix.target }}
 
       - name: Package
         run: |
           name="akua-${GITHUB_REF_NAME#akua-}-${{ matrix.target }}"
           mkdir -p dist
-          cp target/${{ matrix.target }}/release/akua dist/
+          cp target/${{ matrix.target }}/ci-release/akua dist/
           cp README.md SECURITY.md LICENSE dist/ 2>/dev/null || true
           cd dist && tar -czf "${name}.tar.gz" akua README.md SECURITY.md LICENSE
           shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"

@@ -1,0 +1,19 @@
+# Cargo config — honoured by every `cargo` invocation in this workspace.
+#
+# Scope: link-time acceleration on Linux via mold. macOS uses its
+# default linker (ld-prime is already fast); no overrides there.
+# Rust 1.90+ ships rust-lld as default on x86_64-unknown-linux-gnu —
+# the mold override is a small additional win there, a larger one on
+# aarch64-unknown-linux-gnu where rust-lld isn't default yet.
+#
+# CI installs mold via `rui314/setup-mold@v1`. For local dev on Linux,
+# `apt install mold` works; on macOS mold isn't supported, so these
+# sections are silently ignored.
+
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
