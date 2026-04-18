@@ -359,17 +359,6 @@ function validateEntryPath(path: string): void {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function detectTopLevelDir(paths: Iterable<string>): string | null {
-  const roots = new Set<string>();
-  for (const p of paths) {
-    const slash = p.indexOf('/');
-    if (slash === -1) continue;
-    roots.add(p.slice(0, slash));
-  }
-  if (roots.size !== 1) return null;
-  return roots.values().next().value!;
-}
-
 function isZeroBlock(block: Uint8Array): boolean {
   for (const b of block) if (b !== 0) return false;
   return true;
@@ -377,17 +366,6 @@ function isZeroBlock(block: Uint8Array): boolean {
 
 function roundUp(n: number, to: number): number {
   return Math.ceil(n / to) * to;
-}
-
-function concat(parts: Uint8Array[]): Uint8Array {
-  const total = parts.reduce((n, p) => n + p.length, 0);
-  const out = new Uint8Array(total);
-  let off = 0;
-  for (const p of parts) {
-    out.set(p, off);
-    off += p.length;
-  }
-  return out;
 }
 
 /** Cheap two-array concat — hot-path in the streaming parser's buffer refill. */
@@ -426,21 +404,5 @@ function encode(s: string): Uint8Array {
 }
 function decode(b: Uint8Array): string {
   return textDecoder.decode(b);
-}
-
-async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
-  // Cast via unknown — newer TS narrows Blob ctor to ArrayBuffer-backed BlobPart,
-  // but Uint8Array<ArrayBufferLike> is the practical input shape everywhere.
-  const stream = new Blob([bytes as unknown as BlobPart]).stream().pipeThrough(
-    new DecompressionStream('gzip'),
-  );
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
-
-async function gzip(bytes: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([bytes as unknown as BlobPart]).stream().pipeThrough(
-    new CompressionStream('gzip'),
-  );
-  return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
