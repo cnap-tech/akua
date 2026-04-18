@@ -127,12 +127,12 @@ brew install cnap-tech/akua/akua
 # macOS / Linux — curl
 curl -fsSL https://raw.githubusercontent.com/cnap-tech/akua/main/scripts/install.sh | sh
 
+# Windows — PowerShell
+powershell -c "irm https://raw.githubusercontent.com/cnap-tech/akua/main/scripts/install.ps1 | iex"
+
 # Windows — Scoop bucket
 scoop bucket add akua https://github.com/cnap-tech/scoop-akua
 scoop install akua
-
-# Windows — PowerShell
-powershell -c "irm https://raw.githubusercontent.com/cnap-tech/akua/main/scripts/install.ps1 | iex"
 
 # Arch Linux — AUR
 yay -S akua-bin
