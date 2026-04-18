@@ -100,8 +100,10 @@ export function packChartStream(
   options: PackChartOptions = {},
 ): ReadableStream<Uint8Array> {
   const chartName = umbrella.chartYaml.name;
-  const chartYaml = scrubFileRepositories(umbrella.chartYaml);
-  const chartYamlBytes = textEncode(dumpYaml(chartYaml as unknown as Record<string, unknown>));
+  scrubFileRepositoriesInPlace(umbrella.chartYaml);
+  const chartYamlBytes = textEncode(
+    dumpYaml(umbrella.chartYaml as unknown as Record<string, unknown>),
+  );
   const valuesYamlBytes = textEncode(dumpYaml(umbrella.values));
   const { valuesSchema, metadata, signal } = options;
 
@@ -147,16 +149,10 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
  * subcharts are materialised into `charts/`, the field must be blank
  * or `helm install` rejects the chart. Mirrors CLI `akua package`.
  */
-function scrubFileRepositories(chartYaml: ChartYaml): ChartYaml {
-  if (!chartYaml.dependencies?.some((d) => d.repository.startsWith('file://'))) {
-    return chartYaml;
+function scrubFileRepositoriesInPlace(chartYaml: ChartYaml): void {
+  for (const dep of chartYaml.dependencies ?? []) {
+    if (dep.repository.startsWith('file://')) dep.repository = '';
   }
-  return {
-    ...chartYaml,
-    dependencies: chartYaml.dependencies.map((d) =>
-      d.repository.startsWith('file://') ? { ...d, repository: '' } : d,
-    ),
-  };
 }
 
 function findVersion(umbrella: UmbrellaChart, alias: string): string {

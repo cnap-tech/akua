@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 
 import {
   init,
@@ -203,6 +203,38 @@ describe('buildMetadata', () => {
   it('accepts an explicit buildTime override', () => {
     const meta = buildMetadata(makeSources(), [], { buildTime: '2026-01-01T00:00:00Z' });
     expect(meta.akua.buildTime).toBe('2026-01-01T00:00:00Z');
+  });
+});
+
+describe('pullChartStream (OCI path)', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it('returns a ReadableStream piping straight through without buffering', async () => {
+    const { pullChartStream } = await import('../src/oci.ts');
+    const layerBytes = new Uint8Array([0x1f, 0x8b, 0x08, 0x00]);
+    globalThis.fetch = (async (url: string | URL) => {
+      const u = url.toString();
+      if (u.endsWith('/manifests/1.0.0')) {
+        return new Response(
+          JSON.stringify({
+            layers: [
+              { mediaType: 'application/vnd.cncf.helm.chart.content.v1.tar+gzip', digest: 'sha256:x', size: layerBytes.byteLength },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (u.includes('/blobs/')) return new Response(layerBytes, { status: 200 });
+      return new Response(null, { status: 404 });
+    }) as unknown as typeof fetch;
+
+    const stream = await pullChartStream('oci://reg.example.com/pkg/chart:1.0.0');
+    expect(stream).toBeInstanceOf(ReadableStream);
+    const buf = new Uint8Array(await new Response(stream).arrayBuffer());
+    expect(buf).toEqual(layerBytes);
   });
 });
 

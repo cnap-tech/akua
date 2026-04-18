@@ -26,10 +26,23 @@ import type {
   UmbrellaChart,
 } from './types.js';
 
-export { pullChart, parseOciRef, parseBearerChallenge, OciPullError } from './oci.js';
+export {
+  pullChart,
+  pullChartStream,
+  parseOciRef,
+  parseBearerChallenge,
+  OciPullError,
+} from './oci.js';
 export type { OciAuth, OciCredentials, PullChartOptions } from './oci.js';
 
-export { pullHelmHttpChart, parseHelmHttpRef, findIndexEntry, HelmHttpError } from './helm-http.js';
+export {
+  pullHelmHttpChart,
+  pullHelmHttpChartStream,
+  parseHelmHttpRef,
+  findIndexEntry,
+  clearIndexCache,
+  HelmHttpError,
+} from './helm-http.js';
 export type { HelmHttpPullOptions } from './helm-http.js';
 
 export {
@@ -40,7 +53,7 @@ export {
   inspectChartBytes,
   TarError,
 } from './tar.js';
-export type { TgzInput, PackEntries } from './tar.js';
+export type { TgzInput, PackEntries, StreamTgzOptions } from './tar.js';
 
 export {
   packChart,
@@ -51,6 +64,8 @@ export {
 export type { PackChartOptions } from './chart.js';
 
 export { AkuaError, WasmInitError } from './errors.js';
+
+export { SsrfError, validateHost as validateHostSafety } from './ssrf.js';
 
 export type {
   AkuaMetadata,

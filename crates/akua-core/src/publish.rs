@@ -77,10 +77,21 @@ pub struct PublishOptions {
     pub auth: Option<BasicAuth>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct BasicAuth {
     pub username: String,
     pub password: String,
+}
+
+/// Redacted `Debug` — never surface the password in logs.
+impl std::fmt::Debug for BasicAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "BasicAuth {{ username: {:?}, password: <redacted> }}",
+            self.username
+        )
+    }
 }
 
 #[derive(Debug, Clone)]

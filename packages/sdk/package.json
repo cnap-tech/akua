@@ -1,6 +1,6 @@
 {
   "name": "@akua/sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/cnap-tech/akua",
@@ -19,6 +19,10 @@
     "./browser": {
       "types": "./src/index.browser.ts",
       "default": "./src/index.browser.ts"
+    },
+    "./cache": {
+      "types": "./src/cache.node.ts",
+      "default": "./src/cache.node.ts"
     }
   },
   "description": "TypeScript SDK for Akua — published to JSR (see jsr.json). package.json exists only for the local bun workspace + vitest runner.",

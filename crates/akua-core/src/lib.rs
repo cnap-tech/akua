@@ -43,6 +43,8 @@ pub mod publish;
 pub mod render;
 pub mod schema;
 pub mod source;
+#[cfg(feature = "fetch")]
+pub mod ssrf;
 pub mod umbrella;
 pub mod values;
 

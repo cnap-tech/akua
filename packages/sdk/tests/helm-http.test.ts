@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  clearIndexCache,
   findIndexEntry,
   HelmHttpError,
   parseHelmHttpRef,
@@ -102,6 +103,7 @@ generated: "2025-01-01T00:00:00Z"
 
 describe('pullHelmHttpChart', () => {
   const realFetch = globalThis.fetch;
+  beforeEach(() => clearIndexCache());
   afterEach(() => {
     globalThis.fetch = realFetch;
   });
@@ -150,6 +152,35 @@ describe('pullHelmHttpChart', () => {
     await expect(pullHelmHttpChart('https://charts.example.com/x:1.0.0')).rejects.toThrow(
       /digest mismatch/,
     );
+  });
+
+  it('caches index.yaml per-repo so multiple pulls share one fetch', async () => {
+    const chartBytes = new Uint8Array([0x1f, 0x8b, 0x01]);
+    const hashBuf = await crypto.subtle.digest('SHA-256', chartBytes);
+    const hex = Array.from(new Uint8Array(hashBuf))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+    const index = `entries:
+  a:
+    - version: "1.0.0"
+      digest: "sha256:${hex}"
+      urls: [https://charts.example.com/a.tgz]
+  b:
+    - version: "1.0.0"
+      digest: "sha256:${hex}"
+      urls: [https://charts.example.com/b.tgz]
+`;
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      const u = url.toString();
+      if (u.endsWith('/index.yaml')) return new Response(index, { status: 200 });
+      return new Response(chartBytes, { status: 200 });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await pullHelmHttpChart('https://charts.example.com/a:1.0.0');
+    await pullHelmHttpChart('https://charts.example.com/b:1.0.0');
+    // index.yaml + 2x chart .tgz = 3 fetches, not 4.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it('throws HelmHttpError (an AkuaError) on 404 index', async () => {

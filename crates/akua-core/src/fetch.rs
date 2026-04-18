@@ -103,15 +103,38 @@ fn env_bytes(var: &str, default: u64) -> u64 {
 /// Registry credentials applied to OCI pulls. Each entry is keyed by
 /// registry host (e.g. `"ghcr.io"`, `"registry.cnap.internal"`).
 /// Anonymous is the fallback when a repository's host isn't in the map.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct OciAuth {
     pub creds: std::collections::HashMap<String, RegistryCredentials>,
 }
 
-#[derive(Debug, Clone)]
+/// Redacted on purpose — we never want `{:?}` to reveal which hosts
+/// have creds (could leak namespace structure) or the shape of the
+/// secrets. Shows only the host count.
+impl std::fmt::Debug for OciAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "OciAuth {{ creds: <{} hosts redacted> }}", self.creds.len())
+    }
+}
+
+#[derive(Clone)]
 pub enum RegistryCredentials {
     Basic { username: String, password: String },
     Bearer(String),
+}
+
+/// Redacted `Debug` so `tracing::debug!(?creds, …)` doesn't leak
+/// passwords or tokens into logs. Usernames are kept (they're rarely
+/// sensitive) so operators can still tell which account is active.
+impl std::fmt::Debug for RegistryCredentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Basic { username, .. } => {
+                write!(f, "Basic {{ username: {username:?}, password: <redacted> }}")
+            }
+            Self::Bearer(_) => write!(f, "Bearer(<redacted>)"),
+        }
+    }
 }
 
 /// Fetch every dep in `deps` into `charts_dir/<name-or-alias>/`.
@@ -253,6 +276,7 @@ async fn fetch_one_to_file(
     auth: &OciAuth,
     scratch_dir: &Path,
 ) -> Result<(tempfile::NamedTempFile, String), FetchError> {
+    validate_repo_ssrf(&dep.repository)?;
     if dep.repository.starts_with("oci://") {
         fetch_oci_to_file(dep, auth, scratch_dir).await
     } else if dep.repository.starts_with("http://") || dep.repository.starts_with("https://") {
@@ -262,12 +286,53 @@ async fn fetch_one_to_file(
     }
 }
 
+/// Reject private/loopback/link-local IP-literal hosts in `repo`.
+/// Applies to both `oci://` and `http(s)://`. Pure URL check — DNS
+/// names pass through (network-layer egress policy is the proper
+/// mitigation for DNS-rebinding attacks).
+fn validate_repo_ssrf(repo: &str) -> Result<(), FetchError> {
+    let host = repo
+        .strip_prefix("oci://")
+        .or_else(|| repo.strip_prefix("https://"))
+        .or_else(|| repo.strip_prefix("http://"))
+        .unwrap_or(repo)
+        .split('/')
+        .next()
+        .unwrap_or("");
+    crate::ssrf::validate_host(host)
+}
+
+/// reqwest client whose redirect policy re-runs the SSRF check on
+/// every hop — prevents a public registry from 302-ing us to a
+/// private IP (cloud metadata exfil).
+fn ssrf_safe_client(max_redirects: usize) -> Result<reqwest::Client, FetchError> {
+    let policy = reqwest::redirect::Policy::custom(move |attempt| {
+        if attempt.previous().len() >= max_redirects {
+            return attempt.error("too many redirects");
+        }
+        if let Some(host) = attempt.url().host_str() {
+            if crate::ssrf::validate_host(host).is_err() {
+                return attempt.error("redirect to private-range host rejected");
+            }
+        }
+        attempt.follow()
+    });
+    reqwest::Client::builder()
+        .redirect(policy)
+        .build()
+        .map_err(|e| FetchError::Oci(format!("reqwest client: {e}")))
+}
+
 async fn fetch_http_to_file(
     dep: &Dependency,
     scratch_dir: &Path,
 ) -> Result<(tempfile::NamedTempFile, String), FetchError> {
     let url = resolve_http_chart_url(dep).await?;
-    let resp = reqwest::get(&url).await?.error_for_status()?;
+    let resp = ssrf_safe_client(5)?
+        .get(&url)
+        .send()
+        .await?
+        .error_for_status()?;
     stream_response_to_file(resp, max_download_bytes(), scratch_dir).await
 }
 
@@ -358,6 +423,7 @@ impl OciRef {
         let (host, path) = trimmed
             .split_once('/')
             .ok_or_else(|| FetchError::Oci(format!("no repository path in {repo}")))?;
+        validate_oci_host(host)?;
         let repository = if path.is_empty() {
             name.to_string()
         } else {
@@ -369,6 +435,30 @@ impl OciRef {
             tag: version.to_string(),
         })
     }
+}
+
+/// Host portion must be a bare `hostname[:port]` — no userinfo (`@`),
+/// no fragment (`#`), no query (`?`). An attacker-authored
+/// `oci://user:pass@evil.com/foo` otherwise leaks credentials in the
+/// request's URL or confuses auth header selection.
+fn validate_oci_host(host: &str) -> Result<(), FetchError> {
+    if host.is_empty() {
+        return Err(FetchError::Oci("empty host".to_string()));
+    }
+    for ch in host.chars() {
+        let ok = ch.is_ascii_alphanumeric()
+            || ch == '.'
+            || ch == '-'
+            || ch == ':'
+            || ch == '['
+            || ch == ']';
+        if !ok {
+            return Err(FetchError::Oci(format!(
+                "disallowed character `{ch}` in OCI host `{host}`"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -385,19 +475,24 @@ struct OciManifestLayer {
     size: i64,
 }
 
-/// Pick the Helm chart layer from the manifest. Falls back to the
-/// first layer when the registry omits the canonical media type — some
-/// mirrors do, and the OCI spec doesn't require it.
+/// Pick the Helm chart layer from the manifest. Strict media-type:
+/// we require the canonical Helm layer type. The previous `layers[0]`
+/// fallback let a malicious registry substitute arbitrary bytes at the
+/// layer slot; we'd unpack attacker-chosen formats into the chart dir.
 fn pick_helm_layer(manifest: &OciManifestJson) -> Result<&OciManifestLayer, FetchError> {
     const HELM_MEDIA_TYPE: &str = "application/vnd.cncf.helm.chart.content.v1.tar+gzip";
     if manifest.layers.is_empty() {
         return Err(FetchError::Oci("OCI manifest has no layers".to_string()));
     }
-    Ok(manifest
+    manifest
         .layers
         .iter()
         .find(|l| l.media_type == HELM_MEDIA_TYPE)
-        .unwrap_or(&manifest.layers[0]))
+        .ok_or_else(|| {
+            FetchError::Oci(format!(
+                "no layer with media type {HELM_MEDIA_TYPE}; registry may have served a non-Helm artifact"
+            ))
+        })
 }
 
 /// Sync wrapper over [`fetch_oci_manifest_digest`] that manages its
@@ -421,6 +516,7 @@ pub async fn fetch_oci_manifest_digest(
     parts: &OciRef,
     user_auth: &OciAuth,
 ) -> Result<String, FetchError> {
+    crate::ssrf::validate_host(&parts.host)?;
     const MANIFEST_ACCEPT: &str = "application/vnd.oci.image.manifest.v1+json, \
          application/vnd.docker.distribution.manifest.v2+json";
     let auth_header = resolve_oci_auth(parts, user_auth).await;
@@ -428,7 +524,7 @@ pub async fn fetch_oci_manifest_digest(
         "https://{}/v2/{}/manifests/{}",
         parts.host, parts.repository, parts.tag
     );
-    let http = reqwest::Client::new();
+    let http = ssrf_safe_client(5)?;
     let mut req = http
         .head(&url)
         .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT);
@@ -454,7 +550,7 @@ async fn fetch_manifest_json(
         "https://{}/v2/{}/manifests/{}",
         parts.host, parts.repository, parts.tag
     );
-    let http = reqwest::Client::new();
+    let http = ssrf_safe_client(5)?;
     let mut req = http
         .get(&url)
         .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT);
@@ -481,10 +577,7 @@ async fn stream_oci_blob_to_file(
         "https://{}/v2/{}/blobs/{}",
         parts.host, parts.repository, digest
     );
-    let http = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(5))
-        .build()
-        .map_err(|e| FetchError::Oci(format!("reqwest client: {e}")))?;
+    let http = ssrf_safe_client(5)?;
     let mut req = http.get(&url);
     if let Some(h) = auth_header {
         req = req.header(reqwest::header::AUTHORIZATION, h);
@@ -522,7 +615,7 @@ async fn anonymous_bearer_token(parts: &OciRef) -> Option<String> {
         "https://{}/v2/{}/manifests/{}",
         parts.host, parts.repository, parts.tag
     );
-    let http = reqwest::Client::new();
+    let http = ssrf_safe_client(5).ok()?;
     let probe = http.head(&manifest_url).send().await.ok()?;
     if probe.status() != reqwest::StatusCode::UNAUTHORIZED {
         return None;
@@ -590,8 +683,9 @@ fn parse_bearer_challenge(header: &str) -> Option<BearerChallenge> {
 }
 
 async fn fetch_repo_index(repo: &str) -> Result<RepoIndex, FetchError> {
+    validate_repo_ssrf(repo)?;
     let url = format!("{}/index.yaml", repo.trim_end_matches('/'));
-    let resp = reqwest::get(&url).await?.error_for_status()?;
+    let resp = ssrf_safe_client(5)?.get(&url).send().await?.error_for_status()?;
     let bytes = download_with_limit(resp, max_download_bytes()).await?;
     let index: RepoIndex = serde_yaml::from_slice(&bytes)?;
     Ok(index)
@@ -712,8 +806,9 @@ fn unpack_chart_tgz<R: std::io::Read>(
     let mut archive = tar::Archive::new(capped);
 
     // Walk entries manually so we can (a) enforce the entry-count cap,
-    // (b) reject path-traversal attempts, (c) count uncompressed bytes
-    // explicitly. `archive.unpack()` would skip all three checks.
+    // (b) reject path-traversal attempts, (c) reject symlinks/hard-links
+    // (which otherwise let a malicious chart write outside the target
+    // via `entry.unpack()` copying the header linkname verbatim).
     let mut total_entries: u64 = 0;
     for entry in archive.entries()? {
         let mut entry = entry?;
@@ -723,6 +818,23 @@ fn unpack_chart_tgz<R: std::io::Read>(
         }
         let path = entry.path()?.into_owned();
         validate_tar_entry_path(&path)?;
+        // Reject symlinks, hard links, and special files. Real Helm
+        // charts ship regular files + directories only; anything else
+        // is either a packaging mistake or an extraction escape
+        // (CVE class: tar-slip via symlink → target file read).
+        let kind = entry.header().entry_type();
+        if !matches!(
+            kind,
+            tar::EntryType::Regular | tar::EntryType::Directory | tar::EntryType::XGlobalHeader
+        ) {
+            return Err(FetchError::UnsafeEntryPath {
+                path: format!("{} (disallowed entry type: {:?})", path.display(), kind),
+            });
+        }
+        // Skip the PAX global header record itself (it's metadata, not a file).
+        if matches!(kind, tar::EntryType::XGlobalHeader) {
+            continue;
+        }
         let dest_path = tmp.path().join(&path);
         // Per-entry `unpack` doesn't create intermediate dirs, unlike the
         // one-shot `archive.unpack()`. Do it ourselves.
@@ -1071,6 +1183,43 @@ mod tests {
                 }
             ),
             "unexpected: {err:?}"
+        );
+    }
+
+    #[test]
+    fn unpack_rejects_symlink_entry() {
+        // Hand-build a tar archive with a symlink pointing at /etc/passwd.
+        // Real Helm charts never ship links; this would otherwise let a
+        // malicious package read arbitrary host files through inspect.
+        let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        {
+            let mut tar = tar::Builder::new(&mut gz);
+            let mut chart = tar::Header::new_gnu();
+            chart.set_path("mychart/Chart.yaml").unwrap();
+            chart.set_size(4);
+            chart.set_cksum();
+            tar.append(&chart, &b"a:1\n"[..]).unwrap();
+
+            let mut sym = tar::Header::new_gnu();
+            sym.set_entry_type(tar::EntryType::Symlink);
+            sym.set_path("mychart/evil.yaml").unwrap();
+            sym.set_link_name("/etc/passwd").unwrap();
+            sym.set_size(0);
+            sym.set_cksum();
+            tar.append(&sym, &[][..]).unwrap();
+            tar.finish().unwrap();
+        }
+        use std::io::Write;
+        gz.flush().unwrap();
+        let tgz = gz.finish().unwrap();
+
+        let tmp = tempfile::tempdir().unwrap();
+        let charts = tmp.path().join("charts");
+        std::fs::create_dir_all(&charts).unwrap();
+        let err = unpack_chart_tgz(&tgz[..], &charts, "x").unwrap_err();
+        assert!(
+            matches!(err, FetchError::UnsafeEntryPath { .. }),
+            "expected UnsafeEntryPath, got {err:?}"
         );
     }
 

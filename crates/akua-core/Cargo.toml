@@ -8,7 +8,12 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-default = ["helm-cli", "engine-kcl", "engine-helmfile", "publish", "helm-wasm"]
+# `engine-helmfile` is OFF by default — helmfile.yaml templates support
+# `exec`, `readFile`, `requiredEnv`, and other side-effecting Go-template
+# functions. A malicious package's helmfile can execute arbitrary
+# commands at build time. Only enable this feature when you trust every
+# package you build. See SECURITY.md §"Helmfile engine".
+default = ["helm-cli", "engine-kcl", "publish", "helm-wasm"]
 # Shell-to-helm rendering (not WASM-safe — requires std::process and tempfile).
 helm-cli = ["dep:tempfile"]
 # Embedded Helm v4 template engine via helm-engine-wasm (Go→wasip1 +

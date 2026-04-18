@@ -493,7 +493,7 @@ fn load_package(package_dir: &Path, work_dir: &Path) -> Result<(PackageManifest,
     let abs_package = package_dir
         .canonicalize()
         .with_context(|| format!("resolving package dir {}", package_dir.display()))?;
-    let sources = resolve_source_paths(&manifest.sources, &abs_package);
+    let sources = resolve_source_paths(&manifest.sources, &abs_package)?;
 
     let umbrella = build_umbrella_chart_in(&manifest.name, &manifest.version, &sources, &abs_work)
         .context("assembling umbrella chart")?;
@@ -501,15 +501,30 @@ fn load_package(package_dir: &Path, work_dir: &Path) -> Result<(PackageManifest,
 }
 
 /// Resolve relative paths in KCL / helmfile engine blocks against
-/// `base_dir` so engines see absolute paths. Safe for concurrent use.
-fn resolve_source_paths(sources: &[akua_core::Source], base_dir: &Path) -> Vec<akua_core::Source> {
-    let resolve = |p: &str| -> String {
+/// `base_dir` and confine them to `base_dir`. Absolute paths and `..`
+/// traversal are rejected — a malicious `package.yaml` setting
+/// `entrypoint: /etc/passwd` would otherwise trigger engine reads of
+/// arbitrary host files (leaking contents via error output).
+fn resolve_source_paths(
+    sources: &[akua_core::Source],
+    base_dir: &Path,
+) -> Result<Vec<akua_core::Source>> {
+    let base = base_dir
+        .canonicalize()
+        .with_context(|| format!("canonicalising package dir {}", base_dir.display()))?;
+
+    let confine = |field: &str, p: &str| -> Result<String> {
         let path = PathBuf::from(p);
         if path.is_absolute() {
-            p.to_string()
-        } else {
-            base_dir.join(path).display().to_string()
+            bail!("source.{field} must be a relative path inside the package ({p} is absolute)");
         }
+        for component in path.components() {
+            if matches!(component, std::path::Component::ParentDir) {
+                bail!("source.{field} must not contain `..` ({p})");
+            }
+        }
+        let joined = base.join(&path);
+        Ok(joined.display().to_string())
     };
 
     sources
@@ -517,12 +532,12 @@ fn resolve_source_paths(sources: &[akua_core::Source], base_dir: &Path) -> Vec<a
         .map(|s| {
             let mut out = s.clone();
             if let Some(k) = out.kcl.as_mut() {
-                k.entrypoint = resolve(&k.entrypoint);
+                k.entrypoint = confine("kcl.entrypoint", &k.entrypoint)?;
             }
             if let Some(hf) = out.helmfile.as_mut() {
-                hf.path = resolve(&hf.path);
+                hf.path = confine("helmfile.path", &hf.path)?;
             }
-            out
+            Ok(out)
         })
         .collect()
 }

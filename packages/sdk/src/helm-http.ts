@@ -12,8 +12,10 @@
 
 import { parse as parseYaml } from 'yaml';
 
+import { credentialsToAuthHeader } from './auth.js';
 import { AkuaError } from './errors.js';
-import type { OciAuth, OciCredentials } from './oci.js';
+import type { OciAuth } from './oci.js';
+import { validateHost } from './ssrf.js';
 
 export class HelmHttpError extends AkuaError {
   constructor(message: string, cause?: unknown) {
@@ -66,53 +68,131 @@ export function parseHelmHttpRef(ref: string): HelmHttpRef {
   return { repo, chart, version };
 }
 
+/**
+ * Per-repo in-flight promise cache for `index.yaml` fetches. A build
+ * pulling N dependencies from the same repo incurs exactly one network
+ * round-trip for the index. Exposed via `clearIndexCache` in tests.
+ */
+const INDEX_CACHE = new Map<string, Promise<string>>();
+
+export function clearIndexCache(): void {
+  INDEX_CACHE.clear();
+}
+
 /** Pull a chart from an HTTP(S) Helm repo. Returns raw tar+gzip bytes. */
 export async function pullHelmHttpChart(
   ref: string,
   opts: HelmHttpPullOptions = {},
 ): Promise<Uint8Array> {
+  const { bytes } = await fetchHelmHttpChart(ref, opts);
+  return bytes;
+}
+
+/**
+ * Streaming variant. Returns the chart `.tgz` as a
+ * `ReadableStream<Uint8Array>`. Digest verification is **not** performed
+ * in the streaming path — the bytes pass straight through to the
+ * consumer. Use [`pullHelmHttpChart`] when you need digest verification.
+ */
+export async function pullHelmHttpChartStream(
+  ref: string,
+  opts: HelmHttpPullOptions = {},
+): Promise<ReadableStream<Uint8Array>> {
+  const { resp } = await resolveHelmHttpChart(ref, opts);
+  if (!resp.body) {
+    throw new HelmHttpError(`chart response has no body for ${ref}`);
+  }
+  return resp.body;
+}
+
+interface ResolvedHelmHttp {
+  resp: Response;
+  chartUrl: string;
+  digest: string | null;
+}
+
+async function resolveHelmHttpChart(
+  ref: string,
+  opts: HelmHttpPullOptions,
+): Promise<ResolvedHelmHttp> {
   const { repo, chart, version } = parseHelmHttpRef(ref);
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
   const host = new URL(repo).host;
-  const authHeader = basicAuthHeader(opts.auth?.[host]);
+  validateHost(host);
+  const authHeader = credentialsToAuthHeader(opts.auth?.[host]);
 
-  const indexUrl = `${repo.replace(/\/$/, '')}/index.yaml`;
-  const indexResp = await fetch(indexUrl, {
-    headers: authHeader ? { Authorization: authHeader } : {},
-    signal: opts.signal,
-  });
-  if (!indexResp.ok) {
-    throw new HelmHttpError(`index ${indexResp.status} ${indexResp.statusText} for ${indexUrl}`);
-  }
-  const indexText = await indexResp.text();
+  const indexText = await getIndex(repo, authHeader, opts.signal);
   const entry = findIndexEntry(indexText, chart, version);
   if (!entry) {
-    throw new HelmHttpError(`chart ${chart}@${version} not found in ${indexUrl}`);
+    throw new HelmHttpError(`chart ${chart}@${version} not found in ${repo}/index.yaml`);
   }
   if (entry.urls.length === 0) {
-    throw new HelmHttpError(`no urls for chart ${chart}@${version} in ${indexUrl}`);
+    throw new HelmHttpError(`no urls for chart ${chart}@${version} in ${repo}/index.yaml`);
   }
 
   const chartUrl = resolveChartUrl(repo, entry.urls[0]!);
-  const chartResp = await fetch(chartUrl, {
+  const resp = await fetch(chartUrl, {
     headers: authHeader ? { Authorization: authHeader } : {},
     signal: opts.signal,
   });
-  if (!chartResp.ok) {
+  if (!resp.ok) {
+    throw new HelmHttpError(`chart ${resp.status} ${resp.statusText} for ${chartUrl}`);
+  }
+  // Preflight against Content-Length so servers without enforcement
+  // can't OOM the client with a gigabyte response.
+  const advertised = Number(resp.headers.get('content-length') ?? '');
+  if (Number.isFinite(advertised) && advertised > maxBytes) {
     throw new HelmHttpError(
-      `chart ${chartResp.status} ${chartResp.statusText} for ${chartUrl}`,
+      `advertised size ${advertised} > limit ${maxBytes} — override with maxBytes`,
     );
   }
-  const buf = await chartResp.arrayBuffer();
+  return { resp, chartUrl, digest: entry.digest };
+}
+
+async function fetchHelmHttpChart(
+  ref: string,
+  opts: HelmHttpPullOptions,
+): Promise<{ bytes: Uint8Array }> {
+  const { resp, chartUrl, digest } = await resolveHelmHttpChart(ref, opts);
+  const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
+  const buf = await resp.arrayBuffer();
   if (buf.byteLength > maxBytes) {
     throw new HelmHttpError(`received ${buf.byteLength} bytes, over limit ${maxBytes}`);
   }
   const bytes = new Uint8Array(buf);
-
-  if (entry.digest) {
-    await verifySha256(bytes, entry.digest, chartUrl);
+  if (digest) {
+    await verifySha256(bytes, digest, chartUrl);
   }
-  return bytes;
+  return { bytes };
+}
+
+async function getIndex(
+  repo: string,
+  authHeader: string | null,
+  signal: AbortSignal | undefined,
+): Promise<string> {
+  const key = repo;
+  const cached = INDEX_CACHE.get(key);
+  if (cached) return cached;
+  const indexUrl = `${repo.replace(/\/$/, '')}/index.yaml`;
+  const fetchPromise = fetch(indexUrl, {
+    headers: authHeader ? { Authorization: authHeader } : {},
+    signal,
+  }).then(async (resp) => {
+    if (!resp.ok) {
+      throw new HelmHttpError(`index ${resp.status} ${resp.statusText} for ${indexUrl}`);
+    }
+    return resp.text();
+  });
+  // Cache the promise (not the resolved text) so concurrent callers
+  // share the one in-flight fetch. Evict on failure so we don't
+  // permanently remember a transient error.
+  const wrapped = fetchPromise.catch((err) => {
+    INDEX_CACHE.delete(key);
+    throw err;
+  });
+  INDEX_CACHE.set(key, wrapped);
+  return wrapped;
 }
 
 function resolveChartUrl(repo: string, urlOrPath: string): string {
@@ -120,15 +200,6 @@ function resolveChartUrl(repo: string, urlOrPath: string): string {
     return urlOrPath;
   }
   return `${repo.replace(/\/$/, '')}/${urlOrPath.replace(/^\//, '')}`;
-}
-
-function basicAuthHeader(creds: OciCredentials | undefined): string | null {
-  if (!creds) return null;
-  if ('token' in creds) return `Bearer ${creds.token}`;
-  const basic = typeof Buffer !== 'undefined'
-    ? Buffer.from(`${creds.username}:${creds.password}`, 'utf8').toString('base64')
-    : btoa(unescape(encodeURIComponent(`${creds.username}:${creds.password}`)));
-  return `Basic ${basic}`;
 }
 
 async function verifySha256(bytes: Uint8Array, digest: string, source: string): Promise<void> {

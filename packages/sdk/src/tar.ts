@@ -13,6 +13,8 @@
  * malicious chart can't write outside the caller's logical scope.
  */
 
+import { parse as parseYaml } from 'yaml';
+
 import { AkuaError } from './errors.js';
 
 export class TarError extends AkuaError {
@@ -28,6 +30,29 @@ const BLOCK = 512;
 /** Accepted shapes for the tgz input. Pick what's cheapest at the call-site. */
 export type TgzInput = Uint8Array | ArrayBuffer | Blob | ReadableStream<Uint8Array>;
 
+export interface StreamTgzOptions {
+  /**
+   * Maximum number of entries. Prevents an attacker-crafted archive
+   * with millions of empty entries from exhausting CPU. Default 20 000
+   * (matches Rust `AKUA_MAX_TAR_ENTRIES`).
+   */
+  maxEntries?: number;
+  /**
+   * Maximum total decompressed bytes yielded. Protects against gzip
+   * bombs. Default 500 MB (matches Rust `AKUA_MAX_EXTRACTED_BYTES`).
+   */
+  maxTotalBytes?: number;
+  /**
+   * Maximum bytes for any single entry. Default 100 MB. Stops an entry
+   * bigger than a reasonable chart file from landing in memory.
+   */
+  maxEntryBytes?: number;
+}
+
+const DEFAULT_MAX_ENTRIES = 20_000;
+const DEFAULT_MAX_TOTAL_BYTES = 500 * 1024 * 1024;
+const DEFAULT_MAX_ENTRY_BYTES = 100 * 1024 * 1024;
+
 /**
  * Stream tar+gzip entries as they arrive. Yields `{ path, bytes }` one
  * entry at a time; peak memory is one entry's decompressed size + a
@@ -39,10 +64,16 @@ export type TgzInput = Uint8Array | ArrayBuffer | Blob | ReadableStream<Uint8Arr
  */
 export async function* streamTgzEntries(
   tgz: TgzInput,
+  options: StreamTgzOptions = {},
 ): AsyncGenerator<{ path: string; bytes: Uint8Array }, void, undefined> {
+  const maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
+  const maxTotalBytes = options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
+  const maxEntryBytes = options.maxEntryBytes ?? DEFAULT_MAX_ENTRY_BYTES;
   const source = toReadableStream(tgz).pipeThrough(new DecompressionStream('gzip'));
   const reader = source.getReader();
   let buf = new Uint8Array(0);
+  let entryCount = 0;
+  let totalBytes = 0;
 
   /** Pull until `buf` has at least `needed` bytes, or the stream ends. */
   const ensure = async (needed: number): Promise<boolean> => {
@@ -74,6 +105,21 @@ export async function* streamTgzEntries(
       if (!name) continue;
       validateEntryPath(fullPath);
 
+      if (++entryCount > maxEntries) {
+        throw new TarError(`tar entry count exceeded limit (${maxEntries})`);
+      }
+      if (size > maxEntryBytes) {
+        throw new TarError(
+          `tar entry ${fullPath} size ${size} exceeds per-entry limit ${maxEntryBytes}`,
+        );
+      }
+      totalBytes += size;
+      if (totalBytes > maxTotalBytes) {
+        throw new TarError(
+          `tar total decompressed bytes ${totalBytes} exceeds limit ${maxTotalBytes}`,
+        );
+      }
+
       const padded = roundUp(size, BLOCK);
       if (!(await ensure(padded))) {
         throw new TarError(`truncated tar: entry ${fullPath} expected ${size} bytes`);
@@ -100,9 +146,12 @@ export async function* streamTgzEntries(
  * peak usage is the full unpacked archive. Prefer the streaming API
  * for anything bigger than a typical Helm chart.
  */
-export async function unpackTgz(tgz: TgzInput): Promise<Map<string, Uint8Array>> {
+export async function unpackTgz(
+  tgz: TgzInput,
+  options: StreamTgzOptions = {},
+): Promise<Map<string, Uint8Array>> {
   const out = new Map<string, Uint8Array>();
-  for await (const { path, bytes } of streamTgzEntries(tgz)) {
+  for await (const { path, bytes } of streamTgzEntries(tgz, options)) {
     out.set(path, bytes);
   }
   return out;
@@ -387,128 +436,3 @@ async function gzip(bytes: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-/**
- * Minimal YAML-subset parser for the exact shape of Helm `Chart.yaml`
- * and `.akua/metadata.yaml` — scalar keys, nested mappings, string /
- * number / bool values, block-style lists of mappings. Not a full YAML
- * parser; using one (e.g. `yaml` npm) would balloon the SDK size and
- * pull in a regex-heavy dep.
- *
- * For anything more complex than those two files, consumers should
- * bring their own parser.
- */
-function parseYaml(text: string): unknown {
-  // Quick JSON escape hatch — some of our Chart.yaml files are
-  // JSON-compatible and that's fast + safe. Try it first.
-  const trimmed = text.trim();
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      // fall through to YAML parser
-    }
-  }
-  return parseYamlMapping(text.split(/\r?\n/));
-}
-
-function parseYamlMapping(lines: string[]): Record<string, unknown> {
-  const root: Record<string, unknown> = {};
-  parseYamlBlock(lines, 0, 0, root);
-  return root;
-}
-
-function parseYamlBlock(
-  lines: string[],
-  startLine: number,
-  indent: number,
-  out: Record<string, unknown> | unknown[],
-): number {
-  let i = startLine;
-  while (i < lines.length) {
-    const raw = lines[i]!;
-    if (raw.trim() === '' || raw.trim().startsWith('#')) {
-      i++;
-      continue;
-    }
-    const leading = raw.length - raw.trimStart().length;
-    if (leading < indent) return i;
-    const line = raw.slice(leading);
-    if (Array.isArray(out)) {
-      if (line.startsWith('- ')) {
-        const rest = line.slice(2);
-        if (rest.includes(':')) {
-          const item: Record<string, unknown> = {};
-          const [k, v] = splitKV(rest);
-          if (v !== undefined && v !== '') {
-            item[k] = coerceScalar(v);
-          } else {
-            item[k] = {};
-          }
-          i = parseYamlBlock(lines, i + 1, leading + 2, item);
-          // second-level mapping inside list — item may still be empty
-          out.push(item);
-        } else {
-          out.push(coerceScalar(rest));
-          i++;
-        }
-      } else {
-        return i;
-      }
-    } else {
-      const [k, v] = splitKV(line);
-      if (v === undefined) {
-        i++;
-        continue;
-      }
-      if (v === '') {
-        // Look ahead: `-` starts a list, otherwise a nested mapping.
-        const next = findNextContent(lines, i + 1);
-        if (next !== -1 && lines[next]!.trimStart().startsWith('- ')) {
-          const list: unknown[] = [];
-          (out as Record<string, unknown>)[k] = list;
-          i = parseYamlBlock(lines, i + 1, leading + 2, list);
-        } else {
-          const child: Record<string, unknown> = {};
-          (out as Record<string, unknown>)[k] = child;
-          i = parseYamlBlock(lines, i + 1, leading + 2, child);
-        }
-      } else {
-        (out as Record<string, unknown>)[k] = coerceScalar(v);
-        i++;
-      }
-    }
-  }
-  return i;
-}
-
-function splitKV(line: string): [string, string | undefined] {
-  const idx = line.indexOf(':');
-  if (idx === -1) return [line, undefined];
-  const key = line.slice(0, idx).trim();
-  const val = line.slice(idx + 1).trim();
-  return [key, val];
-}
-
-function coerceScalar(value: string): unknown {
-  // Strip a line-ending comment — safe because our YAML inputs are
-  // machine-generated and never contain `#` inside scalars.
-  const hashIdx = value.indexOf(' #');
-  const raw = (hashIdx >= 0 ? value.slice(0, hashIdx) : value).trim();
-  if (raw === '') return '';
-  if (raw === 'true') return true;
-  if (raw === 'false') return false;
-  if (raw === 'null' || raw === '~') return null;
-  if (/^-?\d+$/.test(raw)) return parseInt(raw, 10);
-  if (/^-?\d+\.\d+$/.test(raw)) return parseFloat(raw);
-  if (raw.startsWith('"') && raw.endsWith('"')) return raw.slice(1, -1);
-  if (raw.startsWith("'") && raw.endsWith("'")) return raw.slice(1, -1);
-  return raw;
-}
-
-function findNextContent(lines: string[], from: number): number {
-  for (let i = from; i < lines.length; i++) {
-    const t = lines[i]!.trim();
-    if (t !== '' && !t.startsWith('#')) return i;
-  }
-  return -1;
-}

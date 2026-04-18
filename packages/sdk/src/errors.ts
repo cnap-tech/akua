@@ -8,8 +8,8 @@
  */
 
 export class AkuaError extends Error {
-  constructor(message: string, readonly cause_?: unknown) {
-    super(message);
+  constructor(message: string, cause?: unknown) {
+    super(message, cause !== undefined ? { cause } : undefined);
     this.name = 'AkuaError';
   }
 }

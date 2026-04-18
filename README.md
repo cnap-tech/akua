@@ -139,20 +139,27 @@ akua attest --chart dist/chart      # SLSA v1 provenance predicate for cosign
 akua inspect --chart dist/chart     # show .akua/metadata.yaml provenance
 ```
 
-### WASM bindings (browser / Node)
+### TypeScript SDK ([@akua/sdk](https://jsr.io/@akua/sdk))
 
 ```typescript
-import * as akua from '@akua/core-wasm';
+import { init, pullChart, inspectChartBytes, buildUmbrellaChart, packChart } from '@akua/sdk';
 
-const fields = akua.extractInstallFields(schema);
-const resolved = akua.applyInstallTransforms(fields, {
-  'httpRoute.hostname': 'acme',
-});
-console.log(resolved); // { httpRoute: { hostname: "acme.apps.example.com" } }
+await init();
+
+// Pull a chart — dispatches on scheme (oci:// or https://).
+const bytes = await pullChart('oci://ghcr.io/stefanprodan/charts/podinfo:6.7.1');
+const info = await inspectChartBytes(bytes);
+
+// Compose an umbrella chart + pack a deployable .tgz, no helm CLI.
+const umbrella = buildUmbrellaChart('my-pkg', '0.1.0', sources);
+const tgz = await packChart(umbrella, subcharts, { metadata: buildMetadata(sources) });
 ```
 
 Same Rust core powers native CLI + browser live-preview — no duplicate TS
-implementation, no drift. KCL rendering in the browser uses upstream's
+implementation, no drift. Node entry (`@akua/sdk`) ships chart pull,
+inspect, umbrella assembly, pack, and `dockerConfigAuth`; browser entry
+(`@akua/sdk/browser`) is the same minus Node-only helpers. KCL rendering
+in the browser uses upstream's
 [`@kcl-lang/wasm-lib`](https://www.npmjs.com/package/@kcl-lang/wasm-lib) +
 JS glue; akua-wasm does not compile a KCL engine.
 
@@ -173,9 +180,8 @@ akua/
 │   └── helm-engine-wasm/       # Embedded Helm v4 template engine
 │                               #   (Go→wasip1, hosted via wasmtime)
 ├── packages/
-│   ├── core-wasm/              # @akua/core-wasm (built from akua-wasm)
-│   ├── core/                   # @akua/core — higher-level TS wrapper (WIP)
-│   └── sdk/ ui/                # @akua/sdk, @akua/ui (planned)
+│   ├── core-wasm/              # @akua/core-wasm (raw wasm-pack output; internal)
+│   └── sdk/                    # @akua/sdk — public TypeScript SDK (published to JSR)
 ├── examples/
 │   ├── hello-package/          # Minimal Helm chart + CEL hostname transform
 │   ├── kcl-package/            # KCL-authored component
@@ -197,13 +203,14 @@ See [`docs/roadmap.md`](docs/roadmap.md) for the full status. Landed:
 - ✅ Umbrella chart assembly; `akua build` / `tree` / `preview` / `lint`
 - ✅ CEL expressions (`x-input.cel`) with cross-field references
 - ✅ WASM bindings for browser + Node
+- ✅ [`@akua/sdk`](https://jsr.io/@akua/sdk) on JSR — pullChart (OCI + HTTP Helm), inspectChartBytes, buildUmbrellaChart, packChart, buildMetadata, dockerConfigAuth
 - ✅ Engine plugins: helm, kcl (native Rust), helmfile (CLI shim)
-- ✅ Native OCI publish (oci-client, Helm v4-compatible)
-- ✅ SLSA v1 provenance via `akua attest`
+- ✅ Native OCI publish + fetch (oci-client + raw reqwest streaming)
+- ✅ SLSA v1 provenance via `akua attest` + `.akua/metadata.yaml` sidecar
 - ✅ Embedded Helm v4 template engine + native chart-dep fetcher — **zero external CLI deps by default**
 - ✅ Library-safe (no process CWD mutation; CNAP backend can embed akua-core in a multi-threaded server)
 
-Upcoming: install UI reference (React + rjsf + `@akua/core-wasm`),
+Upcoming: install UI reference (React + rjsf + `@akua/sdk/browser`),
 Package Studio IDE, HIP proposals upstream.
 
 ## Contributing

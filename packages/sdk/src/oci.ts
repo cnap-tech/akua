@@ -41,7 +41,9 @@ const MANIFEST_ACCEPT = [
   'application/vnd.docker.distribution.manifest.v2+json',
 ].join(', ');
 
+import { credentialsToAuthHeader } from './auth.js';
 import { AkuaError } from './errors.js';
+import { validateHost } from './ssrf.js';
 
 export class OciPullError extends AkuaError {
   constructor(message: string, cause?: unknown) {
@@ -85,11 +87,37 @@ function splitLast(s: string, sep: string): [string, string | undefined] {
  * `unpackTgz` (from `./tar`) or the high-level `inspectChartBytes`.
  */
 export async function pullChart(ref: string, opts: PullChartOptions = {}): Promise<Uint8Array> {
+  const stream = await pullChartStream(ref, opts);
+  const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
+  const buf = await new Response(stream).arrayBuffer();
+  if (buf.byteLength > maxBytes) {
+    throw new OciPullError(`received ${buf.byteLength} bytes, over limit ${maxBytes}`);
+  }
+  return new Uint8Array(buf);
+}
+
+/**
+ * Streaming variant of [`pullChart`]. Returns the chart layer as a
+ * `ReadableStream<Uint8Array>` — pipe directly into `inspectChartBytes`,
+ * Convex storage uploads, or `fetch()` as a body without ever
+ * materialising the full tarball in memory. Ideal for charts where you
+ * want to `for await` over entries rather than buffer the blob.
+ *
+ * The stream is consumed lazily — network bytes land in the ReadableStream
+ * queue as they arrive. When the consumer stops reading (or calls
+ * `reader.cancel()`), the underlying fetch aborts via the shared
+ * `signal`.
+ */
+export async function pullChartStream(
+  ref: string,
+  opts: PullChartOptions = {},
+): Promise<ReadableStream<Uint8Array>> {
   if (ref.startsWith('https://') || ref.startsWith('http://')) {
-    const { pullHelmHttpChart } = await import('./helm-http.js');
-    return pullHelmHttpChart(ref, opts);
+    const { pullHelmHttpChartStream } = await import('./helm-http.js');
+    return pullHelmHttpChartStream(ref, opts);
   }
   const { host, repository, tag } = parseOciRef(ref);
+  validateHost(host);
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
   const creds = opts.auth?.[host];
   const authHeader = await resolveAuthHeader(host, repository, creds, opts.signal);
@@ -126,11 +154,10 @@ export async function pullChart(ref: string, opts: PullChartOptions = {}): Promi
       `layer ${blobResp.status} ${blobResp.statusText} for ${layer.digest}`,
     );
   }
-  const buf = await blobResp.arrayBuffer();
-  if (buf.byteLength > maxBytes) {
-    throw new OciPullError(`received ${buf.byteLength} bytes, over limit ${maxBytes}`);
+  if (!blobResp.body) {
+    throw new OciPullError(`layer response has no body for ${layer.digest}`);
   }
-  return new Uint8Array(buf);
+  return blobResp.body;
 }
 
 interface OciManifest {
@@ -145,10 +172,13 @@ function selectChartLayer(manifest: OciManifest): {
   if (!manifest.layers || manifest.layers.length === 0) {
     throw new OciPullError('manifest has no layers');
   }
-  // Prefer the explicit Helm chart layer media type; fall back to the
-  // first layer when the registry doesn't tag it (some do not).
   const tagged = manifest.layers.find((l) => l.mediaType === HELM_LAYER_MEDIA_TYPE);
-  return tagged ?? manifest.layers[0]!;
+  if (!tagged) {
+    throw new OciPullError(
+      `no layer with media type ${HELM_LAYER_MEDIA_TYPE}; registry may have served a non-Helm artifact`,
+    );
+  }
+  return tagged;
 }
 
 /**
@@ -167,11 +197,8 @@ async function resolveAuthHeader(
   creds: OciCredentials | undefined,
   signal: AbortSignal | undefined,
 ): Promise<string | null> {
-  if (creds) {
-    if ('token' in creds) return `Bearer ${creds.token}`;
-    const basic = base64Encode(`${creds.username}:${creds.password}`);
-    return `Basic ${basic}`;
-  }
+  const direct = credentialsToAuthHeader(creds);
+  if (direct) return direct;
   // Anonymous probe — mirrors fetch.rs::anonymous_bearer_for_public_pull.
   const probeUrl = `https://${host}/v2/${repository}/manifests/latest`;
   let probe: Response;
@@ -229,10 +256,3 @@ export function parseBearerChallenge(header: string): BearerChallenge | null {
   return { realm: params.realm, service: params.service, scope: params.scope };
 }
 
-function base64Encode(s: string): string {
-  // Works in Node (Buffer exists) and browsers (btoa exists).
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(s, 'utf8').toString('base64');
-  }
-  return btoa(unescape(encodeURIComponent(s)));
-}

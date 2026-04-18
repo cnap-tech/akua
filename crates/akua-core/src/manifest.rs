@@ -82,6 +82,8 @@ pub enum LoadError {
     },
     #[error("in {path}: duplicate source name `{name}` (source names must be unique)")]
     DuplicateSourceName { path: String, name: String },
+    #[error("in {path}: schema `{value}` must be a relative path inside the package (no absolute paths, no `..`)")]
+    UnsafeSchemaPath { path: String, value: String },
 }
 
 /// Load and validate `<package_dir>/package.yaml`.
@@ -121,6 +123,31 @@ fn validate_manifest(m: &PackageManifest, path: &str) -> Result<(), LoadError> {
             return Err(LoadError::DuplicateSourceName {
                 path: path.to_string(),
                 name: source.name.clone(),
+            });
+        }
+    }
+    if let Some(schema) = m.schema.as_deref() {
+        validate_schema_path(schema, path)?;
+    }
+    Ok(())
+}
+
+/// `manifest.schema` isn't wired up to any I/O today — but we validate
+/// it now so the day someone reads that path they can't be tricked
+/// into reading outside the package dir.
+fn validate_schema_path(schema: &str, path: &str) -> Result<(), LoadError> {
+    let p = Path::new(schema);
+    if p.is_absolute() {
+        return Err(LoadError::UnsafeSchemaPath {
+            path: path.to_string(),
+            value: schema.to_string(),
+        });
+    }
+    for component in p.components() {
+        if matches!(component, std::path::Component::ParentDir) {
+            return Err(LoadError::UnsafeSchemaPath {
+                path: path.to_string(),
+                value: schema.to_string(),
             });
         }
     }

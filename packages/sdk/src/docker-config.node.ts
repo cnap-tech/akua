@@ -19,6 +19,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 
+import { toHost } from './auth.js';
 import { AkuaError } from './errors.js';
 import type { OciAuth, OciCredentials } from './oci.js';
 
@@ -36,8 +37,19 @@ export interface DockerConfigAuthOptions {
    * Restrict to specific hosts — skips credential-helper lookups for
    * other hosts (which can be expensive / prompt for user). Omit to
    * resolve every host present in the config.
+   *
+   * Note: `credsStore` (if configured) is only invoked when `hosts` is
+   * set. Without `hosts` the SDK has no list of hosts to query the
+   * store for — consumers are expected to pass `hosts` when they
+   * depend on a store like `osxkeychain`.
    */
   hosts?: string[];
+  /**
+   * Per-helper timeout in ms (default 5000). Prevents a hung keychain
+   * prompt (e.g. `docker-credential-osxkeychain`) from stalling the
+   * whole pipeline. The helper process is killed on timeout.
+   */
+  helperTimeoutMs?: number;
 }
 
 interface DockerConfigFile {
@@ -67,10 +79,11 @@ export async function dockerConfigAuth(
   }
 
   const wanted = options.hosts ? new Set(options.hosts) : null;
+  const timeoutMs = options.helperTimeoutMs ?? 5000;
   const out: OciAuth = {};
 
   for (const [serverAddress, entry] of Object.entries(config.auths ?? {})) {
-    const host = hostFromServer(serverAddress);
+    const host = toHost(serverAddress);
     if (wanted && !wanted.has(host)) continue;
     const creds = credsFromAuthEntry(entry);
     if (creds) out[host] = creds;
@@ -78,20 +91,24 @@ export async function dockerConfigAuth(
 
   const helperJobs: Promise<void>[] = [];
   for (const [serverAddress, helper] of Object.entries(config.credHelpers ?? {})) {
-    const host = hostFromServer(serverAddress);
+    const host = toHost(serverAddress);
     if (wanted && !wanted.has(host)) continue;
     if (out[host]) continue;
     helperJobs.push(
-      runCredHelper(helper, serverAddress).then((creds) => {
+      runCredHelper(helper, serverAddress, timeoutMs).then((creds) => {
         if (creds) out[host] = creds;
       }),
     );
   }
+  // `credsStore` is a global fallback — but resolving it requires a
+  // per-host query. Without a `hosts` filter there's nothing to query
+  // for, so the store is skipped. Consumers depending on a store pass
+  // `hosts: [...]` so we know which to ask for.
   if (config.credsStore && wanted) {
     for (const host of wanted) {
       if (out[host]) continue;
       helperJobs.push(
-        runCredHelper(config.credsStore, host).then((creds) => {
+        runCredHelper(config.credsStore, host, timeoutMs).then((creds) => {
           if (creds) out[host] = creds;
         }),
       );
@@ -105,22 +122,6 @@ function resolveConfigPath(): string {
   const envBase = process.env.DOCKER_CONFIG;
   if (envBase) return join(envBase, 'config.json');
   return join(homedir(), '.docker', 'config.json');
-}
-
-/**
- * Strip scheme + path from a Docker `auths` key. Docker often writes
- * `https://index.docker.io/v1/` as the server address; consumers
- * dial `registry-1.docker.io` without scheme. Normalise to host.
- */
-function hostFromServer(serverAddress: string): string {
-  try {
-    const u = new URL(
-      serverAddress.includes('://') ? serverAddress : `https://${serverAddress}`,
-    );
-    return u.host;
-  } catch {
-    return serverAddress;
-  }
 }
 
 function credsFromAuthEntry(
@@ -145,26 +146,58 @@ interface CredHelperResponse {
   Secret?: string;
 }
 
-async function runCredHelper(helper: string, host: string): Promise<OciCredentials | null> {
+/**
+ * Reject `helper` values that could cause the spawn to resolve an
+ * unexpected binary (path separators) or escape into shell metachars.
+ * Docker's spec says the name is a bare identifier.
+ */
+function isValidHelperName(helper: string): boolean {
+  return /^[A-Za-z0-9._-]+$/.test(helper);
+}
+
+async function runCredHelper(
+  helper: string,
+  host: string,
+  timeoutMs: number,
+): Promise<OciCredentials | null> {
+  if (!isValidHelperName(helper)) return null;
   const binary = `docker-credential-${helper}`;
   return new Promise<OciCredentials | null>((resolve) => {
     const child = spawn(binary, ['get'], { stdio: ['pipe', 'pipe', 'pipe'] });
     const out: Buffer[] = [];
+    let settled = false;
+    const finish = (creds: OciCredentials | null): void => {
+      if (settled) return;
+      settled = true;
+      resolve(creds);
+    };
+
+    // Drain stderr to prevent the pipe buffer from filling (which would
+    // block the helper process on write).
+    child.stderr.on('data', () => {});
     child.stdout.on('data', (d: Buffer) => out.push(d));
-    child.on('error', () => resolve(null));
+    child.on('error', () => finish(null));
+
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      finish(null);
+    }, timeoutMs);
+    timer.unref?.();
+
     child.on('close', (code) => {
-      if (code !== 0) return resolve(null);
+      clearTimeout(timer);
+      if (code !== 0) return finish(null);
       try {
         const body = JSON.parse(Buffer.concat(out).toString('utf8')) as CredHelperResponse;
-        if (!body.Username || !body.Secret) return resolve(null);
-        // Per Docker spec, <token> username means Secret is an identity token.
+        if (!body.Username || !body.Secret) return finish(null);
+        // Per Docker spec, `<token>` username means Secret is an identity token.
         if (body.Username === '<token>') {
-          resolve({ token: body.Secret });
+          finish({ token: body.Secret });
         } else {
-          resolve({ username: body.Username, password: body.Secret });
+          finish({ username: body.Username, password: body.Secret });
         }
       } catch {
-        resolve(null);
+        finish(null);
       }
     });
     child.stdin.end(host);
