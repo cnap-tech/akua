@@ -8,7 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-wasmtime = "39"
+wasmtime = "43"
 wasmtime-wasi = "39"
 serde = { workspace = true }
 serde_json = { workspace = true }
