@@ -24,13 +24,14 @@
 </p>
 
 <p align="center">
-  <img alt="akua diff oci://…/podinfo:6.6.0 oci://…/podinfo:6.7.1"
-       src="docs/hero-diff.gif"
+  <img alt="akua init → akua inspect --oci → akua diff"
+       src="docs/hero.gif"
        width="840">
 </p>
 <p align="center">
-  <em>Upgrading podinfo? See what actually changed —
-  deps, defaults, schema fields — before your users do.</em>
+  <em>Scaffold a package, pull any OCI chart without <code>helm</code>,
+  diff two versions structurally — three commands, no backend,
+  no cluster.</em>
 </p>
 
 > [!WARNING]
