@@ -1,10 +1,11 @@
+apiVersion: akua.dev/v1alpha1
+
 name: kcl-package
 version: 0.1.0
 description: Akua package authored in KCL. Engine compiles .k → static Helm chart.
 
 sources:
-  - id: hello
-    engine: kcl                  # native Rust via kcl-lang/lib crate — no subprocess, no fetch
-    chart:
-      repoUrl: file://./app.k    # KCL entrypoint
-      targetRevision: 0.1.0      # Chart version for the generated subchart
+  - name: hello
+    kcl:
+      entrypoint: ./app.k
+      version: 0.1.0

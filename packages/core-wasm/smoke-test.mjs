@@ -47,14 +47,40 @@ const resolved = akua.applyInstallTransforms(fields, {
 });
 console.log('applyInstallTransforms:', JSON.stringify(resolved, null, 2));
 
-// 5. buildUmbrellaChart
+// 5. mergeValuesSchemas — combine two per-source schemas into one
+const perSourceSchemas = [
+  {
+    source: {
+      name: 'web',
+      helm: { repo: 'https://charts.example.com', chart: 'nginx', version: '1.0.0' },
+    },
+    schema: {
+      type: 'object',
+      properties: { replicaCount: { type: 'integer' } },
+    },
+  },
+  {
+    source: {
+      name: 'cache',
+      helm: { repo: 'oci://ghcr.io/org/redis', version: '7.0.0' },
+    },
+    schema: {
+      type: 'object',
+      properties: { port: { type: 'integer' } },
+    },
+  },
+];
+const mergedSchema = akua.mergeValuesSchemas(perSourceSchemas);
+console.log('mergeValuesSchemas:', JSON.stringify(mergedSchema, null, 2));
+
+// 6. buildUmbrellaChart
 const sources = [
   {
-    id: 'app',
-    chart: {
-      repoUrl: 'https://charts.bitnami.com/bitnami',
+    name: 'app',
+    helm: {
+      repo: 'https://charts.bitnami.com/bitnami',
       chart: 'nginx',
-      targetRevision: '18.1.0',
+      version: '18.1.0',
     },
     values: { replicaCount: 1 },
   },

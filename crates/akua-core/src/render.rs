@@ -288,20 +288,20 @@ fn helm_template(chart_dir: &Path, opts: &RenderOptions) -> Result<String, Rende
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::source::{ChartRef, HelmSource};
+    use crate::source::{HelmBlock, Source};
     use crate::umbrella::build_umbrella_chart;
     use serde_json::json;
 
     fn make_chart() -> UmbrellaChart {
-        let s = HelmSource {
-            id: Some("a".to_string()),
-            engine: None,
-            chart: ChartRef {
-                repo_url: "https://charts.example.com".to_string(),
+        let s = Source {
+            name: "a".to_string(),
+            helm: Some(HelmBlock {
+                repo: "https://charts.example.com".to_string(),
                 chart: Some("redis".to_string()),
-                target_revision: "7.0.0".to_string(),
-                path: None,
-            },
+                version: "7.0.0".to_string(),
+            }),
+            kcl: None,
+            helmfile: None,
             values: Some(json!({"replicaCount": 2})),
         };
         build_umbrella_chart("demo", "0.1.0", &[s]).expect("known engine")
@@ -316,7 +316,7 @@ mod tests {
         let chart_yaml = std::fs::read_to_string(tmp.path().join("Chart.yaml")).unwrap();
         assert!(chart_yaml.contains("apiVersion: v2"));
         assert!(chart_yaml.contains("name: demo"));
-        assert!(chart_yaml.contains("alias: redis-"));
+        assert!(chart_yaml.contains("alias: a"));
 
         let values_yaml = std::fs::read_to_string(tmp.path().join("values.yaml")).unwrap();
         assert!(values_yaml.contains("replicaCount: 2"));

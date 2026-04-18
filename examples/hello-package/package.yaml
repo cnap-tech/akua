@@ -1,13 +1,16 @@
+apiVersion: akua.dev/v1alpha1
+
 name: hello-package
 version: 0.1.0
 description: Minimal Akua package — one Helm chart, two user-input fields.
 
+schema: ./values.schema.json
+
 sources:
-  - id: app
-    engine: helm                 # default; shown here for clarity
-    chart:
-      repoUrl: https://charts.bitnami.com/bitnami
+  - name: app
+    helm:
+      repo: https://charts.bitnami.com/bitnami
       chart: nginx
-      targetRevision: 18.1.0
+      version: 18.1.0
     values:
       replicaCount: 1
