@@ -17,13 +17,13 @@
 use std::collections::HashMap;
 
 use akua_core::{
-    apply_install_transforms as core_apply_install_transforms,
+    apply_input_transforms as core_apply_input_transforms,
     build_metadata_at as core_build_metadata_at,
     build_umbrella_chart as core_build_umbrella_chart,
-    extract_install_fields as core_extract_install_fields, hash_to_suffix as core_hash_to_suffix,
+    extract_user_input_fields as core_extract_user_input_fields,
     merge_source_values as core_merge_source_values,
     merge_values_schemas as core_merge_values_schemas, schema::SourceWithSchema,
-    validate_values_schema as core_validate_values_schema, ExtractedInstallField, Source,
+    validate_values_schema as core_validate_values_schema, ExtractedUserInputField, Source,
 };
 use wasm_bindgen::prelude::*;
 
@@ -45,30 +45,24 @@ fn from_js<T: serde::de::DeserializeOwned>(v: JsValue) -> Result<T, JsValue> {
     serde_wasm_bindgen::from_value(v).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
-/// Deterministic short alias suffix (djb2 + base36). Used for chart aliases.
-#[wasm_bindgen(js_name = hashToSuffix)]
-pub fn hash_to_suffix(input: &str, length: usize) -> String {
-    core_hash_to_suffix(input, length)
-}
-
 /// Extract `x-user-input` / `x-install` fields from a JSON Schema.
-#[wasm_bindgen(js_name = extractInstallFields)]
-pub fn extract_install_fields(schema: JsValue) -> Result<JsValue, JsValue> {
+#[wasm_bindgen(js_name = extractUserInputFields)]
+pub fn extract_user_input_fields(schema: JsValue) -> Result<JsValue, JsValue> {
     let schema: serde_json::Value = from_js(schema)?;
-    let fields = core_extract_install_fields(&schema);
+    let fields = core_extract_user_input_fields(&schema);
     to_js(&fields)
 }
 
 /// Apply schema transforms (slugify, template substitution) to user inputs.
 ///
-/// `fields` is the output of `extractInstallFields`; `inputs` is an object
+/// `fields` is the output of `extractUserInputFields`; `inputs` is an object
 /// mapping dot-paths to string values. Returns resolved values nested by path.
-#[wasm_bindgen(js_name = applyInstallTransforms)]
-pub fn apply_install_transforms(fields: JsValue, inputs: JsValue) -> Result<JsValue, JsValue> {
-    let fields: Vec<ExtractedInstallField> = from_js(fields)?;
+#[wasm_bindgen(js_name = applyInputTransforms)]
+pub fn apply_input_transforms(fields: JsValue, inputs: JsValue) -> Result<JsValue, JsValue> {
+    let fields: Vec<ExtractedUserInputField> = from_js(fields)?;
     let inputs: HashMap<String, String> = from_js(inputs)?;
-    let resolved = core_apply_install_transforms(&fields, &inputs)
-        .map_err(|e| JsValue::from_str(&format!("apply_install_transforms: {e}")))?;
+    let resolved = core_apply_input_transforms(&fields, &inputs)
+        .map_err(|e| JsValue::from_str(&format!("apply_input_transforms: {e}")))?;
     to_js(&resolved)
 }
 
@@ -127,7 +121,7 @@ pub fn build_metadata(
     build_time: String,
 ) -> Result<JsValue, JsValue> {
     let sources: Vec<Source> = from_js(sources)?;
-    let fields: Vec<ExtractedInstallField> = from_js(fields)?;
+    let fields: Vec<ExtractedUserInputField> = from_js(fields)?;
     let metadata = core_build_metadata_at(&sources, &fields, build_time);
     to_js(&metadata)
 }

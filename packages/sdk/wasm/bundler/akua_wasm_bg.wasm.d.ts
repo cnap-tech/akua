@@ -1,11 +1,10 @@
 /* tslint:disable */
 /* eslint-disable */
 export const memory: WebAssembly.Memory;
-export const applyInstallTransforms: (a: number, b: number, c: number) => void;
+export const applyInputTransforms: (a: number, b: number, c: number) => void;
 export const buildMetadata: (a: number, b: number, c: number, d: number, e: number) => void;
 export const buildUmbrellaChart: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
-export const extractInstallFields: (a: number, b: number) => void;
-export const hashToSuffix: (a: number, b: number, c: number, d: number) => void;
+export const extractUserInputFields: (a: number, b: number) => void;
 export const mergeSourceValues: (a: number, b: number) => void;
 export const mergeValuesSchemas: (a: number, b: number) => void;
 export const validateValuesSchema: (a: number, b: number) => void;

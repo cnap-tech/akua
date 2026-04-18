@@ -7,7 +7,6 @@
 //! ## Modules
 //!
 //! Pure algorithms:
-//! - [`hash`] — djb2 hash producing short base36 suffixes for deterministic aliases.
 //! - [`source`] — helm/kcl/helmfile source representation, chart-name extraction, alias.
 //! - [`values`] — value merging with umbrella alias nesting, dot-notation paths.
 //! - [`schema`] — JSON Schema merging with `x-user-input`/`x-input` extensions,
@@ -32,7 +31,6 @@ pub mod diff;
 pub mod engine;
 #[cfg(feature = "fetch")]
 pub mod fetch;
-pub mod hash;
 pub mod manifest;
 pub mod metadata;
 #[cfg(feature = "publish")]
@@ -58,7 +56,6 @@ pub use fetch::{
     fetch_oci_manifest_digest, fetch_oci_manifest_digest_blocking, redact_userinfo, FetchError,
     FetchOptions, HttpError, LimitKind, OciAuth, OciRef, RegistryCredentials,
 };
-pub use hash::hash_to_suffix;
 pub use manifest::{load_manifest, PackageManifest};
 pub use metadata::{build_metadata, build_metadata_at, AkuaMetadata};
 #[cfg(feature = "publish")]
@@ -70,8 +67,8 @@ pub use render::render_umbrella_embedded;
 #[cfg(feature = "helm-cli")]
 pub use render::{render_umbrella, write_metadata, write_umbrella, RenderError, RenderOptions};
 pub use schema::{
-    apply_install_transforms, extract_install_fields, merge_values_schemas, validate_values_schema,
-    ExtractedInstallField, JsonSchema,
+    apply_input_transforms, extract_user_input_fields, merge_values_schemas, validate_values_schema,
+    ExtractedUserInputField, JsonSchema,
 };
 pub use source::{
     extract_chart_name_from_oci, get_source_alias, is_oci, HelmBlock, HelmfileBlock, KclBlock,
@@ -95,10 +92,3 @@ pub enum Error {
     Io(#[from] std::io::Error),
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn re_exports_compile() {
-        let _ = super::hash_to_suffix("test", 4);
-    }
-}

@@ -6,9 +6,9 @@
 //! - [`merge_values_schemas`] — combine schemas from multiple helm sources,
 //!   honoring umbrella alias rules (nest Helm/OCI under alias keys, merge
 //!   Git at root).
-//! - [`extract_install_fields`] — walk a schema and collect all properties
+//! - [`extract_user_input_fields`] — walk a schema and collect all properties
 //!   annotated with `x-user-input`, producing dot-notation paths.
-//! - [`apply_install_transforms`] — validate + transform customer-provided
+//! - [`apply_input_transforms`] — validate + transform customer-provided
 //!   values according to each field's `x-input` config (template + slugify +
 //!   uniqueness hint; uniqueness check is left to the caller).
 //! - [`validate_values_schema`] — structural validation with CNAP rules:
@@ -42,7 +42,7 @@ pub type JsonSchema = Value;
 /// canonical marker vocabulary.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ExtractedInstallField {
+pub struct ExtractedUserInputField {
     /// Dot-notation path into the resolved values tree.
     pub path: String,
     /// Raw JSON Schema node for this leaf, including any `x-*` extensions.
@@ -53,7 +53,7 @@ pub struct ExtractedInstallField {
     pub required: bool,
 }
 
-impl ExtractedInstallField {
+impl ExtractedUserInputField {
     /// CEL expression from `x-input.cel`, if any. Akua's reference
     /// transform language. Third-party bundle assemblers that use a
     /// different transform language ignore this and read their own key.
@@ -145,14 +145,14 @@ pub struct SourceWithSchema {
 }
 
 // ---------------------------------------------------------------------------
-// extract_install_fields
+// extract_user_input_fields
 // ---------------------------------------------------------------------------
 
 /// Walk a schema and extract all `x-user-input` fields with their dot paths.
 ///
 /// Fields are returned sorted by `order` (ascending); fields without an
 /// explicit order come last.
-pub fn extract_install_fields(schema: &JsonSchema) -> Vec<ExtractedInstallField> {
+pub fn extract_user_input_fields(schema: &JsonSchema) -> Vec<ExtractedUserInputField> {
     let mut out = Vec::new();
     let required = schema
         .get("required")
@@ -176,7 +176,7 @@ fn walk_schema(
     schema: &Value,
     prefix: &str,
     parent_required: &[String],
-    out: &mut Vec<ExtractedInstallField>,
+    out: &mut Vec<ExtractedUserInputField>,
 ) {
     let props = match schema.get("properties").and_then(|v| v.as_object()) {
         Some(p) => p,
@@ -192,7 +192,7 @@ fn walk_schema(
 
         if has_user_input_marker(prop) {
             let required = parent_required.iter().any(|r| r == key);
-            out.push(ExtractedInstallField {
+            out.push(ExtractedUserInputField {
                 path: path.clone(),
                 schema: prop.clone(),
                 required,
@@ -223,7 +223,7 @@ fn walk_schema(
 }
 
 // ---------------------------------------------------------------------------
-// apply_install_transforms
+// apply_input_transforms
 // ---------------------------------------------------------------------------
 
 /// Apply install-time transforms to user-provided string values.
@@ -241,8 +241,8 @@ fn walk_schema(
 ///
 /// Uniqueness checks are **not** performed here — `unique_in` is surfaced
 /// to the caller as a hint; registry integration is a platform concern.
-pub fn apply_install_transforms(
-    fields: &[ExtractedInstallField],
+pub fn apply_input_transforms(
+    fields: &[ExtractedUserInputField],
     user_values: &std::collections::HashMap<String, String>,
 ) -> Result<Value, String> {
     let mut overrides = Value::Object(Map::new());
@@ -494,7 +494,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    // --- extract_install_fields ---
+    // --- extract_user_input_fields ---
 
     #[test]
     fn cel_rejects_expressions_over_source_cap() {
@@ -517,7 +517,7 @@ mod tests {
                 "appName": {"type": "string", "title": "App", "x-user-input": true}
             }
         });
-        let fields = extract_install_fields(&schema);
+        let fields = extract_user_input_fields(&schema);
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].path, "appName");
     }
@@ -530,7 +530,7 @@ mod tests {
             "type": "object",
             "properties": {"foo": {"type": "string", "x-install": true}}
         });
-        let fields = extract_install_fields(&schema);
+        let fields = extract_user_input_fields(&schema);
         assert!(fields.is_empty(), "x-install should not produce a field");
     }
 
@@ -547,7 +547,7 @@ mod tests {
                 }
             }
         });
-        let fields = extract_install_fields(&schema);
+        let fields = extract_user_input_fields(&schema);
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].path, "config.email");
     }
@@ -567,7 +567,7 @@ mod tests {
                 }
             }
         });
-        let fields = extract_install_fields(&schema);
+        let fields = extract_user_input_fields(&schema);
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].cel(), Some("slugify(value) + '.example.com'"));
         assert_eq!(fields[0].unique_in(), Some("hostname"));
@@ -584,7 +584,7 @@ mod tests {
                 "opt": {"type": "string", "x-user-input": true}
             }
         });
-        let fields = extract_install_fields(&schema);
+        let fields = extract_user_input_fields(&schema);
         let by_path: std::collections::HashMap<_, _> =
             fields.into_iter().map(|f| (f.path.clone(), f)).collect();
         assert!(by_path["name"].required);
@@ -601,7 +601,7 @@ mod tests {
                 "third": {"type": "string", "x-user-input": true}
             }
         });
-        let fields = extract_install_fields(&schema);
+        let fields = extract_user_input_fields(&schema);
         let paths: Vec<_> = fields.iter().map(|f| f.path.clone()).collect();
         assert_eq!(paths, vec!["first", "second", "third"]);
     }
@@ -615,7 +615,7 @@ mod tests {
                 "enabled": {"type": "string", "x-user-input": true}
             }
         });
-        let fields = extract_install_fields(&schema);
+        let fields = extract_user_input_fields(&schema);
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].path, "enabled");
     }
@@ -623,10 +623,10 @@ mod tests {
     #[test]
     fn extract_returns_empty_when_no_properties() {
         let schema = json!({"type": "object"});
-        assert_eq!(extract_install_fields(&schema), vec![]);
+        assert_eq!(extract_user_input_fields(&schema), vec![]);
     }
 
-    // --- apply_install_transforms ---
+    // --- apply_input_transforms ---
 
     fn inputs(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
         pairs
@@ -641,8 +641,8 @@ mod tests {
             "type": "object",
             "properties": {"appName": {"type": "string", "x-user-input": true}}
         });
-        let fields = extract_install_fields(&schema);
-        let result = apply_install_transforms(&fields, &inputs(&[("appName", "My App")])).unwrap();
+        let fields = extract_user_input_fields(&schema);
+        let result = apply_input_transforms(&fields, &inputs(&[("appName", "My App")])).unwrap();
         assert_eq!(result, json!({"appName": "My App"}));
     }
 
@@ -658,8 +658,8 @@ mod tests {
                 }
             }
         });
-        let fields = extract_install_fields(&schema);
-        let result = apply_install_transforms(&fields, &inputs(&[("sub", "My Clinic")])).unwrap();
+        let fields = extract_user_input_fields(&schema);
+        let result = apply_input_transforms(&fields, &inputs(&[("sub", "My Clinic")])).unwrap();
         assert_eq!(result, json!({"sub": "my-clinic.lando.health"}));
     }
 
@@ -675,9 +675,9 @@ mod tests {
                 }
             }
         });
-        let fields = extract_install_fields(&schema);
+        let fields = extract_user_input_fields(&schema);
         let result =
-            apply_install_transforms(&fields, &inputs(&[("email", "admin@example.com")])).unwrap();
+            apply_input_transforms(&fields, &inputs(&[("email", "admin@example.com")])).unwrap();
         assert_eq!(result, json!({"email": "admin@example.com"}));
     }
 
@@ -697,8 +697,8 @@ mod tests {
                 }
             }
         });
-        let fields = extract_install_fields(&schema);
-        let result = apply_install_transforms(
+        let fields = extract_user_input_fields(&schema);
+        let result = apply_input_transforms(
             &fields,
             &inputs(&[("env", "staging"), ("subdomain", "acme")]),
         )
@@ -721,8 +721,8 @@ mod tests {
                 }
             }
         });
-        let fields = extract_install_fields(&schema);
-        let result = apply_install_transforms(&fields, &inputs(&[("name", "My App!")])).unwrap();
+        let fields = extract_user_input_fields(&schema);
+        let result = apply_input_transforms(&fields, &inputs(&[("name", "My App!")])).unwrap();
         assert_eq!(result, json!({"name": "my-app-prod"}));
     }
 
@@ -738,8 +738,8 @@ mod tests {
                 }
             }
         });
-        let fields = extract_install_fields(&schema);
-        let result = apply_install_transforms(&fields, &inputs(&[("x", "foo")])).unwrap();
+        let fields = extract_user_input_fields(&schema);
+        let result = apply_input_transforms(&fields, &inputs(&[("x", "foo")])).unwrap();
         assert_eq!(result, json!({"x": "foo.NEW"}));
     }
 
@@ -755,8 +755,8 @@ mod tests {
                 }
             }
         });
-        let fields = extract_install_fields(&schema);
-        let err = apply_install_transforms(&fields, &inputs(&[("x", "foo")])).unwrap_err();
+        let fields = extract_user_input_fields(&schema);
+        let err = apply_input_transforms(&fields, &inputs(&[("x", "foo")])).unwrap_err();
         assert!(err.contains("invalid CEL"));
     }
 
@@ -772,8 +772,8 @@ mod tests {
                 }
             }
         });
-        let fields = extract_install_fields(&schema);
-        let err = apply_install_transforms(&fields, &inputs(&[("x", "foo")])).unwrap_err();
+        let fields = extract_user_input_fields(&schema);
+        let err = apply_input_transforms(&fields, &inputs(&[("x", "foo")])).unwrap_err();
         assert!(err.contains("must return a string"));
     }
 
@@ -784,8 +784,8 @@ mod tests {
             "required": ["name"],
             "properties": {"name": {"type": "string", "title": "Name", "x-user-input": true}}
         });
-        let fields = extract_install_fields(&schema);
-        let err = apply_install_transforms(&fields, &inputs(&[])).unwrap_err();
+        let fields = extract_user_input_fields(&schema);
+        let err = apply_input_transforms(&fields, &inputs(&[])).unwrap_err();
         assert!(err.contains("Name"));
     }
 
@@ -795,8 +795,8 @@ mod tests {
             "type": "object",
             "properties": {"opt": {"type": "string", "x-user-input": true}}
         });
-        let fields = extract_install_fields(&schema);
-        let result = apply_install_transforms(&fields, &inputs(&[])).unwrap();
+        let fields = extract_user_input_fields(&schema);
+        let result = apply_input_transforms(&fields, &inputs(&[])).unwrap();
         assert_eq!(result, json!({}));
     }
 
@@ -807,8 +807,8 @@ mod tests {
             "required": ["name"],
             "properties": {"name": {"type": "string", "title": "Name", "x-user-input": true}}
         });
-        let fields = extract_install_fields(&schema);
-        let err = apply_install_transforms(&fields, &inputs(&[("name", "   ")])).unwrap_err();
+        let fields = extract_user_input_fields(&schema);
+        let err = apply_input_transforms(&fields, &inputs(&[("name", "   ")])).unwrap_err();
         assert!(err.contains("Name"));
     }
 
@@ -823,9 +823,9 @@ mod tests {
                 }
             }
         });
-        let fields = extract_install_fields(&schema);
+        let fields = extract_user_input_fields(&schema);
         let result =
-            apply_install_transforms(&fields, &inputs(&[("config.email", "admin@example.com")]))
+            apply_input_transforms(&fields, &inputs(&[("config.email", "admin@example.com")]))
                 .unwrap();
         assert_eq!(result, json!({"config": {"email": "admin@example.com"}}));
     }

@@ -151,7 +151,7 @@ const ref = dependencyToOciRef(dep);  // 'oci://ghcr.io/you/app:1.0.0' | null
 The "customer inputs" side of things — same primitives the CLI uses.
 
 ```ts
-import { extractInstallFields, applyInstallTransforms, validateValuesSchema } from '@akua/sdk';
+import { extractUserInputFields, applyInputTransforms, validateValuesSchema } from '@akua/sdk';
 
 const schema = {
   type: 'object',
@@ -167,10 +167,10 @@ const schema = {
 
 if (validateValuesSchema(schema)) throw new Error('bad schema');
 
-const fields = extractInstallFields(schema);
+const fields = extractUserInputFields(schema);
 // → [{ path: 'hostname', schema: {...}, required: true }]
 
-const resolved = applyInstallTransforms(fields, { hostname: 'My App!' });
+const resolved = applyInputTransforms(fields, { hostname: 'My App!' });
 // → { hostname: 'my-app.apps.example.com' }
 ```
 
@@ -224,8 +224,8 @@ try {
 
 | Function | Purpose |
 |---|---|
-| `extractInstallFields(schema)` | Walk JSON Schema, return `x-user-input` leaves. |
-| `applyInstallTransforms(fields, inputs)` | Evaluate `x-input.cel` against user inputs. |
+| `extractUserInputFields(schema)` | Walk JSON Schema, return `x-user-input` leaves. |
+| `applyInputTransforms(fields, inputs)` | Evaluate `x-input.cel` against user inputs. |
 | `validateValuesSchema(schema)` | Structural schema validation. `null` when OK. |
 
 ### Auth (Node only)
@@ -238,7 +238,6 @@ try {
 
 | Function | Purpose |
 |---|---|
-| `hashToSuffix(input, length)` | djb2 + base36 short alias suffix. |
 | `streamTgzEntries(tgz)` | Async-iterator over tar entries (low-level). |
 | `packTgzStream(chartName, entries)` | Low-level tar+gzip writer. |
 | `unpackTgz(tgz)` | Buffered tar reader (prefer `streamTgzEntries`). |

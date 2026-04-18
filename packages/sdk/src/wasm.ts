@@ -11,9 +11,8 @@
 import { WasmInitError } from './errors.js';
 
 export interface WasmApi {
-  hashToSuffix(input: string, length: number): string;
-  extractInstallFields(schema: unknown): unknown;
-  applyInstallTransforms(fields: unknown, inputs: unknown): unknown;
+  extractUserInputFields(schema: unknown): unknown;
+  applyInputTransforms(fields: unknown, inputs: unknown): unknown;
   validateValuesSchema(schema: unknown): string | null | undefined;
   mergeSourceValues(sources: unknown): unknown;
   mergeValuesSchemas(sources: unknown): unknown;

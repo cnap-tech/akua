@@ -153,7 +153,7 @@ small `values.yaml` applied at deploy time.
 2. Browser evaluates CEL live via WASM → shows resolved values as they
    type. Zero network round-trip.
 3. Customer submits.
-4. Server-side: Akua runs `applyInstallTransforms` → produces a small
+4. Server-side: Akua runs `applyInputTransforms` → produces a small
    resolved `values.yaml` (KBs).
 5. CNAP creates an ArgoCD `Application` pointing at the shared chart +
    the customer's resolved values.
@@ -382,7 +382,7 @@ their templates. Deploy-time Helm handles both. Model A works.
                                    ▼
                 ┌─────────────────────────────────────┐
                 │  Install backend (CNAP)             │
-                │  - Akua applyInstallTransforms      │
+                │  - Akua applyInputTransforms      │
                 │  - Model A: write values.yaml       │
                 │  - Model B: run full build pipeline │
                 │  - Create ArgoCD Application        │

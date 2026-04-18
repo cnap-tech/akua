@@ -4,10 +4,10 @@
 /**
  * Apply schema transforms (slugify, template substitution) to user inputs.
  *
- * `fields` is the output of `extractInstallFields`; `inputs` is an object
+ * `fields` is the output of `extractUserInputFields`; `inputs` is an object
  * mapping dot-paths to string values. Returns resolved values nested by path.
  */
-export function applyInstallTransforms(fields: any, inputs: any): any;
+export function applyInputTransforms(fields: any, inputs: any): any;
 
 /**
  * Build `.akua/metadata.yaml` provenance. Caller supplies `buildTime`
@@ -26,12 +26,7 @@ export function buildUmbrellaChart(name: string, version: string, sources: any):
 /**
  * Extract `x-user-input` / `x-install` fields from a JSON Schema.
  */
-export function extractInstallFields(schema: any): any;
-
-/**
- * Deterministic short alias suffix (djb2 + base36). Used for chart aliases.
- */
-export function hashToSuffix(input: string, length: number): string;
+export function extractUserInputFields(schema: any): any;
 
 export function init(): void;
 

@@ -148,7 +148,7 @@ Initial published SDK.
 - `unpackTgz`, `streamTgzEntries`, `packTgz`, `packTgzStream`,
   `inspectChartBytes`.
 - `buildUmbrellaChart`, `mergeSourceValues`, `mergeValuesSchemas`,
-  `extractInstallFields`, `applyInstallTransforms`,
+  `extractUserInputFields`, `applyInputTransforms`,
   `validateValuesSchema`, `hashToSuffix`.
 - `packChart` + `packChartStream`.
 - Node (`@akua/sdk`) + browser (`@akua/sdk/browser`) entries.

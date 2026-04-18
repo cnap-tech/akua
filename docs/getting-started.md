@@ -137,8 +137,8 @@ Typical consumption:
 ```js
 import * as akua from '@akua/core-wasm';
 
-const fields = akua.extractInstallFields(schema);
-const resolved = akua.applyInstallTransforms(fields, userInputs);
+const fields = akua.extractUserInputFields(schema);
+const resolved = akua.applyInputTransforms(fields, userInputs);
 ```
 
 ## Next steps

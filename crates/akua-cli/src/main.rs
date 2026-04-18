@@ -10,8 +10,8 @@ use anyhow::{bail, Context, Result};
 use clap::{ArgGroup, Parser, Subcommand};
 
 use akua_core::{
-    apply_install_transforms, build_metadata, build_provenance, build_umbrella_chart_in,
-    extract_install_fields, fetch_dependencies, load_manifest, package_chart, publish_chart,
+    apply_input_transforms, build_metadata, build_provenance, build_umbrella_chart_in,
+    extract_user_input_fields, fetch_dependencies, load_manifest, package_chart, publish_chart,
     render_umbrella, render_umbrella_embedded, validate_values_schema, write_metadata,
     write_umbrella, AkuaMetadata, PackageManifest, PublishOptions, RenderOptions, UmbrellaChart,
 };
@@ -472,7 +472,7 @@ fn load_schema(package: &Path) -> Result<serde_json::Value> {
 
 /// Accept either an inline JSON string or a path to a JSON file. The JSON must
 /// be an object whose values are strings (or null / scalars, which are coerced
-/// via `to_string`). Callers pass these straight to `apply_install_transforms`,
+/// via `to_string`). Callers pass these straight to `apply_input_transforms`,
 /// which expects `HashMap<String, String>`.
 fn load_inputs(inline: Option<&str>, file: Option<&Path>) -> Result<HashMap<String, String>> {
     let value: serde_json::Value = match (inline, file) {
@@ -517,8 +517,8 @@ fn run_preview(
     let schema = load_schema(package)?;
     validate_or_bail(&schema)?;
     let inputs = load_inputs(inputs_inline, inputs_file)?;
-    let fields = extract_install_fields(&schema);
-    let resolved = apply_install_transforms(&fields, &inputs)
+    let fields = extract_user_input_fields(&schema);
+    let resolved = apply_input_transforms(&fields, &inputs)
         .map_err(|e| anyhow::anyhow!("resolving inputs: {e}"))?;
     let out = if compact {
         serde_json::to_string(&resolved)?
@@ -601,8 +601,8 @@ fn resolve_inputs_to_values(
     let schema = load_schema(package_dir)?;
     validate_or_bail(&schema)?;
     let inputs = load_inputs(inline, file)?;
-    let fields = extract_install_fields(&schema);
-    let resolved = apply_install_transforms(&fields, &inputs)
+    let fields = extract_user_input_fields(&schema);
+    let resolved = apply_input_transforms(&fields, &inputs)
         .map_err(|e| anyhow::anyhow!("resolving inputs: {e}"))?;
     Ok(Some(resolved))
 }
@@ -659,7 +659,7 @@ fn run_build(package_dir: &Path, out: &Path, strip_metadata: bool) -> Result<()>
         let fields = load_schema(package_dir)
             .ok()
             .as_ref()
-            .map(extract_install_fields)
+            .map(extract_user_input_fields)
             .unwrap_or_default();
         let metadata = build_metadata(&manifest.sources, &fields);
         write_metadata(&metadata, out).context("writing .akua/metadata.yaml")?;
@@ -1335,7 +1335,7 @@ fn run_tree(package_dir: &Path) -> Result<()> {
 fn run_lint(package: &Path) -> Result<()> {
     let schema = load_schema(package)?;
     validate_or_bail(&schema)?;
-    let fields = extract_install_fields(&schema);
+    let fields = extract_user_input_fields(&schema);
     println!("schema ok — {} user-input field(s)", fields.len());
     for f in &fields {
         println!("  - {}", f.path);

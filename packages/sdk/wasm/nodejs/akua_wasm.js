@@ -3,16 +3,16 @@
 /**
  * Apply schema transforms (slugify, template substitution) to user inputs.
  *
- * `fields` is the output of `extractInstallFields`; `inputs` is an object
+ * `fields` is the output of `extractUserInputFields`; `inputs` is an object
  * mapping dot-paths to string values. Returns resolved values nested by path.
  * @param {any} fields
  * @param {any} inputs
  * @returns {any}
  */
-function applyInstallTransforms(fields, inputs) {
+function applyInputTransforms(fields, inputs) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.applyInstallTransforms(retptr, addHeapObject(fields), addHeapObject(inputs));
+        wasm.applyInputTransforms(retptr, addHeapObject(fields), addHeapObject(inputs));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -24,7 +24,7 @@ function applyInstallTransforms(fields, inputs) {
         wasm.__wbindgen_add_to_stack_pointer(16);
     }
 }
-exports.applyInstallTransforms = applyInstallTransforms;
+exports.applyInputTransforms = applyInputTransforms;
 
 /**
  * Build `.akua/metadata.yaml` provenance. Caller supplies `buildTime`
@@ -89,10 +89,10 @@ exports.buildUmbrellaChart = buildUmbrellaChart;
  * @param {any} schema
  * @returns {any}
  */
-function extractInstallFields(schema) {
+function extractUserInputFields(schema) {
     try {
         const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        wasm.extractInstallFields(retptr, addHeapObject(schema));
+        wasm.extractUserInputFields(retptr, addHeapObject(schema));
         var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
         var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
         var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
@@ -104,33 +104,7 @@ function extractInstallFields(schema) {
         wasm.__wbindgen_add_to_stack_pointer(16);
     }
 }
-exports.extractInstallFields = extractInstallFields;
-
-/**
- * Deterministic short alias suffix (djb2 + base36). Used for chart aliases.
- * @param {string} input
- * @param {number} length
- * @returns {string}
- */
-function hashToSuffix(input, length) {
-    let deferred2_0;
-    let deferred2_1;
-    try {
-        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
-        const ptr0 = passStringToWasm0(input, wasm.__wbindgen_export, wasm.__wbindgen_export2);
-        const len0 = WASM_VECTOR_LEN;
-        wasm.hashToSuffix(retptr, ptr0, len0, length);
-        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
-        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
-        deferred2_0 = r0;
-        deferred2_1 = r1;
-        return getStringFromWasm0(r0, r1);
-    } finally {
-        wasm.__wbindgen_add_to_stack_pointer(16);
-        wasm.__wbindgen_export4(deferred2_0, deferred2_1, 1);
-    }
-}
-exports.hashToSuffix = hashToSuffix;
+exports.extractUserInputFields = extractUserInputFields;
 
 function init() {
     wasm.init();

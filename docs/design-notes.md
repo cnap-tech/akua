@@ -340,9 +340,8 @@ time. No server round-trip. Feels instant.
 
 ### Current WASM surface
 
-- `hashToSuffix(input, length)`
-- `extractInstallFields(schema)`
-- `applyInstallTransforms(fields, inputs)` — will be upgraded to CEL
+- `extractUserInputFields(schema)`
+- `applyInputTransforms(fields, inputs)` — will be upgraded to CEL
 - `validateValuesSchema(schema)`
 - `mergeHelmSourceValues(sources)`
 - `buildUmbrellaChart(name, version, sources)`
@@ -410,7 +409,7 @@ transforms:
 | PaaS builder authors "products" | Akua package (`package.yaml` + schema + engine source) |
 | Products expose configurable settings | `x-user-input` fields in `values.schema.json` |
 | Customers see install UI on the web | React/Svelte form driven by package schema |
-| Form live-previews resolved values | WASM `applyInstallTransforms` in-browser |
+| Form live-previews resolved values | WASM `applyInputTransforms` in-browser |
 | Customer hits "Install" | Per-install values built server-side, ArgoCD Application created |
 | Deploy to cluster | ArgoCD points at `oci://…/chart@sha256:…` |
 

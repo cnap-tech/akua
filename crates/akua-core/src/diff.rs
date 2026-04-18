@@ -131,7 +131,7 @@ pub struct ValuesDiff {
 }
 
 /// Changes to `values.schema.json`. Field paths follow the same
-/// dot-notation convention as [`crate::schema::extract_install_fields`]
+/// dot-notation convention as [`crate::schema::extract_user_input_fields`]
 /// so the install wizard can cross-reference.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SchemaDiff {
@@ -442,7 +442,7 @@ impl SchemaFieldDetail {
 
 /// Walk a JSON Schema object tree and produce leaf-field details
 /// keyed by dot-notation path. Matches the convention in
-/// [`crate::schema::extract_install_fields`].
+/// [`crate::schema::extract_user_input_fields`].
 fn flatten_schema_fields(schema: &Value) -> BTreeMap<String, SchemaFieldDetail> {
     let mut out = BTreeMap::new();
     walk_schema(schema, "", &[], &mut out);

@@ -17,7 +17,7 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
-use crate::schema::ExtractedInstallField;
+use crate::schema::ExtractedUserInputField;
 use crate::source::{Source, SourceKind};
 
 /// Root of `.akua/metadata.yaml`.
@@ -61,7 +61,7 @@ pub struct TransformInfo {
 }
 
 /// Build a provenance block from a package's sources and extracted fields.
-pub fn build_metadata(sources: &[Source], fields: &[ExtractedInstallField]) -> AkuaMetadata {
+pub fn build_metadata(sources: &[Source], fields: &[ExtractedUserInputField]) -> AkuaMetadata {
     build_metadata_at(sources, fields, rfc3339_now())
 }
 
@@ -70,7 +70,7 @@ pub fn build_metadata(sources: &[Source], fields: &[ExtractedInstallField]) -> A
 /// the timestamp in (read `SOURCE_DATE_EPOCH` / `Date.now()` JS-side).
 pub fn build_metadata_at(
     sources: &[Source],
-    fields: &[ExtractedInstallField],
+    fields: &[ExtractedUserInputField],
     build_time: String,
 ) -> AkuaMetadata {
     AkuaMetadata {
@@ -123,7 +123,7 @@ fn source_info(source: &Source) -> SourceInfo {
     }
 }
 
-fn field_to_transform(field: &ExtractedInstallField) -> TransformInfo {
+fn field_to_transform(field: &ExtractedUserInputField) -> TransformInfo {
     TransformInfo {
         field: field.path.clone(),
         required: field.required,
@@ -184,12 +184,12 @@ mod tests {
         }
     }
 
-    fn field(path: &str, cel: Option<&str>) -> ExtractedInstallField {
+    fn field(path: &str, cel: Option<&str>) -> ExtractedUserInputField {
         let schema = match cel {
             Some(expr) => json!({ "x-user-input": true, "x-input": { "cel": expr } }),
             None => json!({ "x-user-input": true }),
         };
-        ExtractedInstallField {
+        ExtractedUserInputField {
             path: path.to_string(),
             schema,
             required: false,
@@ -227,7 +227,7 @@ mod tests {
     fn transforms_capture_raw_input_bag() {
         // x-input here uses Akua-reference keys (cel, uniqueIn) but the
         // metadata layer doesn't privilege them — the whole bag round-trips.
-        let f = ExtractedInstallField {
+        let f = ExtractedUserInputField {
             path: "httpRoute.hostname".to_string(),
             schema: json!({
                 "x-user-input": true,
@@ -255,7 +255,7 @@ mod tests {
     fn transforms_preserve_unknown_input_keys() {
         // Bundle authored with a non-Akua transform language — make sure
         // we don't silently drop the bag's keys.
-        let f = ExtractedInstallField {
+        let f = ExtractedUserInputField {
             path: "region".to_string(),
             schema: json!({
                 "x-user-input": true,
@@ -301,7 +301,7 @@ mod tests {
 
     #[test]
     fn transforms_omit_input_when_absent() {
-        let f = ExtractedInstallField {
+        let f = ExtractedUserInputField {
             path: "plain".to_string(),
             schema: json!({ "x-user-input": true, "type": "string" }),
             required: false,

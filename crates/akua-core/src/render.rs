@@ -52,7 +52,7 @@ pub struct RenderOptions {
     pub release_name: String,
     pub namespace: String,
     /// Values JSON merged on top of the umbrella's `values.yaml`. Typically
-    /// the output of [`apply_install_transforms`].
+    /// the output of [`apply_input_transforms`].
     pub override_values: Option<serde_json::Value>,
 }
 

@@ -3,26 +3,18 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import {
   init,
   buildUmbrellaChart,
-  extractInstallFields,
-  applyInstallTransforms,
+  extractUserInputFields,
+  applyInputTransforms,
   validateValuesSchema,
   mergeSourceValues,
   mergeValuesSchemas,
-  hashToSuffix,
-  type ExtractedInstallField,
+  type ExtractedUserInputField,
   type Source,
   type SourceWithSchema,
 } from '../src/index.node.ts';
 
 beforeAll(async () => {
   await init();
-});
-
-describe('hashToSuffix', () => {
-  it('is deterministic and respects length', () => {
-    expect(hashToSuffix('thsrc_abc123', 4)).toHaveLength(4);
-    expect(hashToSuffix('thsrc_abc123', 4)).toBe(hashToSuffix('thsrc_abc123', 4));
-  });
 });
 
 describe('buildUmbrellaChart', () => {
@@ -59,7 +51,7 @@ describe('buildUmbrellaChart', () => {
   });
 });
 
-describe('extractInstallFields + applyInstallTransforms', () => {
+describe('extractUserInputFields + applyInputTransforms', () => {
   const schema = {
     type: 'object',
     properties: {
@@ -89,14 +81,14 @@ describe('extractInstallFields + applyInstallTransforms', () => {
   };
 
   it('extracts all x-user-input leaf fields sorted by order', () => {
-    const fields = extractInstallFields(schema);
+    const fields = extractUserInputFields(schema);
     expect(fields.map((f) => f.path)).toEqual(['config.adminEmail', 'httpRoute.hostname']);
     expect(fields[0]!.required).toBe(true);
   });
 
   it('applies CEL transforms and passes through unmarked values', () => {
-    const fields = extractInstallFields(schema);
-    const resolved = applyInstallTransforms(fields, {
+    const fields = extractUserInputFields(schema);
+    const resolved = applyInputTransforms(fields, {
       'config.adminEmail': 'admin@example.com',
       'httpRoute.hostname': 'My App!',
     });
@@ -107,12 +99,12 @@ describe('extractInstallFields + applyInstallTransforms', () => {
   });
 
   it('surfaces missing-required-field errors through a thrown JsValue', () => {
-    const fields = extractInstallFields(schema);
-    expect(() => applyInstallTransforms(fields, { 'config.adminEmail': '' })).toThrow();
+    const fields = extractUserInputFields(schema);
+    expect(() => applyInputTransforms(fields, { 'config.adminEmail': '' })).toThrow();
   });
 
   it('preserves the raw x-input bag so consumers can read non-Akua transform keys', () => {
-    const fields = extractInstallFields({
+    const fields = extractUserInputFields({
       type: 'object',
       properties: {
         region: {
@@ -188,11 +180,11 @@ describe('init', () => {
   });
 });
 
-// Type-level regression test: the public Source/HelmBlock/ExtractedInstallField
+// Type-level regression test: the public Source/HelmBlock/ExtractedUserInputField
 // shapes must stay assignment-compatible with what the WASM expects.
 // Doesn't execute — compiler enforces.
 function _typeCheck() {
   const _s: Source = { name: 'a', helm: { repo: 'x', chart: 'y', version: '1.0.0' } };
-  const _f: ExtractedInstallField = { path: 'p', schema: {}, required: false };
+  const _f: ExtractedUserInputField = { path: 'p', schema: {}, required: false };
   return [_s, _f];
 }

@@ -6,7 +6,7 @@
  * Usage:
  *
  * ```ts
- * import { init, buildUmbrellaChart, extractInstallFields } from '@akua/sdk';
+ * import { init, buildUmbrellaChart, extractUserInputFields } from '@akua/sdk';
  *
  * await init();
  * const umbrella = buildUmbrellaChart('my-pkg', '0.1.0', [
@@ -18,7 +18,7 @@
 import { wasm } from './wasm.js';
 import type {
   AkuaMetadata,
-  ExtractedInstallField,
+  ExtractedUserInputField,
   JsonSchema,
   ResolvedValues,
   Source,
@@ -71,7 +71,7 @@ export type {
   AkuaMetadata,
   ChartDependency,
   ChartYaml,
-  ExtractedInstallField,
+  ExtractedUserInputField,
   HelmBlock,
   HelmfileBlock,
   JsonSchema,
@@ -82,17 +82,12 @@ export type {
   UmbrellaChart,
 } from './types.js';
 
-/** Deterministic short alias suffix (djb2 + base36). */
-export function hashToSuffix(input: string, length: number): string {
-  return wasm().hashToSuffix(input, length);
-}
-
 /**
  * Walk a JSON Schema and return all `x-user-input`-marked leaf fields,
  * sorted by `x-user-input.order`.
  */
-export function extractInstallFields(schema: JsonSchema): ExtractedInstallField[] {
-  return wasm().extractInstallFields(schema) as ExtractedInstallField[];
+export function extractUserInputFields(schema: JsonSchema): ExtractedUserInputField[] {
+  return wasm().extractUserInputFields(schema) as ExtractedUserInputField[];
 }
 
 /**
@@ -102,11 +97,11 @@ export function extractInstallFields(schema: JsonSchema): ExtractedInstallField[
  *
  * @throws when a required field is missing or a CEL expression errors.
  */
-export function applyInstallTransforms(
-  fields: ExtractedInstallField[],
+export function applyInputTransforms(
+  fields: ExtractedUserInputField[],
   inputs: Record<string, string>,
 ): ResolvedValues {
-  return wasm().applyInstallTransforms(fields, inputs) as ResolvedValues;
+  return wasm().applyInputTransforms(fields, inputs) as ResolvedValues;
 }
 
 /**
@@ -151,14 +146,14 @@ export interface BuildMetadataOptions {
 
 /**
  * Build `.akua/metadata.yaml` provenance. `fields` is the output of
- * [`extractInstallFields`] (pass `[]` if none). `buildTime` defaults
+ * [`extractUserInputFields`] (pass `[]` if none). `buildTime` defaults
  * to `process.env.SOURCE_DATE_EPOCH` (as Unix seconds) on Node for
  * reproducible builds; otherwise wall-clock `new Date()`. Pair with
  * `packChart`'s `metadata` option.
  */
 export function buildMetadata(
   sources: Source[],
-  fields: ExtractedInstallField[] = [],
+  fields: ExtractedUserInputField[] = [],
   options: BuildMetadataOptions = {},
 ): AkuaMetadata {
   const buildTime = options.buildTime ?? resolveBuildTime();

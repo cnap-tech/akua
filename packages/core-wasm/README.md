@@ -5,10 +5,9 @@ Node.js and browser bundlers.
 
 ## Exported functions
 
-- `hashToSuffix(input, length)` — djb2 → base36, deterministic chart aliases
-- `extractInstallFields(schema)` — walk a JSON Schema, return
+- `extractUserInputFields(schema)` — walk a JSON Schema, return
   `x-user-input` / `x-install` fields
-- `applyInstallTransforms(fields, inputs)` — slugify + template (`{{value}}`)
+- `applyInputTransforms(fields, inputs)` — slugify + template (`{{value}}`)
   over `{path: string}` inputs, returns resolved nested values
 - `validateValuesSchema(schema)` — structural validation, returns error
   message or `null`

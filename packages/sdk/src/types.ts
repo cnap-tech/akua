@@ -43,7 +43,7 @@ export interface HelmfileBlock {
  * `field.schema['x-input']?.cel`) rather than through privileged struct
  * fields.
  */
-export interface ExtractedInstallField {
+export interface ExtractedUserInputField {
   path: string;
   schema: JsonSchema;
   required: boolean;
@@ -88,7 +88,7 @@ export interface SourceWithSchema {
   schema?: JsonSchema;
 }
 
-/** Resolved values from `applyInstallTransforms`. */
+/** Resolved values from `applyInputTransforms`. */
 export type ResolvedValues = Record<string, unknown>;
 
 /**
