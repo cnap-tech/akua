@@ -118,6 +118,37 @@ Use Akua standalone against your own clusters for free. Or use CNAP's
 hosted platform for managed end-to-end. Both paths consume the same
 Akua core.
 
+## Install
+
+```sh
+# macOS / Linux — Homebrew tap
+brew install cnap-tech/akua/akua
+
+# macOS / Linux — curl
+curl -fsSL https://raw.githubusercontent.com/cnap-tech/akua/main/scripts/install.sh | sh
+
+# Windows — Scoop bucket
+scoop bucket add akua https://github.com/cnap-tech/scoop-akua
+scoop install akua
+
+# Windows — PowerShell
+powershell -c "irm https://raw.githubusercontent.com/cnap-tech/akua/main/scripts/install.ps1 | iex"
+
+# Arch Linux — AUR
+yay -S akua-bin
+
+# Docker / containers
+docker run --rm ghcr.io/cnap-tech/akua:latest --version
+
+# Source
+cargo install --git https://github.com/cnap-tech/akua akua-cli
+```
+
+Prebuilt binaries for `{x86_64, aarch64} × {linux-gnu, apple-darwin}` +
+`x86_64-pc-windows-msvc` ship with every [GitHub
+Release](https://github.com/cnap-tech/akua/releases). All downloads
+include SHA-256 checksums.
+
 ## Using Akua
 
 ### CLI

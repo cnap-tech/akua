@@ -15,7 +15,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # required to create Releases
+  contents: write   # required to create Releases
+  packages: write   # required to push to ghcr.io
+  id-token: write   # required for keyless cosign (future)
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
@@ -27,12 +29,19 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             runner: ubuntu-latest
+            archive: tar.gz
           - target: aarch64-unknown-linux-gnu
             runner: ubuntu-latest
+            archive: tar.gz
           - target: x86_64-apple-darwin
             runner: macos-latest
+            archive: tar.gz
           - target: aarch64-apple-darwin
             runner: macos-latest
+            archive: tar.gz
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            archive: zip
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
@@ -85,7 +94,9 @@ jobs:
         # perf for ~25-40% compile-time reduction. See Cargo.toml.
         run: mise exec -- cargo build -p akua-cli --profile ci-release --target ${{ matrix.target }}
 
-      - name: Package
+      - name: Package (unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
         run: |
           name="akua-${GITHUB_REF_NAME#akua-}-${{ matrix.target }}"
           mkdir -p dist
@@ -94,10 +105,27 @@ jobs:
           cd dist && tar -czf "${name}.tar.gz" akua README.md SECURITY.md LICENSE
           shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"
 
+      - name: Package (windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        # `.zip` is idiomatic on Windows and what Scoop/winget expect.
+        # 7-Zip is preinstalled on windows-latest runners.
+        run: |
+          $name = "akua-$($env:GITHUB_REF_NAME -replace '^akua-','')-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/ci-release/akua.exe" -Destination dist/
+          Copy-Item README.md,SECURITY.md,LICENSE -Destination dist/ -ErrorAction SilentlyContinue
+          Push-Location dist
+          7z a "$name.zip" akua.exe README.md SECURITY.md LICENSE
+          (Get-FileHash -Algorithm SHA256 "$name.zip").Hash.ToLower() + "  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
+          Pop-Location
+
       - uses: actions/upload-artifact@v4
         with:
           name: akua-${{ matrix.target }}
-          path: dist/*.tar.gz*
+          path: |
+            dist/*.tar.gz*
+            dist/*.zip*
 
   release:
     needs: build
@@ -114,6 +142,95 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             --title "akua ${GITHUB_REF_NAME#akua-v}" \
             --notes "See [CHANGELOG.md](https://github.com/cnap-tech/akua/blob/main/CHANGELOG.md) for details." \
-            dist/*.tar.gz dist/*.sha256
+            dist/*.tar.gz dist/*.zip dist/*.sha256
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Multi-arch container image — `ghcr.io/cnap-tech/akua:<version>`
+  # ---------------------------------------------------------------------------
+  # Built separately from the binary jobs so it's not in the release-assets
+  # critical path; if container publish fails, the release still ships.
+  docker:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/akua-v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract Linux binaries for the image
+        # Pull the prebuilt binaries out of the release tarballs we
+        # just built — avoids a separate compile-in-Docker step and
+        # keeps the image contents byte-identical to the GitHub Release.
+        run: |
+          mkdir -p image-context/amd64 image-context/arm64
+          version="${GITHUB_REF_NAME#akua-}"
+          tar -xzf "dist/akua-${version}-x86_64-unknown-linux-gnu.tar.gz" -C image-context/amd64 akua
+          tar -xzf "dist/akua-${version}-aarch64-unknown-linux-gnu.tar.gz" -C image-context/arm64 akua
+      - name: Build + push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: image-context
+          file: scripts/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/cnap-tech/akua:${{ github.ref_name }}
+            ghcr.io/cnap-tech/akua:latest
+
+  # ---------------------------------------------------------------------------
+  # Homebrew tap auto-bump — cnap-tech/homebrew-akua
+  # ---------------------------------------------------------------------------
+  # The tap repo has a `Formula/akua.rb` with stanzas for each platform.
+  # This job regenerates URLs + SHA256s and commits the bump. Requires a
+  # PAT with `contents:write` on the tap repo stored as `TAP_BUMP_TOKEN`;
+  # the default GITHUB_TOKEN is scoped to this repo and can't push to
+  # the tap.
+  homebrew-tap:
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/akua-v')
+    steps:
+      - name: Bump formula
+        uses: mislav/bump-homebrew-formula-action@v3
+        with:
+          formula-name: akua
+          tap: cnap-tech/homebrew-akua
+          download-url: https://github.com/cnap-tech/akua/archive/refs/tags/${{ github.ref_name }}.tar.gz
+          # Don't try to edit a non-existent formula on the first run.
+          create-pullrequest: false
+          commit-message: |
+            akua ${{ github.ref_name }}
+
+            Released in https://github.com/cnap-tech/akua/releases/tag/${{ github.ref_name }}
+        env:
+          COMMITTER_TOKEN: ${{ secrets.TAP_BUMP_TOKEN }}
+        continue-on-error: true  # tap may not exist on first release
+
+  # ---------------------------------------------------------------------------
+  # winget manifest submission — microsoft/winget-pkgs
+  # ---------------------------------------------------------------------------
+  # Pushes a PR to the winget-pkgs repo with the updated manifest.
+  # Bot-driven, no manual review on our end. Requires a PAT stored as
+  # WINGET_BOT_TOKEN with `public_repo` scope.
+  winget:
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/akua-v')
+    steps:
+      - uses: vedantmgoyal9/winget-releaser@main
+        with:
+          identifier: CnapTech.Akua
+          installers-regex: 'x86_64-pc-windows-msvc\.zip$'
+          token: ${{ secrets.WINGET_BOT_TOKEN }}
+        continue-on-error: true  # submission not yet approved on first release
