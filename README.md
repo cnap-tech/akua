@@ -16,9 +16,25 @@ A Helm toolkit written in Rust. The same audited core runs in the `akua` CLI, in
        width="840">
 </p>
 
-<p align="center">
-  <i>Scaffold a package, pull an OCI chart without <code>helm</code>, diff two versions structurally — three commands, no backend, no cluster.</i>
-</p>
+## Install
+
+```sh
+# macOS / Linux
+curl -fsSL https://akua.dev/install | sh
+
+# Homebrew
+brew install cnap-tech/tap/akua
+
+# From source (any platform with Rust toolchain)
+cargo install --git https://github.com/cnap-tech/akua akua-cli
+```
+
+Prebuilt binaries for every target live on [GitHub Releases][releases] — each artefact ships with a SHA-256 checksum file. Windows (Scoop, PowerShell), Arch AUR, and Docker images land with `v0.1.1`.
+
+> [!WARNING]
+> **Pre-alpha.** APIs, CLI flags, and the `v1alpha1` schema shape are subject to change. Don't build production workloads on this yet. Do file issues if something surprises you.
+
+## Highlights
 
 - ⚡ **One Rust core, three surfaces.** CLI binary, Node SDK, browser WASM — same algorithms everywhere, no drift.
 - 🌐 **Browser-native chart pulls.** `@akua/sdk/browser` reimplements the OCI bearer-token dance and HTTP Helm `index.yaml` on top of `fetch()` + `DecompressionStream`. Your tab talks directly to Jetstack, Grafana, JFrog public — no backend, no proxy.
@@ -27,35 +43,7 @@ A Helm toolkit written in Rust. The same audited core runs in the `akua` CLI, in
 - 🔒 **Audited fetch by default.** SSRF guard (private/loopback/link-local rejection), size caps, digest verification on every OCI pull.
 - 📜 **Provenance sidecar on every build.** `.akua/metadata.yaml` records the full input graph; `akua attest` emits a [SLSA v1](https://slsa.dev/) predicate ready for `cosign`.
 
-Akua is backed by [CNAP](https://cnap.tech). It's the tool we reach for when we want cloud-native packaging that survives a security review — without becoming a cluster operator.
-
-> [!WARNING]
-> **Pre-alpha.** APIs, CLI flags, and even the `v1alpha1` schema shape are subject to change. Don't build production workloads on this yet. Do file issues if something surprises you.
-
-## Install
-
-Install akua with our standalone installer:
-
-```sh
-# macOS / Linux
-curl -fsSL https://akua.dev/install | sh
-```
-
-Or via Homebrew:
-
-```sh
-brew install cnap-tech/tap/akua
-```
-
-Or from source (any platform with a Rust toolchain):
-
-```sh
-cargo install --git https://github.com/cnap-tech/akua akua-cli
-```
-
-Prebuilt binaries for every target live on [GitHub Releases][releases] — each artefact ships with a SHA-256 checksum file.
-
-Windows (Scoop, PowerShell), Arch AUR, and Docker images are queued for `v0.1.1` — the release plumbing is in place, awaiting the next tag.
+akua is backed by [CNAP](https://cnap.tech).
 
 ## Quick start
 
