@@ -30,17 +30,7 @@ pub(super) async fn fetch_http_to_file(
     // Rejects a registry that serves tampered bytes alongside a
     // correct index entry.
     if let Some(advertised) = resolved.digest {
-        let normalised = advertised
-            .strip_prefix("sha256:")
-            .unwrap_or(&advertised)
-            .to_ascii_lowercase();
-        if normalised != digest {
-            return Err(FetchError::DigestMismatch {
-                url: redact_userinfo(&resolved.url),
-                expected: advertised,
-                actual: digest,
-            });
-        }
+        super::digest::verify(&redact_userinfo(&resolved.url), &advertised, &digest)?;
     }
     Ok((tempfile, digest))
 }

@@ -17,6 +17,13 @@ use super::streaming::stream_response_to_file;
 use super::FetchError;
 use crate::umbrella::Dependency;
 
+/// Canonical media type for a Helm chart layer inside an OCI artifact.
+/// We reject manifests that don't advertise this exact type — a
+/// fallback to `layers[0]` would let a malicious registry substitute
+/// arbitrary bytes at the layer slot.
+pub const HELM_LAYER_MEDIA_TYPE: &str =
+    "application/vnd.cncf.helm.chart.content.v1.tar+gzip";
+
 /// Registry credentials applied to OCI pulls. Each entry is keyed by
 /// registry host (e.g. `"ghcr.io"`, `"registry.cnap.internal"`).
 /// Anonymous is the fallback when a repository's host isn't in the map.
@@ -127,12 +134,9 @@ struct OciManifestLayer {
     size: i64,
 }
 
-/// Pick the Helm chart layer from the manifest. Strict media-type:
-/// we require the canonical Helm layer type. Falling back to
-/// `layers[0]` would let a malicious registry substitute arbitrary
-/// bytes at the layer slot.
+/// Pick the Helm chart layer from the manifest. Strict media-type
+/// enforcement — see [`HELM_LAYER_MEDIA_TYPE`].
 fn pick_helm_layer(manifest: &OciManifestJson) -> Result<&OciManifestLayer, FetchError> {
-    const HELM_MEDIA_TYPE: &str = "application/vnd.cncf.helm.chart.content.v1.tar+gzip";
     if manifest.layers.is_empty() {
         return Err(FetchError::MissingHelmLayer(
             "manifest has no layers".to_string(),
@@ -141,10 +145,10 @@ fn pick_helm_layer(manifest: &OciManifestJson) -> Result<&OciManifestLayer, Fetc
     manifest
         .layers
         .iter()
-        .find(|l| l.media_type == HELM_MEDIA_TYPE)
+        .find(|l| l.media_type == HELM_LAYER_MEDIA_TYPE)
         .ok_or_else(|| {
             FetchError::MissingHelmLayer(format!(
-                "no layer with media type {HELM_MEDIA_TYPE}; registry may have served a non-Helm artifact"
+                "no layer with media type {HELM_LAYER_MEDIA_TYPE}; registry may have served a non-Helm artifact"
             ))
         })
 }
@@ -187,17 +191,8 @@ pub(super) async fn fetch_oci_to_file(
     // Content integrity: the registry advertised this digest; what we
     // just streamed had better match it. If it doesn't, the bytes are
     // either corrupt or a swapped layer — don't hand them to unpack.
-    let expected = layer
-        .digest
-        .strip_prefix("sha256:")
-        .unwrap_or(&layer.digest);
-    if !expected.eq_ignore_ascii_case(&digest) {
-        return Err(FetchError::DigestMismatch {
-            url: format!("oci://{}/{}:{}", parts.host, parts.repository, parts.tag),
-            expected: expected.to_string(),
-            actual: digest,
-        });
-    }
+    let layer_ref = format!("oci://{}/{}:{}", parts.host, parts.repository, parts.tag);
+    super::digest::verify(&layer_ref, &layer.digest, &digest)?;
     Ok((temp, digest))
 }
 
@@ -371,9 +366,9 @@ async fn anonymous_bearer_token(parts: &OciRef) -> Option<String> {
 }
 
 pub(super) struct BearerChallenge {
-    pub realm: String,
-    pub service: Option<String>,
-    pub scope: Option<String>,
+    pub(super) realm: String,
+    pub(super) service: Option<String>,
+    pub(super) scope: Option<String>,
 }
 
 /// Parse the `WWW-Authenticate: Bearer …` header into realm/service/scope.

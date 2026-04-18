@@ -12,6 +12,7 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
+use super::hex::hex_encode;
 use super::options::{limit_exceeded, LimitKind};
 use super::FetchError;
 
@@ -72,17 +73,6 @@ pub(super) async fn stream_response_to_file(
         written += chunk.len() as u64;
     }
     temp.flush()?;
-    let digest = hex_digest(&hasher.finalize());
+    let digest = hex_encode(&hasher.finalize());
     Ok((temp, digest))
-}
-
-/// Hex-encode a 32-byte sha256 digest. Shared by the streaming fetch +
-/// the cache module (both want the same on-disk format).
-pub(super) fn hex_digest(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        let _ = write!(&mut out, "{byte:02x}");
-    }
-    out
 }

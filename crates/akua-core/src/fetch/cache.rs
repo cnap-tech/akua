@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::PathBuf;
 
+use super::hex::{hex_encode, is_valid_sha256_hex};
 use crate::umbrella::Dependency;
 
 pub(super) fn key_for_dep(dep: &Dependency) -> String {
@@ -24,17 +25,17 @@ pub(super) fn key_for_dep(dep: &Dependency) -> String {
 
 pub(super) fn get(key: &str) -> Option<Vec<u8>> {
     let root = root()?;
-    let key_hash = hex_sha256(key.as_bytes());
+    let key_hash = sha256_hex(key.as_bytes());
     let ref_path = root.join("refs").join(&key_hash);
     let blob_digest = std::fs::read_to_string(&ref_path).ok()?;
     let blob_digest = blob_digest.trim();
-    if blob_digest.len() != 64 || !blob_digest.chars().all(|c| c.is_ascii_hexdigit()) {
+    if !is_valid_sha256_hex(blob_digest) {
         return None;
     }
     let blob_path = root.join("blobs").join(format!("{blob_digest}.tgz"));
     let bytes = std::fs::read(&blob_path).ok()?;
     // Integrity check: a corrupted blob is worse than a cache miss.
-    if hex_sha256(&bytes) != blob_digest {
+    if sha256_hex(&bytes) != blob_digest {
         return None;
     }
     Some(bytes)
@@ -44,7 +45,7 @@ pub(super) fn put(key: &str, bytes: &[u8]) -> std::io::Result<()> {
     let Some(root) = root() else {
         return Ok(());
     };
-    let blob_digest = hex_sha256(bytes);
+    let blob_digest = sha256_hex(bytes);
     let (blobs_dir, refs_dir) = ensure_dirs(&root)?;
     let blob_path = blobs_dir.join(format!("{blob_digest}.tgz"));
     if !blob_path.exists() {
@@ -144,10 +145,10 @@ fn max_cache_bytes() -> u64 {
 /// (streaming unpack). Caller must re-verify if paranoid.
 pub(super) fn get_path(key: &str) -> Option<PathBuf> {
     let root = root()?;
-    let ref_path = root.join("refs").join(hex_sha256(key.as_bytes()));
+    let ref_path = root.join("refs").join(sha256_hex(key.as_bytes()));
     let blob_digest = std::fs::read_to_string(&ref_path).ok()?;
     let blob_digest = blob_digest.trim();
-    if blob_digest.len() != 64 || !blob_digest.chars().all(|c| c.is_ascii_hexdigit()) {
+    if !is_valid_sha256_hex(blob_digest) {
         return None;
     }
     let blob_path = root.join("blobs").join(format!("{blob_digest}.tgz"));
@@ -163,7 +164,7 @@ fn ensure_dirs(root: &std::path::Path) -> std::io::Result<(PathBuf, PathBuf)> {
 }
 
 fn write_ref(refs_dir: &std::path::Path, key: &str, digest: &str) -> std::io::Result<()> {
-    let key_hash = hex_sha256(key.as_bytes());
+    let key_hash = sha256_hex(key.as_bytes());
     let ref_path = refs_dir.join(&key_hash);
     let mut tmp = tempfile::NamedTempFile::new_in(refs_dir)?;
     tmp.write_all(digest.as_bytes())?;
@@ -185,12 +186,6 @@ fn root() -> Option<PathBuf> {
     Some(base.join("akua").join("v1"))
 }
 
-fn hex_sha256(bytes: &[u8]) -> String {
-    let digest = Sha256::digest(bytes);
-    let mut out = String::with_capacity(64);
-    for byte in digest {
-        use std::fmt::Write as _;
-        let _ = write!(&mut out, "{byte:02x}");
-    }
-    out
+fn sha256_hex(bytes: &[u8]) -> String {
+    hex_encode(&Sha256::digest(bytes))
 }

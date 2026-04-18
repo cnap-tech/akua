@@ -80,6 +80,8 @@ pub enum FetchError {
 }
 
 mod cache;
+mod digest;
+mod hex;
 mod http_helm;
 mod oci;
 mod options;
@@ -92,7 +94,7 @@ mod tar_unpack;
 
 pub use oci::{
     fetch_oci_manifest_digest, fetch_oci_manifest_digest_blocking, OciAuth, OciRef,
-    RegistryCredentials,
+    RegistryCredentials, HELM_LAYER_MEDIA_TYPE,
 };
 pub use ssrf_client::{redact_userinfo, HttpError};
 use http_helm::fetch_http_to_file;
@@ -100,8 +102,6 @@ use oci::fetch_oci_to_file;
 use ssrf_client::validate_repo_ssrf;
 use tar_unpack::unpack_chart_tgz;
 
-/// Let `?` on a `reqwest::Error` flow straight into `FetchError::Http`
-/// through the redacting `HttpError` wrapper.
 impl From<reqwest::Error> for FetchError {
     fn from(e: reqwest::Error) -> Self {
         FetchError::Http(HttpError::from(e))
@@ -276,10 +276,6 @@ async fn fetch_one_to_file(
         Err(FetchError::UnsupportedRepo(dep.repository.clone()))
     }
 }
-
-
-
-
 
 #[cfg(test)]
 mod tests {

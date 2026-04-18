@@ -14,7 +14,7 @@ use crate::fetch::FetchError;
 
 /// Allow-private bypass env var. Unset by default: private IP literals
 /// in `repo:` URLs are rejected. Set to `1` / `true` for local dev.
-pub(crate) const ALLOW_PRIVATE_ENV: &str = "AKUA_ALLOW_PRIVATE_HOSTS";
+const ALLOW_PRIVATE_ENV: &str = "AKUA_ALLOW_PRIVATE_HOSTS";
 
 /// Validate a repo host. Rejects bare-IP hosts in private ranges
 /// unless the bypass env var is set. DNS names pass through.
@@ -36,7 +36,7 @@ pub fn validate_host(host: &str) -> Result<(), FetchError> {
 
 fn allow_private() -> bool {
     matches!(
-        std::env::var("AKUA_ALLOW_PRIVATE_HOSTS").ok().as_deref(),
+        std::env::var(ALLOW_PRIVATE_ENV).ok().as_deref(),
         Some("1") | Some("true") | Some("yes")
     )
 }

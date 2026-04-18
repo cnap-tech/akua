@@ -104,8 +104,9 @@ pub struct PublishOutcome {
 }
 
 // Helm's OCI media types — matches pkg/registry/constants.go in helm/helm.
+// Layer type shared with the fetch path (strict-match enforcement).
 const CONFIG_MEDIA_TYPE: &str = "application/vnd.cncf.helm.config.v1+json";
-const LAYER_MEDIA_TYPE: &str = "application/vnd.cncf.helm.chart.content.v1.tar+gzip";
+use crate::fetch::HELM_LAYER_MEDIA_TYPE as LAYER_MEDIA_TYPE;
 
 /// Full Chart.yaml metadata. Mirrors `helm.sh/helm/v4/pkg/chart/v2.Metadata`
 /// so the JSON config Helm sees on pull is identical to what `helm push`

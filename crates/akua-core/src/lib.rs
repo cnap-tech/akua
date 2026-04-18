@@ -4,29 +4,26 @@
 //! charts, run WASM transforms, render manifests, and produce OCI-addressable
 //! artifacts.
 //!
-//! ## Status
-//!
-//! Pre-alpha. Phase 0 is landed: pure-algorithm utilities ported from CNAP's
-//! private chart generation service. I/O (OCI fetch/push, Git fetch, Helm
-//! render, Extism WASM host) is scaffolded but not yet implemented.
-//!
 //! ## Modules
 //!
-//! - [`hash`] — djb2 hash producing short base36 suffixes for deterministic aliases
-//! - [`source`] — helm source representation, chart-name extraction, alias computation
-//! - [`values`] — value merging with umbrella alias nesting, dot-notation paths, deep merge
-//! - [`schema`] — JSON Schema merging with x-user-input extensions, field extraction, transforms
-//! - [`umbrella`] — umbrella Helm chart assembly (Chart.yaml + merged values.yaml)
+//! Pure algorithms:
+//! - [`hash`] — djb2 hash producing short base36 suffixes for deterministic aliases.
+//! - [`source`] — helm/kcl/helmfile source representation, chart-name extraction, alias.
+//! - [`values`] — value merging with umbrella alias nesting, dot-notation paths.
+//! - [`schema`] — JSON Schema merging with `x-user-input`/`x-input` extensions,
+//!   CEL-based input transforms (time- and source-length-capped).
+//! - [`umbrella`] — umbrella Helm chart assembly (Chart.yaml + merged values.yaml).
+//! - [`manifest`] — `package.yaml` loader + v1alpha1 validation.
+//! - [`metadata`] — `.akua/metadata.yaml` provenance sidecar.
+//! - [`attest`] — SLSA v1 provenance predicate for cosign.
+//! - [`engine`] — engine trait + built-in helm / kcl / helmfile engines.
 //!
-//! ## Intentionally out of scope (Phase 0)
-//!
-//! The following are scaffolded in the pipeline module but return `unimplemented!`
-//! until Phase 1:
-//!
-//! - `SourceFetcher` implementations (Git, OCI, HTTP Helm)
-//! - Extism WASM plugin host
-//! - Helm render (shell to `helm` binary or embed)
-//! - OCI push via `oras`
+//! I/O (feature-gated):
+//! - [`fetch`] — native OCI + HTTP Helm dep fetcher (SSRF guard, size caps,
+//!   content-addressed cache).
+//! - [`publish`] — native OCI push via `oci-client` (Helm v4 media types).
+//! - [`render`] — embedded Helm v4 template engine (WASM) + legacy shell-out path.
+//! - [`ssrf`] — private-IP-literal host rejection shared by all fetch paths.
 
 #![allow(dead_code)]
 
@@ -57,7 +54,7 @@ pub use engine::{Engine, EngineError, HelmEngine, PrepareContext, PreparedSource
 pub use fetch::{
     fetch_dependencies, fetch_dependencies_with_auth, fetch_dependencies_with_options,
     fetch_oci_manifest_digest, fetch_oci_manifest_digest_blocking, redact_userinfo, FetchError,
-    FetchOptions, HttpError, OciAuth, OciRef, RegistryCredentials,
+    FetchOptions, HttpError, LimitKind, OciAuth, OciRef, RegistryCredentials,
 };
 pub use hash::hash_to_suffix;
 pub use manifest::{load_manifest, PackageManifest};
