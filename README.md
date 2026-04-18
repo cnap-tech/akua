@@ -1,12 +1,25 @@
-# akua
+<p align="center">
+  <a href="https://akua.dev"><img src="docs/mascot.png" alt="akua mascot" height="170"></a>
+</p>
+<h1 align="center">akua</h1>
 
-[![CI](https://img.shields.io/github/actions/workflow/status/cnap-tech/akua/cli-release.yml?branch=main&label=CI&style=flat-square)](https://github.com/cnap-tech/akua/actions/workflows/cli-release.yml)
-[![Release](https://img.shields.io/github/v/release/cnap-tech/akua?label=release&style=flat-square)](https://github.com/cnap-tech/akua/releases/latest)
-[![JSR](https://jsr.io/badges/@akua/sdk?style=flat-square)](https://jsr.io/@akua/sdk)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](./LICENSE)
-[![Status](https://img.shields.io/badge/status-pre--alpha-orange?style=flat-square)](#status)
+<p align="center">
+  <a href="https://github.com/cnap-tech/akua/actions/workflows/cli-release.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/cnap-tech/akua/cli-release.yml?branch=main&label=CI&style=flat-square"></a>
+  <a href="https://github.com/cnap-tech/akua/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/cnap-tech/akua?label=release&style=flat-square"></a>
+  <a href="https://jsr.io/@akua/sdk"><img alt="JSR" src="https://jsr.io/badges/@akua/sdk?style=flat-square"></a>
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square"></a>
+  <a href="#status"><img alt="Status" src="https://img.shields.io/badge/status-pre--alpha-orange?style=flat-square"></a>
+</p>
 
-[Documentation](./docs/getting-started.md) &nbsp;•&nbsp; [Playground](https://akua.dev) &nbsp;•&nbsp; [SDK](https://jsr.io/@akua/sdk) &nbsp;•&nbsp; [Issues](https://github.com/cnap-tech/akua/issues)
+<p align="center">
+  <a href="./docs/getting-started.md">Documentation</a>
+  &nbsp;•&nbsp;
+  <a href="https://akua.dev">Playground</a>
+  &nbsp;•&nbsp;
+  <a href="https://jsr.io/@akua/sdk">SDK</a>
+  &nbsp;•&nbsp;
+  <a href="https://github.com/cnap-tech/akua/issues">Issues</a>
+</p>
 
 ### [Read the docs →](./docs/getting-started.md)
 
