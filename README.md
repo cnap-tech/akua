@@ -1,9 +1,9 @@
 <h1 align="center">Akua</h1>
 
 <p align="center">
-  <em>Build, inspect, and publish Helm charts as OCI artifacts —
-  with a TypeScript SDK that runs the same core in Node or the browser.
-  No <code>helm</code> binary required.</em>
+  <em>The only toolkit that pulls, inspects, diffs, and publishes
+  Helm charts from a browser tab —
+  <br>no <code>helm</code> CLI, no backend, no cluster.</em>
 </p>
 
 <p align="center">
@@ -16,16 +16,22 @@
 </p>
 
 <p align="center">
-  <a href="./docs/getting-started.md"><strong>Getting started</strong></a> ·
+  <a href="https://cnap-tech.github.io/akua/"><strong>▸ Try it in your browser</strong></a> ·
+  <a href="./docs/getting-started.md">Getting started</a> ·
   <a href="./docs/architecture.md">Architecture</a> ·
-  <a href="./docs/vision.md">Vision</a> ·
   <a href="./docs/roadmap.md">Roadmap</a> ·
   <a href="https://jsr.io/@akua/sdk">SDK</a>
 </p>
 
-<!-- Hero asciicast. Placeholder until we record one. -->
-<!-- <p align="center"><img alt="akua in action" src="docs/hero.gif"></p> -->
-<!-- <p align="center"><em>akua lint → preview → build → publish, end-to-end in six commands.</em></p> -->
+<p align="center">
+  <img alt="akua diff oci://…/podinfo:6.6.0 oci://…/podinfo:6.7.1"
+       src="docs/hero-diff.gif"
+       width="840">
+</p>
+<p align="center">
+  <em>Upgrading podinfo? See what actually changed —
+  deps, defaults, schema fields — before your users do.</em>
+</p>
 
 > [!WARNING]
 > **Pre-alpha.** APIs, CLI flags, and even the `v1alpha1` schema
@@ -49,6 +55,62 @@ single Helm chart. Akua handles the layer above:
   `cosign`. `akua diff` structurally compares two chart versions —
   metadata, deps, values defaults, schema input-field deltas — so
   you can see what changed before an upgrade.
+
+### Three things nobody else does
+
+<details><summary><b>Pull an OCI/HTTP chart from a browser tab.</b> No backend, no proxy.</summary>
+<br>
+
+`@akua/sdk/browser` reimplements the OCI bearer-token dance + HTTP
+Helm `index.yaml` lookup + tar-gz unpack + schema merge — all on
+top of the browser's native `fetch()` + `DecompressionStream`. Open
+[the playground][playground], paste
+`https://charts.jetstack.io/cert-manager:v1.16.1`, click Pull: your
+browser talks directly to Jetstack. DevTools Network tab confirms.
+
+Docker can't do this. `helm` can't do this. Traditional approach:
+stand up a CORS-proxying backend. Akua: ship the Rust core as WASM
+and reimplement OCI in JS.
+
+Constraint: needs CORS-friendly registries. Jetstack / Grafana /
+JFrog public: works. `oci://ghcr.io` / `oci://docker.io`: blocked
+by the registry, not by akua.
+
+</details>
+
+<details><summary><b>Structurally diff two chart versions.</b> Not rendered YAML — the <em>shape</em> of what customers will be asked to configure differently.</summary>
+<br>
+
+`helm diff` renders templates (needs values + a cluster). `akua
+diff oci://A oci://B` reports Chart.yaml metadata shifts,
+dependency adds/removes/updates, `values.yaml` default-value
+deltas, `values.schema.json` input-field changes
+(required↔optional, type, default, `x-input` CEL transform
+rewrites).
+
+3am-pager tool. Non-zero exit on delta → gate CI on "no surprise
+upgrades."
+
+</details>
+
+<details><summary><b>Render Helm templates without a <code>helm</code> binary.</b></summary>
+<br>
+
+The Helm v4 template engine (Go), compiled to
+[wasip1](https://github.com/WebAssembly/WASI),
+hosted via [wasmtime](https://wasmtime.dev/) inside `akua-core`.
+`akua render` takes a chart, runs the Go template pipeline through
+a WASM runtime, returns rendered Kubernetes manifests. No external
+`helm` binary anywhere in the pipeline.
+
+|                | binaries needed on PATH | behaviour |
+|---|---|---|
+| `helm dep update && helm template` | `helm` (+ its config) | uses Helm's own registry auth, cache, redirect rules |
+| `akua build && akua render` | *(none)* | uses akua's audited fetch (SSRF guard, size caps, digest verify) |
+
+Most Rust CLIs in Helm's orbit shell out to `helm`. Akua embeds it.
+
+</details>
 
 ## Install
 
@@ -247,4 +309,5 @@ practical. Everyone who reads a pre-alpha README this far.
 [@akua/sdk]: https://jsr.io/@akua/sdk
 [JSR]: https://jsr.io/@akua/sdk
 [releases]: https://github.com/cnap-tech/akua/releases
+[playground]: https://cnap-tech.github.io/akua/
 [hip-0026]: https://helm.sh/community/hips/hip-0026/
