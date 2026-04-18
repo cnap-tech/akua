@@ -189,33 +189,120 @@ jobs:
             ghcr.io/cnap-tech/akua:latest
 
   # ---------------------------------------------------------------------------
-  # Homebrew tap auto-bump — cnap-tech/homebrew-akua
+  # Homebrew tap auto-bump — cnap-tech/homebrew-tap
   # ---------------------------------------------------------------------------
-  # The tap repo has a `Formula/akua.rb` with stanzas for each platform.
-  # This job regenerates URLs + SHA256s and commits the bump. Requires a
-  # PAT with `contents:write` on the tap repo stored as `TAP_BUMP_TOKEN`;
-  # the default GITHUB_TOKEN is scoped to this repo and can't push to
-  # the tap.
+  # Edits `Formula/akua.rb` in the generic CNAP tap with the new
+  # version + per-platform sha256s, then commits + pushes over SSH.
+  #
+  # Auth: `TAP_BUMP_SSH_KEY` is an SSH deploy key registered on the
+  # tap repo only (write access, zero reach anywhere else). No PATs,
+  # no account-level tokens — if this key leaks, the blast radius is
+  # one repo whose only content is Homebrew formulas.
   homebrew-tap:
     needs: release
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/akua-v')
     steps:
-      - name: Bump formula
-        uses: mislav/bump-homebrew-formula-action@v3
+      - uses: actions/download-artifact@v4
         with:
-          formula-name: akua
-          tap: cnap-tech/homebrew-akua
-          download-url: https://github.com/cnap-tech/akua/archive/refs/tags/${{ github.ref_name }}.tar.gz
-          # Don't try to edit a non-existent formula on the first run.
-          create-pullrequest: false
-          commit-message: |
-            akua ${{ github.ref_name }}
+          path: dist
+          merge-multiple: true
 
-            Released in https://github.com/cnap-tech/akua/releases/tag/${{ github.ref_name }}
+      - name: Configure SSH for the tap repo
         env:
-          COMMITTER_TOKEN: ${{ secrets.TAP_BUMP_TOKEN }}
-        continue-on-error: true  # tap may not exist on first release
+          TAP_BUMP_SSH_KEY: ${{ secrets.TAP_BUMP_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$TAP_BUMP_SSH_KEY" > ~/.ssh/tap_bump_key
+          chmod 600 ~/.ssh/tap_bump_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          cat > ~/.ssh/config <<'EOF'
+          Host github.com-tap
+            HostName github.com
+            User git
+            IdentityFile ~/.ssh/tap_bump_key
+            IdentitiesOnly yes
+          EOF
+          chmod 600 ~/.ssh/config
+
+      - name: Clone tap, rewrite formula, push
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -eu
+          version="${REF_NAME#akua-v}"
+
+          # Read each target's sha256 from the per-asset .sha256 file.
+          get_sha() {
+            awk '{print $1}' "dist/akua-v${version}-$1.tar.gz.sha256"
+          }
+          darwin_arm_sha=$(get_sha aarch64-apple-darwin)
+          darwin_x86_sha=$(get_sha x86_64-apple-darwin)
+          linux_arm_sha=$(get_sha aarch64-unknown-linux-gnu)
+          linux_x86_sha=$(get_sha x86_64-unknown-linux-gnu)
+
+          git clone git@github.com-tap:cnap-tech/homebrew-tap.git tap
+          cd tap
+          git config user.email "akua-tap-bumper@cnap-tech"
+          git config user.name  "akua-tap-bumper"
+
+          # Rewrite the whole formula. Simpler than four sed passes,
+          # and the formula shape is our own — no surprise stanzas
+          # another maintainer might have added mid-file.
+          cat > Formula/akua.rb <<RUBY
+          # frozen_string_literal: true
+
+          # Auto-bumped by cli-release.yml in cnap-tech/akua on every
+          # tag push. Manual edits get overwritten.
+          class Akua < Formula
+            desc "Cloud-native package build, transform, and preview toolkit"
+            homepage "https://github.com/cnap-tech/akua"
+            version "${version}"
+            license "Apache-2.0"
+
+            on_macos do
+              on_arm do
+                url "https://github.com/cnap-tech/akua/releases/download/akua-v#{version}/akua-v#{version}-aarch64-apple-darwin.tar.gz"
+                sha256 "${darwin_arm_sha}"
+              end
+              on_intel do
+                url "https://github.com/cnap-tech/akua/releases/download/akua-v#{version}/akua-v#{version}-x86_64-apple-darwin.tar.gz"
+                sha256 "${darwin_x86_sha}"
+              end
+            end
+
+            on_linux do
+              on_arm do
+                url "https://github.com/cnap-tech/akua/releases/download/akua-v#{version}/akua-v#{version}-aarch64-unknown-linux-gnu.tar.gz"
+                sha256 "${linux_arm_sha}"
+              end
+              on_intel do
+                url "https://github.com/cnap-tech/akua/releases/download/akua-v#{version}/akua-v#{version}-x86_64-unknown-linux-gnu.tar.gz"
+                sha256 "${linux_x86_sha}"
+              end
+            end
+
+            def install
+              bin.install "akua"
+              doc.install "README.md", "SECURITY.md" if File.exist?("README.md")
+            end
+
+            test do
+              assert_match(/akua/, shell_output("#{bin}/akua --version"))
+            end
+          end
+          RUBY
+
+          git add Formula/akua.rb
+          if git diff --cached --quiet; then
+            echo "formula already at ${version}, nothing to bump"
+            exit 0
+          fi
+          git commit -m "akua ${REF_NAME}
+
+          Released in https://github.com/cnap-tech/akua/releases/tag/${REF_NAME}"
+          git push
 
   # winget submission to `microsoft/winget-pkgs` is the only viable
   # public path. Self-hosted winget sources technically work but

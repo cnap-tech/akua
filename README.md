@@ -122,7 +122,7 @@ Akua core.
 
 ```sh
 # macOS / Linux — Homebrew tap
-brew install cnap-tech/akua/akua
+brew install cnap-tech/tap/akua
 
 # macOS / Linux — curl
 curl -fsSL https://raw.githubusercontent.com/cnap-tech/akua/main/scripts/install.sh | sh
