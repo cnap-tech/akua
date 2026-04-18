@@ -42,7 +42,7 @@ clap = { version = "4", features = ["derive", "env"] }
 # git2 = "0.20"
 
 # HTTP
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
 
 # Logging
 tracing = "0.1"
