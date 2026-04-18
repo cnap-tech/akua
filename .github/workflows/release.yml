@@ -77,7 +77,7 @@ jobs:
           tar -C dist -czf "$ARCHIVE" akua README.md LICENSE
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ARCHIVE }}
           path: ${{ env.ARCHIVE }}

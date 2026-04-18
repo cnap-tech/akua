@@ -120,7 +120,7 @@ jobs:
           (Get-FileHash -Algorithm SHA256 "$name.zip").Hash.ToLower() + "  $name.zip" | Out-File -Encoding ascii "$name.zip.sha256"
           Pop-Location
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: akua-${{ matrix.target }}
           path: |
