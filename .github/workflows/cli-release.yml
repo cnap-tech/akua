@@ -52,7 +52,13 @@ jobs:
       - name: Rust target
         run: mise exec -- rustup target add ${{ matrix.target }}
 
-      - name: Build WASM artifacts (needed by helm-wasm feature)
+      - name: Build embedded Helm engine (Go→wasip1)
+        # Required by the `helm-wasm` feature which is in akua-core's
+        # default feature set — the resulting `helm-engine.wasm` is
+        # included via `include_bytes!` at compile time.
+        run: mise exec -- task build:helm-engine-wasm
+
+      - name: Build wasm-bindgen SDK artifacts (needed for tests / embedding)
         run: mise exec -- task sdk:wasm
 
       - name: Build akua CLI
