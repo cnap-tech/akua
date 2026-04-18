@@ -11,9 +11,9 @@ use clap::{ArgGroup, Parser, Subcommand};
 
 use akua_core::{
     apply_install_transforms, build_metadata, build_provenance, build_umbrella_chart_in,
-    extract_install_fields, load_manifest, publish_chart, render_umbrella,
-    render_umbrella_embedded, validate_values_schema, write_metadata, write_umbrella, AkuaMetadata,
-    PackageManifest, PublishOptions, RenderOptions, UmbrellaChart,
+    extract_install_fields, fetch_dependencies, load_manifest, package_chart, publish_chart,
+    render_umbrella, render_umbrella_embedded, validate_values_schema, write_metadata,
+    write_umbrella, AkuaMetadata, PackageManifest, PublishOptions, RenderOptions, UmbrellaChart,
 };
 
 #[derive(Parser)]
@@ -21,8 +21,20 @@ use akua_core::{
 #[command(about = "Cloud-native package build and transform toolkit", long_about = None)]
 #[command(version)]
 struct Cli {
+    /// Log output format. `text` (default) is human-readable; `json`
+    /// emits one structured record per event, suitable for Temporal's
+    /// `ApplicationFailure.details` or log-aggregator ingestion.
+    #[arg(long, value_enum, default_value_t = LogFormat::Text, global = true)]
+    log_format: LogFormat,
+
     #[command(subcommand)]
     command: Commands,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum, PartialEq, Eq)]
+enum LogFormat {
+    Text,
+    Json,
 }
 
 #[derive(Subcommand)]
@@ -81,9 +93,30 @@ enum Commands {
         strip_metadata: bool,
     },
     /// Print the Akua provenance metadata from a built chart directory.
+    /// Inspect a chart — either a local built directory or any OCI chart
+    /// reference. For `oci://…` targets, pulls the chart (including
+    /// non-Akua charts) and emits Chart.yaml + values.schema.json (when
+    /// present) + `.akua/metadata.yaml` (when present) as JSON, so
+    /// consumers can cache schemas for BYO charts without extra tooling.
     Inspect {
-        #[arg(long, default_value = "./dist/chart")]
-        chart: PathBuf,
+        /// Path to a built chart directory. Mutually exclusive with `--oci`.
+        #[arg(long)]
+        chart: Option<PathBuf>,
+        /// OCI reference, e.g. `oci://ghcr.io/stefanprodan/charts/podinfo:6.7.1`.
+        /// Mutually exclusive with `--chart`.
+        #[arg(long)]
+        oci: Option<String>,
+        /// Registry username for basic auth against the OCI host. Pair
+        /// with `--oci-password` (or set both via env vars).
+        #[arg(long, env = "AKUA_OCI_USERNAME")]
+        oci_username: Option<String>,
+        /// Registry password for basic auth. Paired with `--oci-username`.
+        #[arg(long, env = "AKUA_OCI_PASSWORD", hide_env_values = true)]
+        oci_password: Option<String>,
+        /// Pre-acquired bearer token for the OCI host. Mutually
+        /// exclusive with basic-auth flags.
+        #[arg(long, env = "AKUA_OCI_TOKEN", hide_env_values = true)]
+        oci_token: Option<String>,
     },
     /// Emit a SLSA v1 provenance attestation from a built chart directory.
     ///
@@ -106,8 +139,9 @@ enum Commands {
     Render {
         #[arg(long, default_value = ".")]
         package: PathBuf,
-        #[arg(long, default_value = "./dist/chart")]
-        out: PathBuf,
+        /// Write rendered manifests to this file. Omit to print to stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
         #[arg(long, default_value = "release")]
         release: String,
         #[arg(long, default_value = "default")]
@@ -124,6 +158,19 @@ enum Commands {
         inputs: Option<String>,
         #[arg(long)]
         inputs_file: Option<PathBuf>,
+    },
+    /// Package a built chart directory as a `.tgz` (Helm-compatible).
+    ///
+    /// Writes `<chart-name>-<chart-version>.tgz` into `--out-dir`. The
+    /// archive wraps a single top-level `<chart-name>/` directory — matches
+    /// what `helm package` produces, so `helm install ./…tgz` works.
+    Package {
+        /// Built chart directory (output of `akua build`).
+        #[arg(long, default_value = "./dist/chart")]
+        chart: PathBuf,
+        /// Directory to write the `.tgz` into. Created if missing.
+        #[arg(long, default_value = "./dist")]
+        out_dir: PathBuf,
     },
     /// Publish a built chart directory to an OCI registry.
     ///
@@ -146,11 +193,41 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    let cli = Cli::parse();
+    init_tracing(cli.log_format);
+    let cmd_name = command_name(&cli.command);
+    tracing::info!(
+        command = cmd_name,
+        version = env!("CARGO_PKG_VERSION"),
+        "akua starting"
+    );
 
-    match Cli::parse().command {
+    let result = dispatch(cli.command);
+    if let Err(err) = &result {
+        // Structured error boundary. `anyhow::Error` chains into `{:#}`.
+        tracing::error!(command = cmd_name, error = %format!("{err:#}"), "akua failed");
+    }
+    result
+}
+
+fn command_name(cmd: &Commands) -> &'static str {
+    match cmd {
+        Commands::Init { .. } => "init",
+        Commands::Preview { .. } => "preview",
+        Commands::Tree { .. } => "tree",
+        Commands::Test => "test",
+        Commands::Lint { .. } => "lint",
+        Commands::Build { .. } => "build",
+        Commands::Inspect { .. } => "inspect",
+        Commands::Attest { .. } => "attest",
+        Commands::Render { .. } => "render",
+        Commands::Package { .. } => "package",
+        Commands::Publish { .. } => "publish",
+    }
+}
+
+fn dispatch(command: Commands) -> Result<()> {
+    match command {
         Commands::Preview {
             package,
             inputs,
@@ -164,7 +241,21 @@ fn main() -> Result<()> {
             out,
             strip_metadata,
         } => run_build(&package, &out, strip_metadata),
-        Commands::Inspect { chart } => run_inspect(&chart),
+        Commands::Inspect {
+            chart,
+            oci,
+            oci_username,
+            oci_password,
+            oci_token,
+        } => run_inspect(
+            chart.as_deref(),
+            oci.as_deref(),
+            OciAuthArgs {
+                username: oci_username,
+                password: oci_password,
+                token: oci_token,
+            },
+        ),
         Commands::Attest { chart, out } => run_attest(&chart, &out),
         Commands::Render {
             package,
@@ -177,7 +268,7 @@ fn main() -> Result<()> {
             inputs_file,
         } => run_render(RenderArgs {
             package_dir: &package,
-            out: &out,
+            out: out.as_deref(),
             release: &release,
             namespace: &namespace,
             engine: &engine,
@@ -187,6 +278,7 @@ fn main() -> Result<()> {
         }),
         Commands::Init { .. } => stub("init"),
         Commands::Test => stub("test"),
+        Commands::Package { chart, out_dir } => run_package(&chart, &out_dir),
         Commands::Publish {
             chart,
             to,
@@ -199,6 +291,21 @@ fn main() -> Result<()> {
 fn stub(name: &str) -> Result<()> {
     eprintln!("akua {name} — not yet implemented");
     Ok(())
+}
+
+/// Initialise the global tracing subscriber. Text format (default) goes
+/// to stderr as compact human-readable output; JSON goes to stderr as
+/// one newline-delimited record per event for downstream parsers
+/// (Temporal's `ApplicationFailure.details`, log aggregators, etc.).
+fn init_tracing(format: LogFormat) {
+    let filter = tracing_subscriber::EnvFilter::from_default_env();
+    let base = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr);
+    match format {
+        LogFormat::Text => base.init(),
+        LogFormat::Json => base.json().flatten_event(true).init(),
+    }
 }
 
 fn load_schema(package: &Path) -> Result<serde_json::Value> {
@@ -287,35 +394,27 @@ fn load_package(package_dir: &Path, work_dir: &Path) -> Result<(PackageManifest,
     Ok((manifest, umbrella))
 }
 
-/// Rewrite any `file://<relative>` URL in a source's `chart.repoUrl` to an
-/// absolute `file://<abs>` form, resolved against `base_dir`. Engines that
-/// load local files (KCL entrypoints, helmfile.yaml) see absolute paths only
-/// — no CWD dependency, safe for concurrent use.
-fn resolve_source_paths(
-    sources: &[akua_core::HelmSource],
-    base_dir: &Path,
-) -> Vec<akua_core::HelmSource> {
+/// Resolve relative paths in KCL / helmfile engine blocks against
+/// `base_dir` so engines see absolute paths. Safe for concurrent use.
+fn resolve_source_paths(sources: &[akua_core::Source], base_dir: &Path) -> Vec<akua_core::Source> {
+    let resolve = |p: &str| -> String {
+        let path = PathBuf::from(p);
+        if path.is_absolute() {
+            p.to_string()
+        } else {
+            base_dir.join(path).display().to_string()
+        }
+    };
+
     sources
         .iter()
         .map(|s| {
             let mut out = s.clone();
-            if let Some(rest) = out.chart.repo_url.strip_prefix("file://") {
-                let path = PathBuf::from(rest);
-                let abs = if path.is_absolute() {
-                    path
-                } else {
-                    base_dir.join(path)
-                };
-                out.chart.repo_url = format!("file://{}", abs.display());
+            if let Some(k) = out.kcl.as_mut() {
+                k.entrypoint = resolve(&k.entrypoint);
             }
-            if let Some(p) = &out.chart.path {
-                let path = PathBuf::from(p);
-                if !path.is_absolute()
-                    && !out.chart.repo_url.starts_with("http")
-                    && !out.chart.repo_url.starts_with("oci://")
-                {
-                    out.chart.path = Some(base_dir.join(path).display().to_string());
-                }
+            if let Some(hf) = out.helmfile.as_mut() {
+                hf.path = resolve(&hf.path);
             }
             out
         })
@@ -342,9 +441,48 @@ fn resolve_inputs_to_values(
 fn run_build(package_dir: &Path, out: &Path, strip_metadata: bool) -> Result<()> {
     std::fs::create_dir_all(out)
         .with_context(|| format!("creating output dir {}", out.display()))?;
-    let (manifest, umbrella) = load_package(package_dir, out)?;
+
+    // Stage engine-materialised subcharts (KCL / helmfile) in a scratch
+    // dir — `fetch_dependencies` will copy them into `out/charts/` below,
+    // so we don't want engines writing directly next to the umbrella
+    // files and leaving a parallel tree alongside `charts/`.
+    let scratch = tempfile::tempdir().context("creating scratch work dir")?;
+    let (manifest, mut umbrella) = load_package(package_dir, scratch.path())?;
+
+    // Populate `out/charts/` so the build output is helm-tooling ready:
+    //   helm template <out> / helm install <out> / helm package <out>
+    // all work without a separate `helm dep update` pass. Fetch runs
+    // BEFORE writing Chart.yaml so we can strip the scratch-tempdir
+    // file:// URLs from the shipped manifest (below).
+    let charts_dir = out.join("charts");
+    fetch_dependencies(&umbrella.chart_yaml.dependencies, &charts_dir)
+        .with_context(|| format!("populating {}", charts_dir.display()))?;
+
+    // Rewrite engine-materialised file:// deps to helm's in-chart
+    // convention (empty repository). They already live in `charts/<alias>/`
+    // after the fetch, so helm resolves them locally at template time —
+    // the absolute scratch path would only leak the builder's filesystem
+    // into a chart that's meant to be shipped via OCI or `.tgz`.
+    for dep in &mut umbrella.chart_yaml.dependencies {
+        if dep.repository.starts_with("file://") {
+            dep.repository.clear();
+        }
+    }
+
     write_umbrella(&umbrella, out).context("writing umbrella chart")?;
-    println!("wrote {}/Chart.yaml + values.yaml", out.display());
+    eprintln!("wrote {}/Chart.yaml + values.yaml", out.display());
+    if !umbrella.chart_yaml.dependencies.is_empty() {
+        eprintln!(
+            "fetched {} dependenc{} into {}/charts/",
+            umbrella.chart_yaml.dependencies.len(),
+            if umbrella.chart_yaml.dependencies.len() == 1 {
+                "y"
+            } else {
+                "ies"
+            },
+            out.display()
+        );
+    }
 
     if !strip_metadata {
         // Schema is optional for `build`. If absent, fields list is empty and
@@ -356,15 +494,21 @@ fn run_build(package_dir: &Path, out: &Path, strip_metadata: bool) -> Result<()>
             .unwrap_or_default();
         let metadata = build_metadata(&manifest.sources, &fields);
         write_metadata(&metadata, out).context("writing .akua/metadata.yaml")?;
-        println!("wrote {}/.akua/metadata.yaml", out.display());
+        eprintln!("wrote {}/.akua/metadata.yaml", out.display());
     }
 
-    if !umbrella.git_sources.is_empty() {
-        eprintln!(
-            "note: {} git source(s) skipped — Helm cannot fetch these",
-            umbrella.git_sources.len()
-        );
-    }
+    Ok(())
+}
+
+fn run_package(chart_dir: &Path, out_dir: &Path) -> Result<()> {
+    let outcome = package_chart(chart_dir, out_dir).context("packaging chart")?;
+    eprintln!(
+        "packaged: {} ({} {}, {} bytes)",
+        outcome.path.display(),
+        outcome.name,
+        outcome.version,
+        outcome.size,
+    );
     Ok(())
 }
 
@@ -387,8 +531,10 @@ fn run_publish(
         auth,
     };
     let outcome = publish_chart(chart_dir, &opts).context("publishing chart")?;
-    println!("pushed: {}", outcome.pushed_ref);
-    println!("digest: {}", outcome.digest);
+    // pushed_ref on stdout so scripts can capture it; digest to stderr as
+    // human-readable confirmation.
+    println!("{}", outcome.pushed_ref);
+    eprintln!("digest: {}", outcome.digest);
     Ok(())
 }
 
@@ -422,16 +568,154 @@ fn read_chart_yaml(chart_dir: &Path) -> Result<(String, String)> {
     Ok((name, version))
 }
 
-fn run_inspect(chart_dir: &Path) -> Result<()> {
-    let path = chart_dir.join(".akua").join("metadata.yaml");
-    let bytes = std::fs::read(&path).with_context(|| {
-        format!(
-            "reading {} (chart built with --strip-metadata?)",
-            path.display()
+/// Output keys emitted by `akua inspect` as pretty JSON:
+/// - `chartYaml`: parsed Chart.yaml (Helm Chart v2 schema).
+/// - `valuesSchema`: parsed values.schema.json when the chart ships one
+///   (Helm 3.5+ feature); null otherwise.
+/// - `akuaMetadata`: parsed `.akua/metadata.yaml` when the chart is
+///   Akua-built; null for vanilla Helm charts.
+struct OciAuthArgs {
+    username: Option<String>,
+    password: Option<String>,
+    token: Option<String>,
+}
+
+fn run_inspect(
+    chart_dir: Option<&Path>,
+    oci_ref: Option<&str>,
+    auth_args: OciAuthArgs,
+) -> Result<()> {
+    match (chart_dir, oci_ref) {
+        (Some(_), Some(_)) => bail!("--chart and --oci are mutually exclusive"),
+        (None, None) => bail!("provide either --chart <dir> or --oci <ref>"),
+        (Some(dir), None) => inspect_local(dir),
+        (None, Some(r)) => inspect_oci(r, auth_args),
+    }
+}
+
+fn inspect_local(chart_dir: &Path) -> Result<()> {
+    let output = read_chart_contents(chart_dir)?;
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+fn inspect_output_json(
+    chart_yaml: serde_json::Value,
+    values_schema: Option<serde_json::Value>,
+    akua_metadata: Option<serde_json::Value>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "chartYaml": chart_yaml,
+        "valuesSchema": values_schema,
+        "akuaMetadata": akua_metadata,
+    })
+}
+
+fn inspect_oci(reference: &str, auth_args: OciAuthArgs) -> Result<()> {
+    let (repository, chart, version) = parse_oci_inspect_ref(reference)?;
+    let host = repository
+        .trim_start_matches("oci://")
+        .split('/')
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    let oci_auth = build_oci_auth(&host, auth_args)?;
+
+    let tmp = tempfile::tempdir().context("creating scratch dir")?;
+    let charts_dir = tmp.path().join("charts");
+    let dep = akua_core::Dependency {
+        name: chart.clone(),
+        version: version.clone(),
+        repository: repository.clone(),
+        alias: Some("__inspect".to_string()),
+        condition: None,
+    };
+    akua_core::fetch_dependencies_with_auth(std::slice::from_ref(&dep), &charts_dir, &oci_auth)
+        .with_context(|| {
+            format!("pulling {reference} (chart `{chart}` version `{version}`) from {repository}")
+        })?;
+    let output = read_chart_contents(&charts_dir.join("__inspect"))?;
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+fn build_oci_auth(host: &str, args: OciAuthArgs) -> Result<akua_core::OciAuth> {
+    use akua_core::RegistryCredentials;
+    let mut auth = akua_core::OciAuth::default();
+    match (args.username, args.password, args.token) {
+        (Some(_), _, Some(_)) | (_, Some(_), Some(_)) => {
+            bail!("--oci-token is mutually exclusive with --oci-username / --oci-password")
+        }
+        (Some(u), Some(p), None) => {
+            auth.creds.insert(
+                host.to_string(),
+                RegistryCredentials::Basic {
+                    username: u,
+                    password: p,
+                },
+            );
+        }
+        (Some(_), None, None) | (None, Some(_), None) => {
+            bail!("--oci-username and --oci-password must be provided together")
+        }
+        (None, None, Some(token)) => {
+            auth.creds
+                .insert(host.to_string(), RegistryCredentials::Bearer(token));
+        }
+        (None, None, None) => {}
+    }
+    Ok(auth)
+}
+
+/// Require a fully-tagged `oci://host/path/chart:version`. Returns
+/// `(repository, chart, version)`. Delegates parsing to
+/// `akua_core::source::parse_oci_url` (shared with the fetcher).
+fn parse_oci_inspect_ref(reference: &str) -> Result<(String, String, String)> {
+    let parsed = akua_core::source::parse_oci_url(reference)
+        .ok_or_else(|| anyhow::anyhow!("`{reference}` is not a valid oci:// URL"))?;
+    let version = parsed.tag.ok_or_else(|| {
+        anyhow::anyhow!(
+            "`{reference}` missing `:<version>` suffix — inspect needs an exact version"
         )
     })?;
-    print!("{}", String::from_utf8_lossy(&bytes));
-    Ok(())
+    Ok((parsed.repository, parsed.chart_name, version))
+}
+
+/// Shared by local + OCI inspect — reads whatever files the chart dir
+/// happens to have. Missing `values.schema.json` and `.akua/metadata.yaml`
+/// are both fine; vanilla Helm charts don't ship either.
+fn read_chart_contents(chart_dir: &Path) -> Result<serde_json::Value> {
+    let chart_yaml_path = chart_dir.join("Chart.yaml");
+    let chart_bytes = std::fs::read(&chart_yaml_path)
+        .with_context(|| format!("reading {}", chart_yaml_path.display()))?;
+    let chart_yaml: serde_json::Value = serde_yaml::from_slice(&chart_bytes)
+        .with_context(|| format!("parsing {}", chart_yaml_path.display()))?;
+
+    let schema_path = chart_dir.join("values.schema.json");
+    let values_schema = match std::fs::read(&schema_path) {
+        Ok(bytes) => Some(
+            serde_json::from_slice::<serde_json::Value>(&bytes)
+                .with_context(|| format!("parsing {}", schema_path.display()))?,
+        ),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e).context(format!("reading {}", schema_path.display())),
+    };
+
+    let metadata_path = chart_dir.join(".akua").join("metadata.yaml");
+    let akua_metadata = match std::fs::read(&metadata_path) {
+        Ok(bytes) => Some(
+            serde_yaml::from_slice::<serde_json::Value>(&bytes)
+                .with_context(|| format!("parsing {}", metadata_path.display()))?,
+        ),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => return Err(e).context(format!("reading {}", metadata_path.display())),
+    };
+
+    Ok(inspect_output_json(
+        chart_yaml,
+        values_schema,
+        akua_metadata,
+    ))
 }
 
 fn run_attest(chart_dir: &Path, out: &Path) -> Result<()> {
@@ -444,9 +728,9 @@ fn run_attest(chart_dir: &Path, out: &Path) -> Result<()> {
             .with_context(|| format!("creating {}", parent.display()))?;
     }
     std::fs::write(out, json).with_context(|| format!("writing {}", out.display()))?;
-    println!("wrote {}", out.display());
-    println!("sign + push with:");
-    println!(
+    eprintln!("wrote {}", out.display());
+    eprintln!("sign + push with:");
+    eprintln!(
         "  cosign attest --predicate {} --type slsaprovenance1 <image>",
         out.display()
     );
@@ -455,7 +739,7 @@ fn run_attest(chart_dir: &Path, out: &Path) -> Result<()> {
 
 struct RenderArgs<'a> {
     package_dir: &'a Path,
-    out: &'a Path,
+    out: Option<&'a Path>,
     release: &'a str,
     namespace: &'a str,
     engine: &'a str,
@@ -465,9 +749,10 @@ struct RenderArgs<'a> {
 }
 
 fn run_render(args: RenderArgs<'_>) -> Result<()> {
-    std::fs::create_dir_all(args.out)
-        .with_context(|| format!("creating output dir {}", args.out.display()))?;
-    let (_, umbrella) = load_package(args.package_dir, args.out)?;
+    // Stage the umbrella in a throwaway temp dir. Render is a transient
+    // operation — the durable chart artifact is what `akua build` emits.
+    let scratch = tempfile::tempdir().context("creating scratch work dir")?;
+    let (_, umbrella) = load_package(args.package_dir, scratch.path())?;
     let override_values =
         resolve_inputs_to_values(args.package_dir, args.inputs_inline, args.inputs_file)?;
     let opts = RenderOptions {
@@ -477,12 +762,28 @@ fn run_render(args: RenderArgs<'_>) -> Result<()> {
         override_values,
     };
     let manifest_yaml = match args.engine {
-        "helm-cli" => render_umbrella(&umbrella, args.out, &opts).context("helm-cli render")?,
-        "helm-wasm" => render_umbrella_embedded(&umbrella, args.out, &opts)
+        "helm-cli" => {
+            render_umbrella(&umbrella, scratch.path(), &opts).context("helm-cli render")?
+        }
+        "helm-wasm" => render_umbrella_embedded(&umbrella, scratch.path(), &opts)
             .context("helm-wasm (embedded) render")?,
         other => anyhow::bail!("unknown --engine `{other}`; expected `helm-wasm` or `helm-cli`"),
     };
-    print!("{manifest_yaml}");
+    match args.out {
+        Some(out) => {
+            if let Some(parent) = out.parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent).with_context(|| {
+                        format!("creating parent directory {}", parent.display())
+                    })?;
+                }
+            }
+            std::fs::write(out, &manifest_yaml)
+                .with_context(|| format!("writing {}", out.display()))?;
+            eprintln!("wrote {}", out.display());
+        }
+        None => print!("{manifest_yaml}"),
+    }
     Ok(())
 }
 
@@ -498,7 +799,7 @@ fn run_tree(package_dir: &Path) -> Result<()> {
         umbrella.chart_yaml.version,
         manifest.sources.len()
     );
-    if umbrella.chart_yaml.dependencies.is_empty() && umbrella.git_sources.is_empty() {
+    if umbrella.chart_yaml.dependencies.is_empty() {
         println!("  (no dependencies)");
         return Ok(());
     }
@@ -516,15 +817,6 @@ fn run_tree(package_dir: &Path) -> Result<()> {
             repo = dep.repository
         );
     }
-    for git in &umbrella.git_sources {
-        let path = git.chart.path.as_deref().unwrap_or(".");
-        println!(
-            "  - (git) {repo}@{rev} path={path}",
-            repo = git.chart.repo_url,
-            rev = git.chart.target_revision,
-            path = path
-        );
-    }
     Ok(())
 }
 
@@ -537,4 +829,144 @@ fn run_lint(package: &Path) -> Result<()> {
         println!("  - {}", f.path);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_oci_inspect_ref_splits_host_chart_and_version() {
+        let (repo, chart, version) =
+            parse_oci_inspect_ref("oci://ghcr.io/stefanprodan/charts/podinfo:6.7.1").unwrap();
+        assert_eq!(repo, "oci://ghcr.io/stefanprodan/charts");
+        assert_eq!(chart, "podinfo");
+        assert_eq!(version, "6.7.1");
+    }
+
+    #[test]
+    fn parse_oci_inspect_ref_shallow_path() {
+        let (repo, chart, version) =
+            parse_oci_inspect_ref("oci://registry.local/mychart:1.0.0").unwrap();
+        assert_eq!(repo, "oci://registry.local");
+        assert_eq!(chart, "mychart");
+        assert_eq!(version, "1.0.0");
+    }
+
+    #[test]
+    fn parse_oci_inspect_ref_preserves_deep_path() {
+        let (repo, chart, version) =
+            parse_oci_inspect_ref("oci://registry.local/a/b/c/d/leaf-chart:v2.0.0-rc1").unwrap();
+        assert_eq!(repo, "oci://registry.local/a/b/c/d");
+        assert_eq!(chart, "leaf-chart");
+        assert_eq!(version, "v2.0.0-rc1");
+    }
+
+    #[test]
+    fn parse_oci_inspect_ref_rejects_missing_scheme() {
+        // Parser rejects non-oci URLs up-front — inspect turns that into
+        // "not a valid oci:// URL".
+        let err = parse_oci_inspect_ref("ghcr.io/foo/bar:1.0").unwrap_err();
+        assert!(format!("{err}").contains("not a valid oci:// URL"));
+    }
+
+    #[test]
+    fn parse_oci_inspect_ref_rejects_missing_version() {
+        let err = parse_oci_inspect_ref("oci://ghcr.io/foo/bar").unwrap_err();
+        assert!(format!("{err}").contains("missing `:<version>`"));
+    }
+
+    #[test]
+    fn parse_oci_inspect_ref_rejects_empty_version() {
+        // Empty tag parses as "no tag" → same error path as truly
+        // missing tag, one code branch to reason about.
+        let err = parse_oci_inspect_ref("oci://ghcr.io/foo/bar:").unwrap_err();
+        assert!(format!("{err}").contains("missing `:<version>`"));
+    }
+
+    #[test]
+    fn parse_oci_inspect_ref_rejects_missing_chart_path() {
+        // `oci://ghcr.io:1.0.0` has no path segments so the shared
+        // parser rejects it; inspect surfaces that as "not a valid oci:// URL".
+        let err = parse_oci_inspect_ref("oci://ghcr.io:1.0.0").unwrap_err();
+        assert!(format!("{err}").contains("not a valid oci:// URL"));
+    }
+
+    #[test]
+    fn read_chart_contents_returns_nulls_for_vanilla_chart() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("Chart.yaml"),
+            "apiVersion: v2\nname: vanilla\nversion: 0.1.0\n",
+        )
+        .unwrap();
+        let out = read_chart_contents(tmp.path()).unwrap();
+        assert_eq!(out["chartYaml"]["name"], "vanilla");
+        assert!(out["valuesSchema"].is_null());
+        assert!(out["akuaMetadata"].is_null());
+    }
+
+    #[test]
+    fn read_chart_contents_includes_values_schema_when_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("Chart.yaml"),
+            "apiVersion: v2\nname: x\nversion: 0.1.0\n",
+        )
+        .unwrap();
+        std::fs::write(
+            tmp.path().join("values.schema.json"),
+            r#"{"type":"object","properties":{"replicas":{"type":"integer"}}}"#,
+        )
+        .unwrap();
+        let out = read_chart_contents(tmp.path()).unwrap();
+        assert_eq!(out["valuesSchema"]["type"], "object");
+        assert_eq!(
+            out["valuesSchema"]["properties"]["replicas"]["type"],
+            "integer"
+        );
+    }
+
+    #[test]
+    fn read_chart_contents_errors_on_missing_chart_yaml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let err = read_chart_contents(tmp.path()).unwrap_err();
+        assert!(format!("{err:#}").contains("Chart.yaml"));
+    }
+
+    #[test]
+    fn log_format_clap_values_parse() {
+        use clap::ValueEnum;
+        assert_eq!(LogFormat::from_str("text", true).unwrap(), LogFormat::Text);
+        assert_eq!(LogFormat::from_str("json", true).unwrap(), LogFormat::Json);
+        assert!(LogFormat::from_str("xml", true).is_err());
+    }
+
+    #[test]
+    fn log_format_defaults_to_text() {
+        // Regression guard: the global default is Text. Flipping to Json
+        // by accident would break every existing user's stderr.
+        let cli = Cli::parse_from(["akua", "tree", "--package", "."]);
+        assert_eq!(cli.log_format, LogFormat::Text);
+    }
+
+    #[test]
+    fn log_format_flag_accepts_json() {
+        let cli = Cli::parse_from(["akua", "--log-format", "json", "tree", "--package", "."]);
+        assert_eq!(cli.log_format, LogFormat::Json);
+    }
+
+    #[test]
+    fn command_name_labels_match_subcommands() {
+        // Spot-check each variant so we don't forget to add a label when
+        // introducing a new subcommand.
+        let cli = Cli::parse_from(["akua", "build", "--package", "."]);
+        assert_eq!(command_name(&cli.command), "build");
+        let cli = Cli::parse_from(["akua", "render", "--package", "."]);
+        assert_eq!(command_name(&cli.command), "render");
+        let cli = Cli::parse_from(["akua", "inspect", "--chart", "."]);
+        assert_eq!(command_name(&cli.command), "inspect");
+        let cli = Cli::parse_from(["akua", "package", "--chart", "."]);
+        assert_eq!(command_name(&cli.command), "package");
+    }
 }

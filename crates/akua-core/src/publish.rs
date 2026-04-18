@@ -159,6 +159,46 @@ struct Maintainer {
     url: String,
 }
 
+/// Outcome of [`package_chart`].
+#[derive(Debug, Clone)]
+pub struct PackageOutcome {
+    /// Absolute path to the written `.tgz`.
+    pub path: PathBuf,
+    /// Chart name from `Chart.yaml`.
+    pub name: String,
+    /// Chart version from `Chart.yaml`.
+    pub version: String,
+    /// Byte length of the written archive.
+    pub size: u64,
+}
+
+/// Package `chart_dir` as a gzipped tarball and write it to `out_dir` as
+/// `<name>-<version>.tgz`. Matches Helm's packaging convention: the tarball
+/// wraps a single top-level directory named `<chart-name>/`.
+///
+/// Creates `out_dir` if missing. Returns the written path and chart metadata
+/// for display.
+pub fn package_chart(chart_dir: &Path, out_dir: &Path) -> Result<PackageOutcome, PublishError> {
+    let meta = read_chart_yaml(chart_dir)?;
+    let tarball = package_chart_tgz(chart_dir, &meta.name)?;
+    std::fs::create_dir_all(out_dir).map_err(|source| PublishError::Write {
+        path: out_dir.to_path_buf(),
+        source,
+    })?;
+    let filename = format!("{}-{}.tgz", meta.name, meta.version);
+    let out_path = out_dir.join(&filename);
+    std::fs::write(&out_path, &tarball).map_err(|source| PublishError::Write {
+        path: out_path.clone(),
+        source,
+    })?;
+    Ok(PackageOutcome {
+        path: out_path,
+        name: meta.name,
+        version: meta.version,
+        size: tarball.len() as u64,
+    })
+}
+
 /// Package `chart_dir` and push it to `opts.target`. Blocks until the push
 /// completes. Returns the fully qualified ref + manifest digest.
 ///
@@ -391,6 +431,62 @@ mod tests {
         paths.sort();
         assert!(paths.iter().any(|p| p == "mychart/Chart.yaml"));
         assert!(paths.iter().any(|p| p == "mychart/templates/deploy.yaml"));
+    }
+
+    #[test]
+    fn package_chart_writes_named_tgz_and_reports_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let chart_dir = tmp.path().join("src");
+        std::fs::create_dir_all(chart_dir.join("templates")).unwrap();
+        std::fs::write(
+            chart_dir.join("Chart.yaml"),
+            "apiVersion: v2\nname: demo\nversion: 0.3.1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            chart_dir.join("templates/deploy.yaml"),
+            "kind: Deployment\n",
+        )
+        .unwrap();
+
+        let out_dir = tmp.path().join("dist");
+        let outcome = package_chart(&chart_dir, &out_dir).unwrap();
+        assert_eq!(outcome.name, "demo");
+        assert_eq!(outcome.version, "0.3.1");
+        assert_eq!(outcome.path, out_dir.join("demo-0.3.1.tgz"));
+        assert!(outcome.path.exists());
+        assert_eq!(
+            outcome.size,
+            std::fs::metadata(&outcome.path).unwrap().len()
+        );
+
+        // Re-open and confirm the tarball layout is still `demo/…`.
+        let bytes = std::fs::read(&outcome.path).unwrap();
+        let gz = flate2::read::GzDecoder::new(&bytes[..]);
+        let mut archive = tar::Archive::new(gz);
+        let paths: Vec<String> = archive
+            .entries()
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path().unwrap().display().to_string())
+            .collect();
+        assert!(paths.iter().any(|p| p == "demo/Chart.yaml"));
+    }
+
+    #[test]
+    fn package_chart_creates_out_dir_if_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let chart_dir = tmp.path().join("src");
+        std::fs::create_dir_all(&chart_dir).unwrap();
+        std::fs::write(
+            chart_dir.join("Chart.yaml"),
+            "apiVersion: v2\nname: x\nversion: 0.0.1\n",
+        )
+        .unwrap();
+        let out_dir = tmp.path().join("deeply/nested/out");
+        assert!(!out_dir.exists());
+        package_chart(&chart_dir, &out_dir).unwrap();
+        assert!(out_dir.join("x-0.0.1.tgz").exists());
     }
 
     #[test]

@@ -1,10 +1,11 @@
+apiVersion: akua.dev/v1alpha1
+
 name: helmfile-package
 version: 0.1.0
 description: Akua package authored as a helmfile. Engine pre-renders → static Helm chart.
 
 sources:
-  - id: stack
-    engine: helmfile
-    chart:
-      repoUrl: file://./helmfile.yaml
-      targetRevision: 0.1.0
+  - name: stack
+    helmfile:
+      path: ./helmfile.yaml
+      version: 0.1.0

@@ -115,7 +115,7 @@ pub fn build_provenance(
         .sources
         .iter()
         .map(|s| ResolvedDependency {
-            name: s.id.clone(),
+            name: s.name.clone(),
             uri: s.origin.clone(),
             version: Some(s.version.clone()),
         })
@@ -172,14 +172,14 @@ mod tests {
             },
             sources: vec![
                 SourceInfo {
-                    id: "redis".to_string(),
+                    name: "redis".to_string(),
                     engine: "helm".to_string(),
                     origin: "https://charts.bitnami.com/bitnami/redis".to_string(),
                     version: "20.1.3".to_string(),
-                    alias: Some("redis-a1b2".to_string()),
+                    alias: Some("redis".to_string()),
                 },
                 SourceInfo {
-                    id: "app".to_string(),
+                    name: "app".to_string(),
                     engine: "kcl".to_string(),
                     origin: "file://./app.k".to_string(),
                     version: "0.1.0".to_string(),
@@ -227,7 +227,7 @@ mod tests {
         let mut meta = fixture_metadata();
         // Two helm sources + one kcl should collapse to ["helm", "kcl"]
         meta.sources.push(SourceInfo {
-            id: "nginx".to_string(),
+            name: "nginx".to_string(),
             engine: "helm".to_string(),
             origin: "https://charts.example.com/nginx".to_string(),
             version: "1.0.0".to_string(),

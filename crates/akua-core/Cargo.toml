@@ -17,7 +17,17 @@ helm-cli = ["dep:tempfile"]
 # fetcher lands.
 helm-wasm = ["dep:helm-engine-wasm", "dep:tar", "dep:flate2", "fetch"]
 # Native HTTP + OCI chart dep fetcher — replaces `helm dependency update`.
-fetch = ["dep:oci-client", "dep:tar", "dep:flate2", "dep:tokio", "dep:tempfile"]
+# `oci-client` stays in the dep list for `publish`; the fetch path uses
+# raw reqwest streaming so there's no layer-sized in-memory buffer.
+fetch = [
+    "dep:oci-client",
+    "dep:tar",
+    "dep:flate2",
+    "dep:tokio",
+    "dep:tempfile",
+    "dep:sha2",
+    "dep:base64",
+]
 # Native OCI publish via oci-client. No helm CLI needed for `akua publish`.
 publish = ["dep:oci-client", "dep:tar", "dep:flate2", "dep:tokio", "dep:tempfile"]
 # KCL engine — native Rust via kcl-lang/lib (git dep). Not WASM-safe;
@@ -47,3 +57,5 @@ oci-client = { version = "0.16", default-features = false, features = ["rustls-t
 tar = { version = "0.4", optional = true }
 flate2 = { version = "1", optional = true }
 helm-engine-wasm = { path = "../helm-engine-wasm", optional = true }
+sha2 = { version = "0.10", optional = true }
+base64 = { version = "0.22", optional = true }

@@ -1,6 +1,8 @@
 # `package.yaml` v1alpha1 — final design
 
-> **Status:** design locked, pending implementation. No code yet.
+> **Status:** implemented. Parser enforces the shape below; all examples
+> are authored in v1alpha1; no v0 reader exists (hard cut — no published
+> packages to migrate).
 > **Confidence:** ~90% on shipped surface; see "Deferred" section for the
 > 55–65% ideas we're *not* shipping in v1alpha1.
 > **Companion:** [`design-package-yaml-research.md`](./design-package-yaml-research.md)
@@ -148,14 +150,23 @@ remove v0 reader in the release after.
   SLSA. Build tool contract unchanged.
 - Helm v4 template engine embedding, native dep fetching, native OCI push.
 
-## Implementation steps (post-approval)
+## Implementation
 
-1. Rewrite `akua-core::manifest` types to v1alpha1 shape.
-2. Add `akua-core::manifest::v0` with the old types behind a feature flag;
-   auto-upgrade on load with a deprecation warning.
-3. Update `examples/{hello,kcl,helmfile}-package` to v1alpha1.
-4. Write `akua migrate-v1` subcommand.
-5. Sync docs (README, use-cases, getting-started) to the new shape.
-6. One release cycle later: remove v0 reader.
+Landed in a single cut (no v0 reader — zero published packages, so no
+migration path to maintain):
+
+- `akua-core::manifest::PackageManifest` carries `apiVersion`, parses
+  with `#[serde(deny_unknown_fields)]`, validates via `validate_manifest`
+  (unknown apiVersion, missing/duplicate/multi engine blocks).
+- `akua-core::source::Source` replaces the prior `HelmSource` +
+  `ChartRef`. Per-engine blocks: `HelmBlock { repo, chart?, version }`,
+  `KclBlock { entrypoint, version }`, `HelmfileBlock { path, version }`.
+- `engine::prepare` dispatches on `Source::kind()` instead of a string.
+  No `DEFAULT_ENGINE` constant; no `engine::resolve(&str)`.
+- `examples/{hello,kcl,helmfile}-package/package.yaml` and
+  `packages/core-wasm/smoke-test.mjs` are authored in v1alpha1.
+- SLSA provenance compatibility preserved: `SourceInfo` still serializes
+  as `{ id, engine, origin, version, alias }` — the Rust field is
+  renamed to `name` but `#[serde(rename = "id")]` keeps the output key.
 
 Estimate: 2–3 focused days.

@@ -14,8 +14,9 @@ use akua_core::{
     apply_install_transforms as core_apply_install_transforms,
     build_umbrella_chart as core_build_umbrella_chart,
     extract_install_fields as core_extract_install_fields, hash_to_suffix as core_hash_to_suffix,
-    merge_helm_source_values as core_merge_helm_source_values,
-    validate_values_schema as core_validate_values_schema, ExtractedInstallField, HelmSource,
+    merge_source_values as core_merge_source_values,
+    merge_values_schemas as core_merge_values_schemas, schema::SourceWithSchema,
+    validate_values_schema as core_validate_values_schema, ExtractedInstallField, Source,
 };
 use wasm_bindgen::prelude::*;
 
@@ -72,24 +73,37 @@ pub fn validate_values_schema(schema: JsValue) -> Result<Option<String>, JsValue
     Ok(core_validate_values_schema(&schema))
 }
 
-/// Merge values from multiple HelmSources into a single object, nested by
-/// alias. Git sources merge at the root.
-#[wasm_bindgen(js_name = mergeHelmSourceValues)]
-pub fn merge_helm_source_values(sources: JsValue) -> Result<JsValue, JsValue> {
-    let sources: Vec<HelmSource> = from_js(sources)?;
-    let merged = core_merge_helm_source_values(&sources);
+/// Merge values from multiple sources into a single object, nested by alias.
+#[wasm_bindgen(js_name = mergeSourceValues)]
+pub fn merge_source_values(sources: JsValue) -> Result<JsValue, JsValue> {
+    let sources: Vec<Source> = from_js(sources)?;
+    let merged = core_merge_source_values(&sources);
+    to_js(&merged)
+}
+
+/// Merge JSON Schemas from multiple sources into one umbrella schema.
+///
+/// Input: array of `{ source, schema? }`. Output: a single
+/// `type: object` schema where each source's schema nests under its
+/// deterministic alias (same alias the values use). Sources without a
+/// schema are skipped. Used by the install wizard to show one combined
+/// form for a multi-source package.
+#[wasm_bindgen(js_name = mergeValuesSchemas)]
+pub fn merge_values_schemas(sources: JsValue) -> Result<JsValue, JsValue> {
+    let sources: Vec<SourceWithSchema> = from_js(sources)?;
+    let merged = core_merge_values_schemas(&sources);
     to_js(&merged)
 }
 
 /// Build an umbrella Helm chart from a set of sources. Returns
-/// `{ chartYaml, values, gitSources }`.
+/// `{ chartYaml, values }`.
 #[wasm_bindgen(js_name = buildUmbrellaChart)]
 pub fn build_umbrella_chart(
     name: &str,
     version: &str,
     sources: JsValue,
 ) -> Result<JsValue, JsValue> {
-    let sources: Vec<HelmSource> = from_js(sources)?;
+    let sources: Vec<Source> = from_js(sources)?;
     let umbrella = core_build_umbrella_chart(name, version, &sources)
         .map_err(|e| JsValue::from_str(&format!("buildUmbrellaChart: {e}")))?;
     to_js(&umbrella)

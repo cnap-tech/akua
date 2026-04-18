@@ -1,26 +1,33 @@
 {
-	"name": "@akua/sdk",
-	"version": "0.0.0",
-	"description": "Akua SDK — high-level TypeScript API for building, previewing, and deploying cloud-native packages",
-	"license": "Apache-2.0",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/cnap-tech/akua",
-		"directory": "packages/sdk"
-	},
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"scripts": {
-		"build": "tsc",
-		"test": "echo 'no tests yet'",
-		"lint": "echo 'no lint yet'"
-	},
-	"dependencies": {
-		"@akua/core": "workspace:*"
-	},
-	"files": ["dist", "README.md"],
-	"publishConfig": {
-		"access": "restricted"
-	},
-	"private": true
+  "name": "@akua/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for Akua — published to JSR (see jsr.json). package.json exists only for the local bun workspace + vitest runner.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cnap-tech/akua",
+    "directory": "packages/sdk"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.node.ts",
+      "default": "./src/index.node.ts"
+    },
+    "./browser": {
+      "types": "./src/index.browser.ts",
+      "default": "./src/index.browser.ts"
+    }
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "^5.6",
+    "vitest": "^2.1"
+  },
+  "private": true
 }

@@ -24,7 +24,7 @@
 
 use serde_json::{Map, Value};
 
-use crate::source::{get_source_alias, HelmSource};
+use crate::source::{get_source_alias, Source};
 use crate::values::set_nested_value;
 
 /// Thin wrapper around [`serde_json::Value`] to make schema APIs explicit.
@@ -68,7 +68,11 @@ impl ExtractedInstallField {
 
     /// UI ordering hint from `x-user-input.order`, if any.
     pub fn order(&self) -> Option<i64> {
-        self.schema.get("x-user-input")?.as_object()?.get("order")?.as_i64()
+        self.schema
+            .get("x-user-input")?
+            .as_object()?
+            .get("order")?
+            .as_i64()
     }
 
     /// Standard JSON Schema `title`, if any.
@@ -90,32 +94,16 @@ fn has_user_input_marker(prop: &Value) -> bool {
     }
 }
 
-
-// ---------------------------------------------------------------------------
-// Alias computation for schema merge (mirrors values merge logic)
-// ---------------------------------------------------------------------------
-
-fn get_chart_name_from_source(source: &HelmSource) -> Option<String> {
-    if let Some(c) = &source.chart.chart {
-        if !c.is_empty() {
-            return Some(c.clone());
-        }
-    }
-    crate::source::extract_chart_name_from_oci(&source.chart.repo_url)
-}
-
 // ---------------------------------------------------------------------------
 // merge_values_schemas
 // ---------------------------------------------------------------------------
 
-/// Combine schemas from multiple helm sources into one umbrella schema.
+/// Combine schemas from multiple package sources into one umbrella schema.
 ///
 /// - Sources with no `valuesSchema` (or where the field is absent) are
 ///   skipped entirely.
 /// - Single-source inputs return that source's schema unchanged.
-/// - Multiple sources: Helm HTTP / OCI schemas nest under the source's alias
-///   (or chart name if no ID); Git schemas merge their top-level properties
-///   at the root; required arrays from Git sources concatenate.
+/// - Multiple sources: each schema nests under the source's alias.
 ///
 /// The returned schema is always a `type: "object"` root.
 pub fn merge_values_schemas(sources: &[SourceWithSchema]) -> JsonSchema {
@@ -132,58 +120,27 @@ pub fn merge_values_schemas(sources: &[SourceWithSchema]) -> JsonSchema {
     }
 
     if with_schema.len() == 1 {
-        let s = with_schema[0];
-        let schema = s.schema.clone().unwrap();
-        let chart_name = get_chart_name_from_source(&s.source);
-        if chart_name.is_none() {
-            // Git source with single schema: return at root.
-            return schema;
-        }
-        // Single Helm/OCI source: return as-is (no nesting needed).
-        return schema;
+        return with_schema[0].schema.clone().unwrap();
     }
 
-    // Multiple sources: merge.
     let mut merged_props: Map<String, Value> = Map::new();
-    let mut merged_required: Vec<Value> = Vec::new();
-
     for s in &with_schema {
         let schema = s.schema.as_ref().unwrap();
-        let chart_name = get_chart_name_from_source(&s.source);
-
-        if let Some(chart_name) = chart_name {
-            // Helm / OCI: nest under alias or chart name.
-            let key = get_source_alias(&s.source).unwrap_or(chart_name);
-            merged_props.insert(key, schema.clone());
-        } else {
-            // Git: merge properties at root.
-            if let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
-                for (k, v) in props {
-                    merged_props.insert(k.clone(), v.clone());
-                }
-            }
-            if let Some(req) = schema.get("required").and_then(|v| v.as_array()) {
-                for r in req {
-                    merged_required.push(r.clone());
-                }
-            }
-        }
+        let key = get_source_alias(&s.source).unwrap_or_else(|| s.source.name.clone());
+        merged_props.insert(key, schema.clone());
     }
 
     let mut root = Map::new();
     root.insert("type".to_string(), Value::String("object".to_string()));
     root.insert("properties".to_string(), Value::Object(merged_props));
-    if !merged_required.is_empty() {
-        root.insert("required".to_string(), Value::Array(merged_required));
-    }
     Value::Object(root)
 }
 
-/// Pairing of a helm source with its optional values schema, used by
+/// Pairing of a package source with its optional values schema, used by
 /// [`merge_values_schemas`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SourceWithSchema {
-    pub source: HelmSource,
+    pub source: Source,
     pub schema: Option<JsonSchema>,
 }
 
@@ -336,9 +293,10 @@ fn eval_cel(
         .map_err(|e| format!("field `{path}`: invalid CEL expression: {e}"))?;
 
     let mut ctx = Context::default();
-    ctx.add_function("slugify", |s: std::sync::Arc<String>| -> std::sync::Arc<String> {
-        std::sync::Arc::new(slugify(&s))
-    });
+    ctx.add_function(
+        "slugify",
+        |s: std::sync::Arc<String>| -> std::sync::Arc<String> { std::sync::Arc::new(slugify(&s)) },
+    );
     ctx.add_function(
         "slugifyMax",
         |s: std::sync::Arc<String>, max: i64| -> std::sync::Arc<String> {
@@ -454,11 +412,7 @@ fn validate_properties(props: &Map<String, Value>) -> Option<String> {
                     ))
                 }
                 Some(_) => {}
-                None => {
-                    return Some(format!(
-                        "Property \"{key}\": x-input.cel must be a string"
-                    ))
-                }
+                None => return Some(format!("Property \"{key}\": x-input.cel must be a string")),
             }
         }
 
@@ -941,21 +895,16 @@ mod tests {
 
     // --- merge_values_schemas ---
 
-    fn make_source(
-        id: Option<&str>,
-        repo: &str,
-        chart: Option<&str>,
-        path: Option<&str>,
-    ) -> HelmSource {
-        HelmSource {
-            id: id.map(String::from),
-            engine: None,
-            chart: crate::source::ChartRef {
-                repo_url: repo.to_string(),
+    fn make_source(name: &str, repo: &str, chart: Option<&str>) -> Source {
+        Source {
+            name: name.to_string(),
+            helm: Some(crate::source::HelmBlock {
+                repo: repo.to_string(),
                 chart: chart.map(String::from),
-                target_revision: "1.0.0".to_string(),
-                path: path.map(String::from),
-            },
+                version: "1.0.0".to_string(),
+            }),
+            kcl: None,
+            helmfile: None,
             values: None,
         }
     }
@@ -967,12 +916,7 @@ mod tests {
             "properties": {"replicas": {"type": "number"}}
         });
         let input = vec![SourceWithSchema {
-            source: make_source(
-                Some("id1"),
-                "https://charts.example.com",
-                Some("redis"),
-                None,
-            ),
+            source: make_source("id1", "https://charts.example.com", Some("redis")),
             schema: Some(schema.clone()),
         }];
         assert_eq!(merge_values_schemas(&input), schema);
@@ -981,57 +925,24 @@ mod tests {
     #[test]
     fn merge_nests_helm_oci_under_alias_keys() {
         let s1 = SourceWithSchema {
-            source: make_source(
-                Some("id_a"),
-                "https://charts.example.com",
-                Some("redis"),
-                None,
-            ),
+            source: make_source("cache", "https://charts.example.com", Some("redis")),
             schema: Some(json!({"type": "object", "properties": {"port": {"type": "number"}}})),
         };
         let s2 = SourceWithSchema {
-            source: make_source(Some("id_b"), "oci://ghcr.io/org/postgres", None, None),
+            source: make_source("db", "oci://ghcr.io/org/postgres", None),
             schema: Some(json!({"type": "object", "properties": {"mem": {"type": "string"}}})),
         };
         let merged = merge_values_schemas(&[s1, s2]);
         let props = merged.get("properties").unwrap().as_object().unwrap();
         assert_eq!(props.len(), 2);
-        for key in props.keys() {
-            assert!(key.starts_with("redis-") || key.starts_with("postgres-"));
-        }
-    }
-
-    #[test]
-    fn merge_puts_git_source_at_root() {
-        let git = SourceWithSchema {
-            source: make_source(None, "https://github.com/org/repo", None, Some("chart")),
-            schema: Some(json!({"type": "object", "properties": {"global": {"type": "boolean"}}})),
-        };
-        let helm = SourceWithSchema {
-            source: make_source(
-                Some("id1"),
-                "https://charts.example.com",
-                Some("redis"),
-                None,
-            ),
-            schema: Some(json!({"type": "object", "properties": {"replicas": {"type": "number"}}})),
-        };
-        let merged = merge_values_schemas(&[git, helm]);
-        let props = merged.get("properties").unwrap().as_object().unwrap();
-        assert!(props.contains_key("global"));
-        let alias_keys: Vec<_> = props.keys().filter(|k| k.starts_with("redis-")).collect();
-        assert_eq!(alias_keys.len(), 1);
+        assert!(props.contains_key("cache"));
+        assert!(props.contains_key("db"));
     }
 
     #[test]
     fn merge_empty_when_no_sources_have_schema() {
         let s = SourceWithSchema {
-            source: make_source(
-                Some("id"),
-                "https://charts.example.com",
-                Some("redis"),
-                None,
-            ),
+            source: make_source("id", "https://charts.example.com", Some("redis")),
             schema: None,
         };
         let merged = merge_values_schemas(&[s]);

@@ -248,6 +248,44 @@ A consumer (install UI, form renderer) is **Akua-conformant** if it:
 4. Never parses `x-input` directly — calls the bundle's `schema()`
    ABI for dynamic form updates.
 
+## Relationship to uiSchema standards (rjsf, JSONForms)
+
+Akua's `x-user-input` and the broader JSON Schema UI ecosystem
+([react-jsonschema-form][rjsf], [JSONForms][jsonforms]) solve different
+problems and are complementary, not competitors.
+
+| Concern | Akua | rjsf / JSONForms |
+|---|---|---|
+| **Which fields does the end-user configure per-install?** | `x-user-input` (inline, on the schema) | Not modelled — every property is renderable |
+| **How should each field be rendered (widget, layout, grouping, conditional visibility)?** | Out of scope | `uiSchema` (rjsf: `ui:widget`, `ui:order`; JSONForms: `{type: "VerticalLayout", elements: [{scope: …}]}`) |
+| **How are the two documents connected?** | Markers are inline with the schema | `uiSchema` is a **separate** document keyed by JSON Pointer |
+
+Two observations:
+
+1. **Overlap is intentionally small.** The only property we standardise
+   that rjsf also covers is `order`. Everything rjsf/JSONForms add
+   (widgets, layouts, conditional rendering) we deliberately leave
+   out — the Gen 4 `schema()` ABI already lets bundles emit a
+   partially-resolved schema, so cross-field conditionals belong in
+   the bundle, not in a uiSchema layer Akua enforces.
+2. **Consumers MAY pair a uiSchema with Akua.** Nothing stops an
+   install UI from reading `x-user-input` for the allowlist and
+   applying a separate rjsf- or JSONForms-shaped `uiSchema.json` for
+   rendering. Akua doesn't own or validate that file. Keep it out of
+   the resolved schema that `schema()` returns — ship it as a sibling
+   artefact if you need it.
+
+[rjsf]: https://github.com/rjsf-team/react-jsonschema-form
+[jsonforms]: https://github.com/eclipsesource/jsonforms
+
+Why we don't embed uiSchema-style hints inline (e.g., a `ui:widget`
+key on every property): the resolved schema crosses the `schema()` ABI
+boundary. Everything we put on it becomes a stable contract with
+consumers. `x-user-input` earns its place because "is this field
+customer-configurable?" is a decision authors *must* make and consumers
+*must* know. Widget choice is not — it's a rendering preference that
+differs per product and per UI framework.
+
 ## Deprecated / removed
 
 These legacy markers are no longer recognised:
