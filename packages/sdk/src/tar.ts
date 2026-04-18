@@ -13,7 +13,9 @@
  * malicious chart can't write outside the caller's logical scope.
  */
 
-export class TarError extends Error {
+import { AkuaError } from './errors.js';
+
+export class TarError extends AkuaError {
   constructor(message: string) {
     super(message);
     this.name = 'TarError';

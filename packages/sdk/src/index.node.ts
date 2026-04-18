@@ -18,3 +18,5 @@ export async function init(): Promise<void> {
 }
 
 export * from './index.js';
+export { dockerConfigAuth, DockerConfigError } from './docker-config.node.js';
+export type { DockerConfigAuthOptions } from './docker-config.node.js';

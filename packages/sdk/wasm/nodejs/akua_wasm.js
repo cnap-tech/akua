@@ -27,6 +27,35 @@ function applyInstallTransforms(fields, inputs) {
 exports.applyInstallTransforms = applyInstallTransforms;
 
 /**
+ * Build `.akua/metadata.yaml` provenance. Caller supplies `buildTime`
+ * as an RFC 3339 string — JS sees `SystemTime::now()` panic in WASM,
+ * so the timestamp is computed host-side (SDK reads `SOURCE_DATE_EPOCH`
+ * on Node, falls back to `new Date().toISOString()`).
+ * @param {any} sources
+ * @param {any} fields
+ * @param {string} build_time
+ * @returns {any}
+ */
+function buildMetadata(sources, fields, build_time) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passStringToWasm0(build_time, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len0 = WASM_VECTOR_LEN;
+        wasm.buildMetadata(retptr, addHeapObject(sources), addHeapObject(fields), ptr0, len0);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
+    }
+}
+exports.buildMetadata = buildMetadata;
+
+/**
  * Build an umbrella Helm chart from a set of sources. Returns
  * `{ chartYaml, values }`.
  * @param {string} name

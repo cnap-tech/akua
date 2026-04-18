@@ -28,10 +28,46 @@
  */
 
 import { packTgzStream } from './tar.js';
-import type { UmbrellaChart } from './types.js';
+import type {
+  AkuaMetadata,
+  ChartDependency,
+  ChartYaml,
+  JsonSchema,
+  UmbrellaChart,
+} from './types.js';
+
+/**
+ * Canonical OCI reference for a `Chart.yaml` dependency. Returns
+ * `${repository}/${name}:${version}` for `oci://` deps, `null`
+ * otherwise (e.g. `file://`, `https://`, or empty after scrubbing).
+ * Pair with [`pullChart`].
+ */
+export function dependencyToOciRef(dep: ChartDependency): string | null {
+  if (!dep.repository.startsWith('oci://')) return null;
+  return `${dep.repository}/${dep.name}:${dep.version}`;
+}
 
 // Small subset of js-yaml's API we need — hand-rolled dumper below.
 // We avoid a js-yaml dep so the SDK stays small.
+
+export interface PackChartOptions {
+  /**
+   * Optional merged JSON Schema to emit as `values.schema.json`. Usually
+   * the output of [`mergeValuesSchemas`] — lets install tooling validate
+   * user inputs against the umbrella's combined schema.
+   */
+  valuesSchema?: JsonSchema;
+  /**
+   * Optional `.akua/metadata.yaml` sidecar. Produced by [`buildMetadata`].
+   * Carries SLSA-style provenance (sources, build time, akua version).
+   */
+  metadata?: AkuaMetadata;
+  /**
+   * Abort signal — rejects the pack promise / errors the stream when
+   * cancelled. Checked before each tar entry is emitted.
+   */
+  signal?: AbortSignal;
+}
 
 /**
  * Pack an assembled umbrella chart + subchart bytes into a single
@@ -41,8 +77,11 @@ import type { UmbrellaChart } from './types.js';
 export async function packChart(
   umbrella: UmbrellaChart,
   subcharts: Map<string, Uint8Array>,
+  options: PackChartOptions = {},
 ): Promise<Uint8Array> {
-  return new Uint8Array(await new Response(packChartStream(umbrella, subcharts)).arrayBuffer());
+  return new Uint8Array(
+    await new Response(packChartStream(umbrella, subcharts, options)).arrayBuffer(),
+  );
 }
 
 /**
@@ -58,27 +97,66 @@ export function packChartStream(
     | Map<string, Uint8Array>
     | Iterable<readonly [string, Uint8Array]>
     | AsyncIterable<readonly [string, Uint8Array]>,
+  options: PackChartOptions = {},
 ): ReadableStream<Uint8Array> {
   const chartName = umbrella.chartYaml.name;
-  const chartYamlBytes = textEncode(
-    dumpYaml(umbrella.chartYaml as unknown as Record<string, unknown>),
-  );
+  const chartYaml = scrubFileRepositories(umbrella.chartYaml);
+  const chartYamlBytes = textEncode(dumpYaml(chartYaml as unknown as Record<string, unknown>));
   const valuesYamlBytes = textEncode(dumpYaml(umbrella.values));
+  const { valuesSchema, metadata, signal } = options;
 
   async function* entries(): AsyncGenerator<readonly [string, Uint8Array]> {
+    throwIfAborted(signal);
     yield ['Chart.yaml', chartYamlBytes];
+    throwIfAborted(signal);
     yield ['values.yaml', valuesYamlBytes];
+    if (valuesSchema) {
+      throwIfAborted(signal);
+      yield ['values.schema.json', textEncode(JSON.stringify(valuesSchema, null, 2) + '\n')];
+    }
+    if (metadata) {
+      throwIfAborted(signal);
+      yield [
+        '.akua/metadata.yaml',
+        textEncode(dumpYaml(metadata as unknown as Record<string, unknown>)),
+      ];
+    }
     const iter =
       Symbol.asyncIterator in (subcharts as object)
         ? (subcharts as AsyncIterable<readonly [string, Uint8Array]>)
         : (subcharts as Iterable<readonly [string, Uint8Array]>);
     for await (const [alias, bytes] of iter as AsyncIterable<readonly [string, Uint8Array]>) {
       if (!alias) continue;
+      throwIfAborted(signal);
       yield [`charts/${alias}-${findVersion(umbrella, alias)}.tgz`, bytes];
     }
   }
 
   return packTgzStream(chartName, entries());
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw signal.reason ?? new DOMException('aborted', 'AbortError');
+  }
+}
+
+/**
+ * Helm's semantics for `dependencies[].repository: file://…`: the path
+ * is only meaningful during local development (`helm dep update`). Once
+ * subcharts are materialised into `charts/`, the field must be blank
+ * or `helm install` rejects the chart. Mirrors CLI `akua package`.
+ */
+function scrubFileRepositories(chartYaml: ChartYaml): ChartYaml {
+  if (!chartYaml.dependencies?.some((d) => d.repository.startsWith('file://'))) {
+    return chartYaml;
+  }
+  return {
+    ...chartYaml,
+    dependencies: chartYaml.dependencies.map((d) =>
+      d.repository.startsWith('file://') ? { ...d, repository: '' } : d,
+    ),
+  };
 }
 
 function findVersion(umbrella: UmbrellaChart, alias: string): string {

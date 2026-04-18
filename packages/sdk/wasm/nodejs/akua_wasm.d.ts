@@ -10,6 +10,14 @@
 export function applyInstallTransforms(fields: any, inputs: any): any;
 
 /**
+ * Build `.akua/metadata.yaml` provenance. Caller supplies `buildTime`
+ * as an RFC 3339 string — JS sees `SystemTime::now()` panic in WASM,
+ * so the timestamp is computed host-side (SDK reads `SOURCE_DATE_EPOCH`
+ * on Node, falls back to `new Date().toISOString()`).
+ */
+export function buildMetadata(sources: any, fields: any, build_time: string): any;
+
+/**
  * Build an umbrella Helm chart from a set of sources. Returns
  * `{ chartYaml, values }`.
  */

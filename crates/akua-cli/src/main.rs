@@ -39,11 +39,17 @@ enum LogFormat {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Scaffold a new package in the current directory.
+    /// Scaffold a new package (package.yaml, values.schema.json, README.md).
     Init {
-        /// Scaffold around an existing public Helm chart.
+        /// Directory to create the package in. Created if missing.
+        #[arg(default_value = ".")]
+        dir: PathBuf,
+        /// Package name. Defaults to the target directory's name.
         #[arg(long)]
-        from: Option<String>,
+        name: Option<String>,
+        /// Overwrite existing files instead of aborting.
+        #[arg(long)]
+        force: bool,
     },
     /// Preview the resolved values for a given set of inputs.
     ///
@@ -196,7 +202,9 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     init_tracing(cli.log_format);
     let cmd_name = command_name(&cli.command);
+    let phase = phase_for(&cli.command);
     tracing::info!(
+        phase,
         command = cmd_name,
         version = env!("CARGO_PKG_VERSION"),
         "akua starting"
@@ -205,7 +213,9 @@ fn main() -> Result<()> {
     let result = dispatch(cli.command);
     if let Err(err) = &result {
         // Structured error boundary. `anyhow::Error` chains into `{:#}`.
-        tracing::error!(command = cmd_name, error = %format!("{err:#}"), "akua failed");
+        tracing::error!(phase, command = cmd_name, error = %format!("{err:#}"), "akua failed");
+    } else {
+        tracing::info!(phase, command = cmd_name, "akua done");
     }
     result
 }
@@ -224,6 +234,15 @@ fn command_name(cmd: &Commands) -> &'static str {
         Commands::Package { .. } => "package",
         Commands::Publish { .. } => "publish",
     }
+}
+
+/// Stable pipeline phase tag attached to top-level log events so
+/// downstream aggregators (Temporal workers, log shippers) can group
+/// events without parsing the subcommand label. At the CLI layer
+/// `phase` matches `command` 1:1; library callers can emit richer
+/// sub-phases (e.g. `fetch_deps`) on their own events.
+fn phase_for(cmd: &Commands) -> &'static str {
+    command_name(cmd)
 }
 
 fn dispatch(command: Commands) -> Result<()> {
@@ -276,7 +295,7 @@ fn dispatch(command: Commands) -> Result<()> {
             inputs_inline: inputs.as_deref(),
             inputs_file: inputs_file.as_deref(),
         }),
-        Commands::Init { .. } => stub("init"),
+        Commands::Init { dir, name, force } => run_init(&dir, name.as_deref(), force),
         Commands::Test => stub("test"),
         Commands::Package { chart, out_dir } => run_package(&chart, &out_dir),
         Commands::Publish {
@@ -291,6 +310,93 @@ fn dispatch(command: Commands) -> Result<()> {
 fn stub(name: &str) -> Result<()> {
     eprintln!("akua {name} — not yet implemented");
     Ok(())
+}
+
+/// Scaffold a starter package: `package.yaml`, `values.schema.json`,
+/// `README.md`. Refuses to clobber unless `force` is set.
+fn run_init(dir: &Path, name_override: Option<&str>, force: bool) -> Result<()> {
+    std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+
+    let resolved_name = match name_override {
+        Some(n) => n.to_string(),
+        None => dir
+            .canonicalize()
+            .with_context(|| format!("canonicalising {}", dir.display()))?
+            .file_name()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| anyhow::anyhow!("cannot derive package name from {}", dir.display()))?
+            .to_string(),
+    };
+
+    let files: [(&str, String); 3] = [
+        ("package.yaml", starter_package_yaml(&resolved_name)),
+        ("values.schema.json", starter_values_schema()),
+        ("README.md", starter_readme(&resolved_name)),
+    ];
+
+    for (fname, _) in &files {
+        let path = dir.join(fname);
+        if path.exists() && !force {
+            bail!(
+                "{} already exists — pass --force to overwrite",
+                path.display()
+            );
+        }
+    }
+    for (fname, contents) in files {
+        let path = dir.join(fname);
+        std::fs::write(&path, contents)
+            .with_context(|| format!("writing {}", path.display()))?;
+        eprintln!("wrote {}", path.display());
+    }
+    Ok(())
+}
+
+fn starter_package_yaml(name: &str) -> String {
+    format!(
+        "apiVersion: akua.dev/v1alpha1\n\
+         \n\
+         name: {name}\n\
+         version: 0.1.0\n\
+         description: TODO — describe this package.\n\
+         \n\
+         schema: ./values.schema.json\n\
+         \n\
+         sources:\n\
+         \x20\x20- name: app\n\
+         \x20\x20\x20\x20helm:\n\
+         \x20\x20\x20\x20\x20\x20repo: https://charts.bitnami.com/bitnami\n\
+         \x20\x20\x20\x20\x20\x20chart: nginx\n\
+         \x20\x20\x20\x20\x20\x20version: 18.1.0\n\
+         \x20\x20\x20\x20values:\n\
+         \x20\x20\x20\x20\x20\x20replicaCount: 1\n"
+    )
+}
+
+fn starter_values_schema() -> String {
+    r#"{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "replicaCount": {
+      "type": "integer",
+      "default": 1
+    }
+  }
+}
+"#
+    .to_string()
+}
+
+fn starter_readme(name: &str) -> String {
+    format!(
+        "# {name}\n\n\
+         An Akua package. Edit `package.yaml` and `values.schema.json`, then:\n\n\
+         ```sh\n\
+         akua preview\n\
+         akua build\n\
+         ```\n"
+    )
 }
 
 /// Initialise the global tracing subscriber. Text format (default) goes
@@ -594,7 +700,8 @@ fn run_inspect(
 }
 
 fn inspect_local(chart_dir: &Path) -> Result<()> {
-    let output = read_chart_contents(chart_dir)?;
+    let c = read_chart_contents(chart_dir)?;
+    let output = inspect_output_json(c.chart_yaml, c.values_schema, c.akua_metadata, None);
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }
@@ -603,11 +710,13 @@ fn inspect_output_json(
     chart_yaml: serde_json::Value,
     values_schema: Option<serde_json::Value>,
     akua_metadata: Option<serde_json::Value>,
+    oci_manifest_digest: Option<&str>,
 ) -> serde_json::Value {
     serde_json::json!({
         "chartYaml": chart_yaml,
         "valuesSchema": values_schema,
         "akuaMetadata": akua_metadata,
+        "ociManifestDigest": oci_manifest_digest,
     })
 }
 
@@ -634,7 +743,21 @@ fn inspect_oci(reference: &str, auth_args: OciAuthArgs) -> Result<()> {
         .with_context(|| {
             format!("pulling {reference} (chart `{chart}` version `{version}`) from {repository}")
         })?;
-    let output = read_chart_contents(&charts_dir.join("__inspect"))?;
+
+    // Resolve the upstream manifest digest via a single HEAD request so
+    // consumers can detect content changes without re-pulling. Best-effort:
+    // if the registry misbehaves, emit null rather than failing inspect.
+    let oci_ref = akua_core::OciRef::parse(&repository, &chart, &version)
+        .context("parsing OCI reference for digest lookup")?;
+    let digest = akua_core::fetch_oci_manifest_digest_blocking(&oci_ref, &oci_auth).ok();
+
+    let c = read_chart_contents(&charts_dir.join("__inspect"))?;
+    let output = inspect_output_json(
+        c.chart_yaml,
+        c.values_schema,
+        c.akua_metadata,
+        digest.as_deref(),
+    );
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }
@@ -681,10 +804,17 @@ fn parse_oci_inspect_ref(reference: &str) -> Result<(String, String, String)> {
     Ok((parsed.repository, parsed.chart_name, version))
 }
 
+#[derive(Debug)]
+struct ChartContents {
+    chart_yaml: serde_json::Value,
+    values_schema: Option<serde_json::Value>,
+    akua_metadata: Option<serde_json::Value>,
+}
+
 /// Shared by local + OCI inspect — reads whatever files the chart dir
 /// happens to have. Missing `values.schema.json` and `.akua/metadata.yaml`
 /// are both fine; vanilla Helm charts don't ship either.
-fn read_chart_contents(chart_dir: &Path) -> Result<serde_json::Value> {
+fn read_chart_contents(chart_dir: &Path) -> Result<ChartContents> {
     let chart_yaml_path = chart_dir.join("Chart.yaml");
     let chart_bytes = std::fs::read(&chart_yaml_path)
         .with_context(|| format!("reading {}", chart_yaml_path.display()))?;
@@ -711,11 +841,11 @@ fn read_chart_contents(chart_dir: &Path) -> Result<serde_json::Value> {
         Err(e) => return Err(e).context(format!("reading {}", metadata_path.display())),
     };
 
-    Ok(inspect_output_json(
+    Ok(ChartContents {
         chart_yaml,
         values_schema,
         akua_metadata,
-    ))
+    })
 }
 
 fn run_attest(chart_dir: &Path, out: &Path) -> Result<()> {
@@ -901,9 +1031,9 @@ mod tests {
         )
         .unwrap();
         let out = read_chart_contents(tmp.path()).unwrap();
-        assert_eq!(out["chartYaml"]["name"], "vanilla");
-        assert!(out["valuesSchema"].is_null());
-        assert!(out["akuaMetadata"].is_null());
+        assert_eq!(out.chart_yaml["name"], "vanilla");
+        assert!(out.values_schema.is_none());
+        assert!(out.akua_metadata.is_none());
     }
 
     #[test]
@@ -920,11 +1050,9 @@ mod tests {
         )
         .unwrap();
         let out = read_chart_contents(tmp.path()).unwrap();
-        assert_eq!(out["valuesSchema"]["type"], "object");
-        assert_eq!(
-            out["valuesSchema"]["properties"]["replicas"]["type"],
-            "integer"
-        );
+        let schema = out.values_schema.expect("values.schema.json");
+        assert_eq!(schema["type"], "object");
+        assert_eq!(schema["properties"]["replicas"]["type"], "integer");
     }
 
     #[test]
@@ -968,5 +1096,69 @@ mod tests {
         assert_eq!(command_name(&cli.command), "inspect");
         let cli = Cli::parse_from(["akua", "package", "--chart", "."]);
         assert_eq!(command_name(&cli.command), "package");
+    }
+
+    #[test]
+    fn phase_for_matches_command_name() {
+        // At the CLI layer phase == command; contract documented on phase_for.
+        for argv in [
+            vec!["akua", "build", "--package", "."],
+            vec!["akua", "render", "--package", "."],
+            vec!["akua", "inspect", "--chart", "."],
+            vec!["akua", "package", "--chart", "."],
+            vec!["akua", "publish", "--to", "oci://x/y"],
+        ] {
+            let cli = Cli::parse_from(argv);
+            assert_eq!(phase_for(&cli.command), command_name(&cli.command));
+        }
+    }
+
+    #[test]
+    fn run_init_creates_starter_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pkg = tmp.path().join("my-pkg");
+        run_init(&pkg, None, false).unwrap();
+
+        let pkg_yaml = std::fs::read_to_string(pkg.join("package.yaml")).unwrap();
+        assert!(pkg_yaml.contains("apiVersion: akua.dev/v1alpha1"));
+        assert!(pkg_yaml.contains("name: my-pkg"));
+
+        let schema = std::fs::read_to_string(pkg.join("values.schema.json")).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&schema).unwrap();
+        assert_eq!(parsed["type"], "object");
+
+        assert!(std::fs::read_to_string(pkg.join("README.md"))
+            .unwrap()
+            .contains("# my-pkg"));
+    }
+
+    #[test]
+    fn run_init_name_override_wins() {
+        let tmp = tempfile::tempdir().unwrap();
+        run_init(tmp.path(), Some("override"), false).unwrap();
+        let pkg_yaml = std::fs::read_to_string(tmp.path().join("package.yaml")).unwrap();
+        assert!(pkg_yaml.contains("name: override"));
+    }
+
+    #[test]
+    fn run_init_refuses_to_clobber_without_force() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("package.yaml"), "existing").unwrap();
+        let err = run_init(tmp.path(), Some("x"), false).unwrap_err();
+        assert!(format!("{err}").contains("--force"));
+        // Untouched by a failed init.
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("package.yaml")).unwrap(),
+            "existing"
+        );
+    }
+
+    #[test]
+    fn run_init_force_overwrites() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("package.yaml"), "stale").unwrap();
+        run_init(tmp.path(), Some("x"), true).unwrap();
+        let pkg_yaml = std::fs::read_to_string(tmp.path().join("package.yaml")).unwrap();
+        assert!(pkg_yaml.contains("name: x"));
     }
 }

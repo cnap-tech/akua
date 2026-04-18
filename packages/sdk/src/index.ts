@@ -17,6 +17,7 @@
 
 import { wasm } from './wasm.js';
 import type {
+  AkuaMetadata,
   ExtractedInstallField,
   JsonSchema,
   ResolvedValues,
@@ -28,6 +29,9 @@ import type {
 export { pullChart, parseOciRef, parseBearerChallenge, OciPullError } from './oci.js';
 export type { OciAuth, OciCredentials, PullChartOptions } from './oci.js';
 
+export { pullHelmHttpChart, parseHelmHttpRef, findIndexEntry, HelmHttpError } from './helm-http.js';
+export type { HelmHttpPullOptions } from './helm-http.js';
+
 export {
   unpackTgz,
   streamTgzEntries,
@@ -38,9 +42,18 @@ export {
 } from './tar.js';
 export type { TgzInput, PackEntries } from './tar.js';
 
-export { packChart, packChartStream, dumpYaml } from './chart.js';
+export {
+  packChart,
+  packChartStream,
+  dependencyToOciRef,
+  dumpYaml,
+} from './chart.js';
+export type { PackChartOptions } from './chart.js';
+
+export { AkuaError, WasmInitError } from './errors.js';
 
 export type {
+  AkuaMetadata,
   ChartDependency,
   ChartYaml,
   ExtractedInstallField,
@@ -110,4 +123,42 @@ export function buildUmbrellaChart(
   sources: Source[],
 ): UmbrellaChart {
   return wasm().buildUmbrellaChart(name, version, sources) as UmbrellaChart;
+}
+
+export interface BuildMetadataOptions {
+  /**
+   * Explicit `buildTime` (RFC 3339). Overrides auto-detection. Pass this
+   * for reproducible builds or when running in a browser without a
+   * notion of `SOURCE_DATE_EPOCH`.
+   */
+  buildTime?: string;
+}
+
+/**
+ * Build `.akua/metadata.yaml` provenance. `fields` is the output of
+ * [`extractInstallFields`] (pass `[]` if none). `buildTime` defaults
+ * to `process.env.SOURCE_DATE_EPOCH` (as Unix seconds) on Node for
+ * reproducible builds; otherwise wall-clock `new Date()`. Pair with
+ * `packChart`'s `metadata` option.
+ */
+export function buildMetadata(
+  sources: Source[],
+  fields: ExtractedInstallField[] = [],
+  options: BuildMetadataOptions = {},
+): AkuaMetadata {
+  const buildTime = options.buildTime ?? resolveBuildTime();
+  return wasm().buildMetadata(sources, fields, buildTime) as AkuaMetadata;
+}
+
+function resolveBuildTime(): string {
+  // Node: honour SOURCE_DATE_EPOCH when present, same contract as `akua build`.
+  const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+  const sde = proc?.env?.SOURCE_DATE_EPOCH?.trim();
+  if (sde) {
+    const secs = Number(sde);
+    if (Number.isFinite(secs) && secs >= 0) {
+      return new Date(secs * 1000).toISOString();
+    }
+  }
+  return new Date().toISOString();
 }

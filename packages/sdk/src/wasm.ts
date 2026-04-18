@@ -8,6 +8,8 @@
  * semantics, so downstream code only ever sees the `WasmApi` interface.
  */
 
+import { WasmInitError } from './errors.js';
+
 export interface WasmApi {
   hashToSuffix(input: string, length: number): string;
   extractInstallFields(schema: unknown): unknown;
@@ -16,6 +18,7 @@ export interface WasmApi {
   mergeSourceValues(sources: unknown): unknown;
   mergeValuesSchemas(sources: unknown): unknown;
   buildUmbrellaChart(name: string, version: string, sources: unknown): unknown;
+  buildMetadata(sources: unknown, fields: unknown, buildTime: string): unknown;
 }
 
 let api: WasmApi | null = null;
@@ -32,7 +35,7 @@ export function setWasmApi(loaded: WasmApi): void {
 /** Fetch the previously-installed WASM API. Throws if init didn't run. */
 export function wasm(): WasmApi {
   if (!api) {
-    throw new Error(
+    throw new WasmInitError(
       '@akua/sdk: WASM not initialised. Call `await init()` before any other SDK function.',
     );
   }

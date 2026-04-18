@@ -64,6 +64,13 @@ export interface ChartYaml {
   version: string;
   description?: string;
   type?: string;
+  appVersion?: string;
+  keywords?: string[];
+  home?: string;
+  sources?: string[];
+  icon?: string;
+  annotations?: Record<string, string>;
+  maintainers?: { name?: string; email?: string; url?: string }[];
   dependencies?: ChartDependency[];
 }
 
@@ -83,3 +90,30 @@ export interface SourceWithSchema {
 
 /** Resolved values from `applyInstallTransforms`. */
 export type ResolvedValues = Record<string, unknown>;
+
+/**
+ * Provenance sidecar written to `.akua/metadata.yaml`. Mirrors
+ * `akua-core::metadata::AkuaMetadata`.
+ */
+export interface AkuaMetadata {
+  akua: {
+    version: string;
+    buildTime: string;
+  };
+  sources?: AkuaMetadataSource[];
+  transforms?: AkuaMetadataTransform[];
+}
+
+export interface AkuaMetadataSource {
+  name: string;
+  engine: string;
+  origin: string;
+  version: string;
+  alias?: string;
+}
+
+export interface AkuaMetadataTransform {
+  field: string;
+  required: boolean;
+  input?: Record<string, unknown>;
+}

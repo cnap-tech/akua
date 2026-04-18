@@ -5,5 +5,5 @@ import { __wbg_set_wasm } from "./akua_wasm_bg.js";
 __wbg_set_wasm(wasm);
 wasm.__wbindgen_start();
 export {
-    applyInstallTransforms, buildUmbrellaChart, extractInstallFields, hashToSuffix, init, mergeSourceValues, mergeValuesSchemas, validateValuesSchema
+    applyInstallTransforms, buildMetadata, buildUmbrellaChart, extractInstallFields, hashToSuffix, init, mergeSourceValues, mergeValuesSchemas, validateValuesSchema
 } from "./akua_wasm_bg.js";

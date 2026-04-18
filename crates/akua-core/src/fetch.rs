@@ -343,14 +343,14 @@ async fn fetch_oci_to_file(
 }
 
 /// Parsed `oci://host/repo:tag` for direct URL construction.
-struct OciRef {
-    host: String,
-    repository: String,
-    tag: String,
+pub struct OciRef {
+    pub host: String,
+    pub repository: String,
+    pub tag: String,
 }
 
 impl OciRef {
-    fn parse(repo: &str, name: &str, version: &str) -> Result<Self, FetchError> {
+    pub fn parse(repo: &str, name: &str, version: &str) -> Result<Self, FetchError> {
         let without_scheme = repo
             .strip_prefix("oci://")
             .ok_or_else(|| FetchError::UnsupportedRepo(repo.to_string()))?;
@@ -398,6 +398,50 @@ fn pick_helm_layer(manifest: &OciManifestJson) -> Result<&OciManifestLayer, Fetc
         .iter()
         .find(|l| l.media_type == HELM_MEDIA_TYPE)
         .unwrap_or(&manifest.layers[0]))
+}
+
+/// Sync wrapper over [`fetch_oci_manifest_digest`] that manages its
+/// own current-thread runtime. Prefer this from non-async callers.
+pub fn fetch_oci_manifest_digest_blocking(
+    parts: &OciRef,
+    user_auth: &OciAuth,
+) -> Result<String, FetchError> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(FetchError::Unpack)?
+        .block_on(fetch_oci_manifest_digest(parts, user_auth))
+}
+
+/// Fetch the manifest digest for an OCI reference via a single HEAD
+/// request. Returns the `Docker-Content-Digest` header value (e.g.
+/// `"sha256:abc…"`). Consumers use this for upstream-change detection
+/// without pulling the chart.
+pub async fn fetch_oci_manifest_digest(
+    parts: &OciRef,
+    user_auth: &OciAuth,
+) -> Result<String, FetchError> {
+    const MANIFEST_ACCEPT: &str = "application/vnd.oci.image.manifest.v1+json, \
+         application/vnd.docker.distribution.manifest.v2+json";
+    let auth_header = resolve_oci_auth(parts, user_auth).await;
+    let url = format!(
+        "https://{}/v2/{}/manifests/{}",
+        parts.host, parts.repository, parts.tag
+    );
+    let http = reqwest::Client::new();
+    let mut req = http
+        .head(&url)
+        .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT);
+    if let Some(h) = &auth_header {
+        req = req.header(reqwest::header::AUTHORIZATION, h);
+    }
+    let resp = req.send().await?.error_for_status()?;
+    resp.headers()
+        .get("docker-content-digest")
+        .ok_or_else(|| FetchError::Oci("registry did not return Docker-Content-Digest".into()))?
+        .to_str()
+        .map(ToString::to_string)
+        .map_err(|e| FetchError::Oci(format!("non-ASCII digest header: {e}")))
 }
 
 async fn fetch_manifest_json(

@@ -62,10 +62,21 @@ pub struct TransformInfo {
 
 /// Build a provenance block from a package's sources and extracted fields.
 pub fn build_metadata(sources: &[Source], fields: &[ExtractedInstallField]) -> AkuaMetadata {
+    build_metadata_at(sources, fields, rfc3339_now())
+}
+
+/// Like [`build_metadata`] but with an explicit `buildTime`. WASM hosts
+/// lack `SystemTime::now()`, so callers in those environments must pass
+/// the timestamp in (read `SOURCE_DATE_EPOCH` / `Date.now()` JS-side).
+pub fn build_metadata_at(
+    sources: &[Source],
+    fields: &[ExtractedInstallField],
+    build_time: String,
+) -> AkuaMetadata {
     AkuaMetadata {
         akua: BuildInfo {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            build_time: rfc3339_now(),
+            build_time,
         },
         sources: sources.iter().map(source_info).collect(),
         transforms: fields.iter().map(field_to_transform).collect(),

@@ -41,9 +41,11 @@ const MANIFEST_ACCEPT = [
   'application/vnd.docker.distribution.manifest.v2+json',
 ].join(', ');
 
-export class OciPullError extends Error {
-  constructor(message: string, readonly cause_?: unknown) {
-    super(message);
+import { AkuaError } from './errors.js';
+
+export class OciPullError extends AkuaError {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause);
     this.name = 'OciPullError';
   }
 }
@@ -74,10 +76,19 @@ function splitLast(s: string, sep: string): [string, string | undefined] {
 }
 
 /**
- * Pull a Helm OCI chart. Returns the raw tar+gzip bytes of the layer.
- * Consume via `unpackTgz` (from `./tar`) or the high-level `inspectChart`.
+ * Pull a Helm chart. Dispatches on scheme:
+ *   - `oci://…`   → OCI Distribution manifest + blob pull (this file).
+ *   - `https://…` / `http://…` → Helm HTTP repo: index.yaml lookup + .tgz
+ *     GET (see [`pullHelmHttpChart`]).
+ *
+ * Returns the raw tar+gzip bytes of the chart layer. Consume via
+ * `unpackTgz` (from `./tar`) or the high-level `inspectChartBytes`.
  */
 export async function pullChart(ref: string, opts: PullChartOptions = {}): Promise<Uint8Array> {
+  if (ref.startsWith('https://') || ref.startsWith('http://')) {
+    const { pullHelmHttpChart } = await import('./helm-http.js');
+    return pullHelmHttpChart(ref, opts);
+  }
   const { host, repository, tag } = parseOciRef(ref);
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
   const creds = opts.auth?.[host];

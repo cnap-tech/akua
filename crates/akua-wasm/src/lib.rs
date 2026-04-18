@@ -12,6 +12,7 @@ use std::collections::HashMap;
 
 use akua_core::{
     apply_install_transforms as core_apply_install_transforms,
+    build_metadata_at as core_build_metadata_at,
     build_umbrella_chart as core_build_umbrella_chart,
     extract_install_fields as core_extract_install_fields, hash_to_suffix as core_hash_to_suffix,
     merge_source_values as core_merge_source_values,
@@ -107,4 +108,20 @@ pub fn build_umbrella_chart(
     let umbrella = core_build_umbrella_chart(name, version, &sources)
         .map_err(|e| JsValue::from_str(&format!("buildUmbrellaChart: {e}")))?;
     to_js(&umbrella)
+}
+
+/// Build `.akua/metadata.yaml` provenance. Caller supplies `buildTime`
+/// as an RFC 3339 string — JS sees `SystemTime::now()` panic in WASM,
+/// so the timestamp is computed host-side (SDK reads `SOURCE_DATE_EPOCH`
+/// on Node, falls back to `new Date().toISOString()`).
+#[wasm_bindgen(js_name = buildMetadata)]
+pub fn build_metadata(
+    sources: JsValue,
+    fields: JsValue,
+    build_time: String,
+) -> Result<JsValue, JsValue> {
+    let sources: Vec<Source> = from_js(sources)?;
+    let fields: Vec<ExtractedInstallField> = from_js(fields)?;
+    let metadata = core_build_metadata_at(&sources, &fields, build_time);
+    to_js(&metadata)
 }
