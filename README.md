@@ -6,9 +6,30 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square)](./LICENSE)
 [![Status](https://img.shields.io/badge/status-pre--alpha-orange?style=flat-square)](#status)
 
-[**Playground**](https://akua.dev) | [**SDK**](https://jsr.io/@akua/sdk) | [**Getting started**](./docs/getting-started.md) | [**Architecture**](./docs/architecture.md)
+[Documentation](./docs/getting-started.md) &nbsp;•&nbsp; [Playground](https://akua.dev) &nbsp;•&nbsp; [SDK](https://jsr.io/@akua/sdk) &nbsp;•&nbsp; [Issues](https://github.com/cnap-tech/akua/issues)
 
-A Helm toolkit written in Rust. The same audited core runs in the `akua` CLI, in Node via [`@akua/sdk`][@akua/sdk], and in any browser tab via WASM — one set of algorithms, three surfaces, no drift.
+### [Read the docs →](./docs/getting-started.md)
+
+## What is akua?
+
+akua is an all-in-one toolkit for cloud-native packaging. It ships as a single executable called `akua`, written in Rust.
+
+At its core is the _akua core_, an audited fetch layer plus a Helm v4 template engine compiled to WebAssembly. It's designed as **a drop-in replacement for `helm` + `crane` + a CORS-proxy backend**, so the same pull-inspect-render-diff pipeline works on your laptop, in Node via `@akua/sdk`, and in any browser tab.
+
+```bash
+akua init demo                                           # scaffold a new package
+akua inspect --oci oci://ghcr.io/.../podinfo:6.7.1       # pull + inspect any chart — no `helm` on PATH
+akua diff oci://.../podinfo:6.6.0 oci://.../podinfo:6.7.1  # structural version diff
+```
+
+The `akua` command-line tool also implements a builder, a publisher, a schema validator, and a [browser playground](https://akua.dev). Instead of juggling `helm` + `crane` + `cosign` + a CORS-proxy backend, you only need `akua`. Built-in tooling is significantly faster than shelling out to `helm`, and works without a cluster.
+
+```bash
+akua build --out dist/chart               # build an umbrella chart with metadata sidecar
+akua attest dist/chart                    # emit a SLSA v1 predicate for cosign
+akua render dist/chart --inputs '{...}'   # render Kubernetes manifests (no helm binary)
+akua publish oci://ghcr.io/you/pkg:v1     # publish with digest-pinning
+```
 
 <p align="center">
   <img alt="akua init → akua inspect --oci → akua diff"
@@ -16,34 +37,27 @@ A Helm toolkit written in Rust. The same audited core runs in the `akua` CLI, in
        width="840">
 </p>
 
+akua is backed by [CNAP](https://cnap.tech).
+
 ## Install
 
+akua supports Linux (x64 & arm64) and macOS (x64 & Apple Silicon). Windows binaries land with `v0.1.1`.
+
 ```sh
-# macOS / Linux
+# with install script (recommended)
 curl -fsSL https://akua.dev/install | sh
 
-# Homebrew
+# with Homebrew
 brew install cnap-tech/tap/akua
 
-# From source (any platform with Rust toolchain)
+# from source (any platform with a Rust toolchain)
 cargo install --git https://github.com/cnap-tech/akua akua-cli
 ```
 
-Prebuilt binaries for every target live on [GitHub Releases][releases] — each artefact ships with a SHA-256 checksum file. Windows (Scoop, PowerShell), Arch AUR, and Docker images land with `v0.1.1`.
+Prebuilt binaries for every target live on [GitHub Releases][releases] — each artefact ships with a SHA-256 checksum file.
 
 > [!WARNING]
 > **Pre-alpha.** APIs, CLI flags, and the `v1alpha1` schema shape are subject to change. Don't build production workloads on this yet. Do file issues if something surprises you.
-
-## Highlights
-
-- ⚡ **One Rust core, three surfaces.** CLI binary, Node SDK, browser WASM — same algorithms everywhere, no drift.
-- 🌐 **Browser-native chart pulls.** `@akua/sdk/browser` reimplements the OCI bearer-token dance and HTTP Helm `index.yaml` on top of `fetch()` + `DecompressionStream`. Your tab talks directly to Jetstack, Grafana, JFrog public — no backend, no proxy.
-- 🧱 **No `helm` binary on `$PATH`.** The Helm v4 template engine compiled to `wasip1` and hosted via [wasmtime](https://wasmtime.dev/). `akua render` takes a chart, returns rendered Kubernetes manifests.
-- 🔍 **Structural version diffs.** `akua diff oci://A oci://B` compares Chart.yaml metadata, dependency adds/removes, `values.yaml` defaults, and `values.schema.json` input-field deltas. Not rendered YAML — the shape of what customers will be asked to configure.
-- 🔒 **Audited fetch by default.** SSRF guard (private/loopback/link-local rejection), size caps, digest verification on every OCI pull.
-- 📜 **Provenance sidecar on every build.** `.akua/metadata.yaml` records the full input graph; `akua attest` emits a [SLSA v1](https://slsa.dev/) predicate ready for `cosign`.
-
-akua is backed by [CNAP](https://cnap.tech).
 
 ## Quick start
 
