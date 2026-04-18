@@ -760,8 +760,8 @@ fn inspect_oci(reference: &str, auth_args: OciAuthArgs) -> Result<()> {
             // in the reference/repository.
             format!(
                 "pulling {} (chart `{chart}` version `{version}`) from {}",
-                redact_userinfo_simple(reference),
-                redact_userinfo_simple(&repository),
+                akua_core::redact_userinfo(reference),
+                akua_core::redact_userinfo(&repository),
             )
         })?;
 
@@ -814,24 +814,6 @@ fn build_oci_auth(host: &str, args: OciAuthArgs) -> Result<akua_core::OciAuth> {
 /// Require a fully-tagged `oci://host/path/chart:version`. Returns
 /// `(repository, chart, version)`. Delegates parsing to
 /// `akua_core::source::parse_oci_url` (shared with the fetcher).
-/// Strip `user:pass@` userinfo fragments from a URL-like string for
-/// use in user-facing error messages. Mirrors the redaction in
-/// `akua-core::fetch::redact_userinfo` but kept local so the CLI
-/// doesn't depend on a private symbol.
-fn redact_userinfo_simple(s: &str) -> String {
-    if let Some(colon_slash) = s.find("://") {
-        let prefix = &s[..colon_slash + 3];
-        let rest = &s[colon_slash + 3..];
-        if let Some(at) = rest.find('@') {
-            let path_start = rest[..at].find('/').unwrap_or(at);
-            if path_start > at {
-                return format!("{prefix}<redacted>@{}", &rest[at + 1..]);
-            }
-            return format!("{prefix}<redacted>@{}", &rest[at + 1..]);
-        }
-    }
-    s.to_string()
-}
 
 fn parse_oci_inspect_ref(reference: &str) -> Result<(String, String, String)> {
     let parsed = akua_core::source::parse_oci_url(reference)

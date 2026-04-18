@@ -26,9 +26,9 @@ pub fn validate_host(host: &str) -> Result<(), FetchError> {
     // Only IP literals reach here — DNS names aren't parsable.
     if let Ok(ip) = host_only.parse::<IpAddr>() {
         if is_private(ip) {
-            return Err(FetchError::Oci(format!(
-                "refusing to fetch from private-range host `{host}`. Set AKUA_ALLOW_PRIVATE_HOSTS=1 for local dev."
-            )));
+            return Err(FetchError::PrivateHost {
+                host: host.to_string(),
+            });
         }
     }
     Ok(())

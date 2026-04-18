@@ -56,8 +56,8 @@ pub use engine::{Engine, EngineError, HelmEngine, PrepareContext, PreparedSource
 #[cfg(feature = "fetch")]
 pub use fetch::{
     fetch_dependencies, fetch_dependencies_with_auth, fetch_dependencies_with_options,
-    fetch_oci_manifest_digest, fetch_oci_manifest_digest_blocking, FetchError, FetchOptions,
-    OciAuth, OciRef, RegistryCredentials,
+    fetch_oci_manifest_digest, fetch_oci_manifest_digest_blocking, redact_userinfo, FetchError,
+    FetchOptions, HttpError, OciAuth, OciRef, RegistryCredentials,
 };
 pub use hash::hash_to_suffix;
 pub use manifest::{load_manifest, PackageManifest};

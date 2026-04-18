@@ -17,8 +17,8 @@
 
 import { createHash } from 'node:crypto';
 import { createWriteStream, existsSync } from 'node:fs';
-import { mkdir, readFile, rename, stat } from 'node:fs/promises';
-import { homedir, tmpdir } from 'node:os';
+import { mkdir, readFile, rename } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -136,8 +136,3 @@ function sha256Hex(bytes: Buffer | Uint8Array): string {
 function isHex64(s: string): boolean {
   return s.length === 64 && /^[0-9a-f]+$/.test(s);
 }
-
-// Keep these imports alive for TS — `tmpdir` / `stat` could be useful
-// for future eviction logic; satisfy no-unused-imports until then.
-void tmpdir;
-void stat;
