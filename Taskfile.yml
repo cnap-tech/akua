@@ -156,8 +156,12 @@ tasks:
         packages/sdk/wasm/nodejs/
       - task: wasm:build
       - mkdir -p packages/sdk/wasm/bundler
+      # bundler target needs akua_wasm_bg.js too — it's the wasm-bindgen glue
+      # that akua_wasm.js imports (`import { __wbg_set_wasm } from "./akua_wasm_bg.js"`).
+      # Missing it leaves the browser entry unresolvable at bundle time.
       - >-
         cp packages/core-wasm/akua_wasm.js packages/core-wasm/akua_wasm.d.ts
+        packages/core-wasm/akua_wasm_bg.js
         packages/core-wasm/akua_wasm_bg.wasm packages/core-wasm/akua_wasm_bg.wasm.d.ts
         packages/sdk/wasm/bundler/
 
