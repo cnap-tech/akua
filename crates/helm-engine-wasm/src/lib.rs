@@ -22,13 +22,43 @@
 //! Not done yet; bundled path gives zero maintenance burden.
 
 use std::path::Path;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use wasmtime::{Config, Engine, Linker, Memory, Module, Store, TypedFunc};
 use wasmtime_wasi::p1::{self, WasiP1Ctx};
 use wasmtime_wasi::WasiCtxBuilder;
 
-const HELM_ENGINE_WASM: &[u8] = include_bytes!("../assets/helm-engine.wasm");
+// Cranelift-compiling the 75 MB Go→wasip1 Helm engine takes ~6-8s cold.
+// build.rs precompiles it to a native-code `.cwasm` artifact that's
+// `Module::deserialize`d here — a memcpy + fixup, not a compile. Ready
+// in single-digit milliseconds.
+const HELM_ENGINE_CWASM: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.cwasm"));
+
+/// Config used at build time AND runtime. Must match exactly — the
+/// deserialized artifact is tied to the engine's `precompile_compatibility_hash`.
+pub fn engine_config() -> Config {
+    let mut config = Config::new();
+    config.wasm_exceptions(true);
+    config
+}
+
+static COMPILED: OnceLock<(Engine, Module)> = OnceLock::new();
+
+fn compiled_engine() -> Result<&'static (Engine, Module), HelmEngineError> {
+    if let Some(x) = COMPILED.get() {
+        return Ok(x);
+    }
+    let engine = Engine::new(&engine_config()).map_err(wasm_err)?;
+    // SAFETY: the cwasm bytes were produced by build.rs against an engine
+    // with the same `engine_config()`. They're embedded at compile time, so
+    // tampering requires tampering with the akua binary itself.
+    let module = unsafe { Module::deserialize(&engine, HELM_ENGINE_CWASM) }
+        .map_err(wasm_err)?;
+    let _ = COMPILED.set((engine, module));
+    Ok(COMPILED.get().expect("just set"))
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum HelmEngineError {
@@ -127,20 +157,17 @@ fn tar_chart_dir(chart_dir: &Path, chart_name: &str) -> Result<Vec<u8>, HelmEngi
 }
 
 fn call_wasm(input: &[u8]) -> Result<Vec<u8>, HelmEngineError> {
-    let mut config = Config::new();
-    config.wasm_exceptions(true);
-    let engine = Engine::new(&config).map_err(wasm_err)?;
-    let module = Module::new(&engine, HELM_ENGINE_WASM).map_err(wasm_err)?;
+    let (engine, module) = compiled_engine()?;
 
     // klog's init() reads os.Args[0] unconditionally — an empty argv crashes
     // Go's runtime with index-out-of-range. We provide a dummy arg and nothing
     // else from the host.
     let wasi = WasiCtxBuilder::new().arg("helm-engine").build_p1();
-    let mut store = Store::new(&engine, wasi);
-    let mut linker: Linker<WasiP1Ctx> = Linker::new(&engine);
+    let mut store = Store::new(engine, wasi);
+    let mut linker: Linker<WasiP1Ctx> = Linker::new(engine);
     p1::add_to_linker_sync(&mut linker, |s: &mut WasiP1Ctx| s).map_err(wasm_err)?;
 
-    let instance = linker.instantiate(&mut store, &module).map_err(wasm_err)?;
+    let instance = linker.instantiate(&mut store, module).map_err(wasm_err)?;
     // Reactor module: `_initialize` runs Go runtime + package init() chains
     // without exiting. Exports are callable after.
     if let Ok(init) = instance.get_typed_func::<(), ()>(&mut store, "_initialize") {
@@ -237,11 +264,11 @@ data:
     }
 
     #[test]
-    fn embedded_wasm_bytes_are_present() {
+    fn embedded_cwasm_bytes_are_present() {
         assert!(
-            HELM_ENGINE_WASM.len() > 1_000_000,
-            "helm-engine.wasm too small ({} bytes) — did `task build:helm-engine-wasm` run?",
-            HELM_ENGINE_WASM.len()
+            HELM_ENGINE_CWASM.len() > 1_000_000,
+            "helm-engine.cwasm too small ({} bytes) — did build.rs precompile run?",
+            HELM_ENGINE_CWASM.len()
         );
     }
 

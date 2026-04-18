@@ -7,6 +7,11 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[build-dependencies]
+# build.rs precompiles helm-engine.wasm → native-code .cwasm. Needs the
+# full wasmtime feature set (cranelift) so the default features are fine.
+wasmtime = "39"
+
 [dependencies]
 wasmtime = "39"
 wasmtime-wasi = "39"
