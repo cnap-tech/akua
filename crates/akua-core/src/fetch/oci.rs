@@ -233,7 +233,7 @@ fn manifest_request(
         "https://{}/v2/{}/manifests/{}",
         parts.host, parts.repository, parts.tag
     );
-    let http = ssrf_safe_client(5)?;
+    let http = ssrf_safe_client()?;
     let mut req = http
         .request(method, &url)
         .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT);
@@ -296,7 +296,7 @@ async fn stream_oci_blob_to_file(
         "https://{}/v2/{}/blobs/{}",
         parts.host, parts.repository, digest
     );
-    let http = ssrf_safe_client(5)?;
+    let http = ssrf_safe_client()?;
     let mut req = http.get(&url);
     if let Some(h) = auth_header {
         req = req.header(reqwest::header::AUTHORIZATION, h);
@@ -334,7 +334,7 @@ async fn anonymous_bearer_token(parts: &OciRef) -> Option<String> {
         "https://{}/v2/{}/manifests/{}",
         parts.host, parts.repository, parts.tag
     );
-    let http = ssrf_safe_client(5).ok()?;
+    let http = ssrf_safe_client().ok()?;
     let probe = http.head(&manifest_url).send().await.ok()?;
     if probe.status() != reqwest::StatusCode::UNAUTHORIZED {
         return None;

@@ -18,7 +18,7 @@ pub(super) async fn fetch_http_to_file(
     scratch_dir: &Path,
 ) -> Result<(tempfile::NamedTempFile, String), FetchError> {
     let resolved = resolve_http_chart_url(dep).await?;
-    let resp = ssrf_safe_client(5)?
+    let resp = ssrf_safe_client()?
         .get(&resolved.url)
         .send()
         .await?
@@ -69,7 +69,7 @@ async fn resolve_http_chart_url(dep: &Dependency) -> Result<ResolvedHttpChart, F
 async fn fetch_repo_index(repo: &str) -> Result<RepoIndex, FetchError> {
     validate_repo_ssrf(repo)?;
     let url = format!("{}/index.yaml", repo.trim_end_matches('/'));
-    let resp = ssrf_safe_client(5)?
+    let resp = ssrf_safe_client()?
         .get(&url)
         .send()
         .await?

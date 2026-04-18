@@ -98,12 +98,37 @@ pub(super) fn validate_repo_ssrf(repo: &str) -> Result<(), FetchError> {
     crate::ssrf::validate_host(host)
 }
 
+/// Max redirects on any outbound fetch. 5 is enough for realistic
+/// registry chains (registry → CDN → bucket); beyond that an
+/// attacker is almost certainly trying to chain through metadata
+/// endpoints. Shared across all callers so the client can be cached.
+const MAX_REDIRECTS: usize = 5;
+
 /// reqwest client whose redirect policy re-runs the SSRF check on
 /// every hop — prevents a public registry from 302-ing us to a
 /// private IP (cloud metadata exfil).
-pub(super) fn ssrf_safe_client(max_redirects: usize) -> Result<reqwest::Client, FetchError> {
-    let policy = reqwest::redirect::Policy::custom(move |attempt| {
-        if attempt.previous().len() >= max_redirects {
+///
+/// Cached via [`OnceLock`]. `reqwest::Client::builder().build()`
+/// initialises the TLS backend (rustls roots, ~10 ms on first call);
+/// every `fetch_dependencies_*` call previously did this 4–6 times per
+/// OCI pull. Now: one build per process, a cheap `Arc`-clone per call.
+///
+/// All cloned handles share the same connection pool, which is the
+/// behaviour we want — multi-dep umbrella pulls reuse TCP + TLS to
+/// the same host across requests.
+pub(super) fn ssrf_safe_client() -> Result<reqwest::Client, FetchError> {
+    use std::sync::OnceLock;
+    static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+    let slot = CLIENT.get_or_init(build_shared_client);
+    match slot {
+        Ok(client) => Ok(client.clone()),
+        Err(e) => Err(FetchError::ClientConfig(e.clone())),
+    }
+}
+
+fn build_shared_client() -> Result<reqwest::Client, String> {
+    let policy = reqwest::redirect::Policy::custom(|attempt| {
+        if attempt.previous().len() >= MAX_REDIRECTS {
             return attempt.error("too many redirects");
         }
         if let Some(host) = attempt.url().host_str() {
@@ -116,7 +141,7 @@ pub(super) fn ssrf_safe_client(max_redirects: usize) -> Result<reqwest::Client, 
     reqwest::Client::builder()
         .redirect(policy)
         .build()
-        .map_err(|e| FetchError::ClientConfig(format!("reqwest client: {e}")))
+        .map_err(|e| format!("reqwest client: {e}"))
 }
 
 #[cfg(test)]
