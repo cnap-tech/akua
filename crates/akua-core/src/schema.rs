@@ -306,29 +306,40 @@ fn eval_cel(
         ));
     }
 
-    let expr = expression.to_string();
-    let val = value.to_string();
-    let values = values_so_far.clone();
-    let path_for_thread = path.to_string();
+    // WASM: no `std::thread::spawn`, no `std::sync::mpsc::recv_timeout`.
+    // Callers on WASM hosts (browser, Node via akua-wasm) must enforce
+    // their own per-invocation budget (setTimeout wrapper / abort
+    // signal). Source-length cap above still applies.
+    #[cfg(target_arch = "wasm32")]
+    {
+        return eval_cel_inner(expression, value, values_so_far, path);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let expr = expression.to_string();
+        let val = value.to_string();
+        let values = values_so_far.clone();
+        let path_for_thread = path.to_string();
 
-    // Spawn on a worker thread so a runaway expression (deep
-    // comprehensions, long string concat) doesn't pin the caller.
-    // The thread leaks if the interpreter hangs past the timeout —
-    // bounded by process memory; preferable to a worker-thread stall.
-    let (tx, rx) = std::sync::mpsc::channel();
-    let _handle = std::thread::Builder::new()
-        .name("akua-cel".into())
-        .spawn(move || {
-            let result = eval_cel_inner(&expr, &val, &values, &path_for_thread);
-            let _ = tx.send(result);
-        })
-        .map_err(|e| format!("field `{path}`: spawn CEL worker: {e}"))?;
+        // Spawn on a worker thread so a runaway expression (deep
+        // comprehensions, long string concat) doesn't pin the caller.
+        // The thread leaks if the interpreter hangs past the timeout —
+        // bounded by process memory; preferable to a worker-thread stall.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let _handle = std::thread::Builder::new()
+            .name("akua-cel".into())
+            .spawn(move || {
+                let result = eval_cel_inner(&expr, &val, &values, &path_for_thread);
+                let _ = tx.send(result);
+            })
+            .map_err(|e| format!("field `{path}`: spawn CEL worker: {e}"))?;
 
-    match rx.recv_timeout(CEL_EVAL_TIMEOUT) {
-        Ok(result) => result,
-        Err(_) => Err(format!(
-            "field `{path}`: CEL evaluation exceeded {CEL_EVAL_TIMEOUT:?} timeout"
-        )),
+        match rx.recv_timeout(CEL_EVAL_TIMEOUT) {
+            Ok(result) => result,
+            Err(_) => Err(format!(
+                "field `{path}`: CEL evaluation exceeded {CEL_EVAL_TIMEOUT:?} timeout"
+            )),
+        }
     }
 }
 
