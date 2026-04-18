@@ -1,12 +1,18 @@
 //! # akua-wasm
 //!
 //! WASM bindings for `akua-core`. Built with `wasm-pack build
-//! crates/akua-wasm --target bundler` to produce a `.wasm` module + TypeScript
-//! definitions consumable from a browser.
+//! crates/akua-wasm --target bundler` to produce a `.wasm` module +
+//! TypeScript definitions consumable from a browser.
 //!
 //! Exposes the pure-algorithm surface: schema field extraction, input
-//! transforms, umbrella chart assembly, value merging. Does *not* include
-//! Helm render (shells to a binary — not WASM-safe).
+//! transforms, umbrella chart assembly, value merging, `.akua/metadata.yaml`
+//! provenance. Does *not* include Helm render — the embedded template
+//! engine (`helm-engine-wasm`, Go→wasip1) is hosted via wasmtime,
+//! which only runs in native Rust (server-side, CLI). Browsers could
+//! in principle instantiate `helm-engine.wasm` directly via
+//! `WebAssembly.instantiate`, but that bridge isn't implemented here;
+//! front-end live-preview uses `mergeValuesSchemas` + the customer-
+//! supplied values, not a full template render.
 
 use std::collections::HashMap;
 
