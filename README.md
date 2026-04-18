@@ -122,25 +122,15 @@ brew install cnap-tech/tap/akua
 # macOS / Linux — one-liner
 curl -fsSL https://raw.githubusercontent.com/cnap-tech/akua/main/scripts/install.sh | sh
 
-# Windows — Scoop bucket
-scoop bucket add akua https://github.com/cnap-tech/scoop-akua && scoop install akua
-
-# Windows — PowerShell
-powershell -c "irm https://raw.githubusercontent.com/cnap-tech/akua/main/scripts/install.ps1 | iex"
-
-# Arch Linux — AUR
-yay -S akua-bin
-
-# Docker / CI
-docker run --rm ghcr.io/cnap-tech/akua:latest --version
-
-# From source
+# From source (any platform with Rust toolchain)
 cargo install --git https://github.com/cnap-tech/akua akua-cli
 ```
 
-Every install path downloads the same prebuilt binary from the
-[GitHub Releases][releases]. Each artefact ships with a SHA-256
-checksum file.
+Or grab the prebuilt binary directly from [GitHub Releases][releases]
+— every artefact ships with a SHA-256 checksum file.
+
+Windows (Scoop, PowerShell), Arch AUR, and Docker images are queued
+for `v0.1.1` — the release plumbing is in place, awaiting the next tag.
 
 ## Quick start
 

@@ -52,10 +52,15 @@ jobs:
 
       - name: Build playground
         env:
-          # Repo is at github.com/cnap-tech/akua → Pages serves from
-          # /akua/, so Vite needs to emit asset URLs rooted there.
-          PLAYGROUND_BASE: /akua/
+          # Custom domain akua.dev serves the site at the zone root,
+          # so Vite emits asset URLs relative to /.
+          PLAYGROUND_BASE: /
         run: bun run --filter @akua/playground build
+
+      # Custom-domain binding: Pages strips the domain on every deploy
+      # unless the published artefact contains a CNAME file at the root.
+      - name: Write CNAME
+        run: echo 'akua.dev' > packages/playground/dist/CNAME
 
       - uses: actions/configure-pages@v5
 
