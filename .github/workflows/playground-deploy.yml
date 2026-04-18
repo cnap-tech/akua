@@ -1,0 +1,74 @@
+name: playground-deploy
+
+# Deploys the @akua/playground Vite app to GitHub Pages on every
+# push to main. User-visible URL:
+#
+#   https://cnap-tech.github.io/akua/
+#
+# The playground imports `@akua/sdk/browser` (workspace dep) so it
+# always tracks `packages/sdk`'s current shape, not the published
+# JSR version — useful for reviewing SDK changes before they land
+# on JSR.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/playground/**'
+      - 'packages/sdk/**'
+      - 'crates/akua-wasm/**'
+      - 'crates/akua-core/**'
+      - '.github/workflows/playground-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+          cache: true
+
+      # The SDK's WASM artifacts sit under packages/sdk/wasm/
+      # (checked-in from a prior `task sdk:wasm` run). Rebuild on
+      # every deploy so the playground picks up fresh Rust changes.
+      - name: Build WASM artifacts
+        run: mise exec -- task sdk:wasm
+
+      - name: Install deps
+        run: bun install --frozen-lockfile
+
+      - name: Build playground
+        env:
+          # Repo is at github.com/cnap-tech/akua → Pages serves from
+          # /akua/, so Vite needs to emit asset URLs rooted there.
+          PLAYGROUND_BASE: /akua/
+        run: bun run --filter @akua/playground build
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: packages/playground/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

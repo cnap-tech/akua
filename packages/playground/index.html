@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>akua playground — pull + inspect Helm charts in your browser</title>
+    <meta
+      name="description"
+      content="Pull any public Helm chart from your browser tab. No helm CLI, no backend, no server. Powered by @akua/sdk."
+    />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>
+        <a href="https://github.com/cnap-tech/akua">akua</a>
+        <span class="sub">playground</span>
+      </h1>
+      <p class="tagline">
+        Pull and inspect a Helm chart from your browser tab.
+        No backend, no <code>helm</code> CLI. Everything below runs in-page,
+        via <a href="https://jsr.io/@akua/sdk">@akua/sdk</a> compiled to
+        WebAssembly.
+      </p>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>Pull a chart</h2>
+        <form id="pull-form">
+          <label for="ref">
+            Chart reference
+            <span class="hint"
+              >HTTPS Helm repo URL: <code>https://&lt;repo&gt;/&lt;chart&gt;:&lt;version&gt;</code></span
+            >
+          </label>
+          <div class="row">
+            <input
+              id="ref"
+              name="ref"
+              type="text"
+              required
+              placeholder="https://charts.jetstack.io/cert-manager:v1.16.1"
+              value="https://charts.jetstack.io/cert-manager:v1.16.1"
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <button type="submit" id="pull-btn">Pull</button>
+          </div>
+          <div class="examples">
+            <span>Try:</span>
+            <button type="button" class="example" data-ref="https://charts.jetstack.io/cert-manager:v1.16.1">cert-manager</button>
+            <button type="button" class="example" data-ref="https://charts.jetstack.io/cert-manager:v1.15.3">cert-manager (older)</button>
+            <button type="button" class="example" data-ref="https://grafana.github.io/helm-charts/grafana:8.5.0">grafana</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card" id="output-card" hidden>
+        <h2>Chart inspection</h2>
+        <div id="output"></div>
+      </section>
+
+      <section class="card" id="error-card" hidden>
+        <h2>Error</h2>
+        <pre id="error"></pre>
+        <details>
+          <summary>Why might this fail?</summary>
+          <p>
+            The playground pulls charts directly from the browser, which
+            means the Helm repository <em>must</em> send a permissive
+            <code>Access-Control-Allow-Origin</code> header. Many OCI
+            registries (including ghcr.io) don't — that's a registry
+            limitation, not an akua one. Use the
+            <a href="https://github.com/cnap-tech/akua">CLI or the Node SDK</a>
+            for those.
+          </p>
+        </details>
+      </section>
+
+      <section class="notes">
+        <details>
+          <summary>What exactly is running here?</summary>
+          <p>
+            <code>@akua/sdk/browser</code> (shipped on
+            <a href="https://jsr.io/@akua/sdk">JSR</a>). Same Rust core
+            the <code>akua</code> CLI uses, compiled to WebAssembly via
+            <code>wasm-pack</code>. The OCI + HTTP Helm pull pipeline
+            (bearer token dance, sha256 digest verification, SSRF-safe
+            host validation, size caps) is pure-JS fetch on top of the
+            WASM manifest-parse / tar-unpack / schema-merge layer.
+          </p>
+          <p>
+            Nothing is proxied. Your browser is talking directly to the
+            Helm repo server. You can verify in DevTools Network tab.
+          </p>
+        </details>
+
+        <details>
+          <summary>Why not arbitrary OCI registries?</summary>
+          <p>
+            The HTTP pipeline works against anything that sends CORS
+            headers. Known-good: Jetstack, Grafana, JFrog (public
+            repos). <code>oci://ghcr.io/…</code> and
+            <code>oci://docker.io/…</code> don't — both registries omit
+            <code>Access-Control-Allow-Origin</code>, and the browser
+            will refuse. The Rust CLI and Node SDK have no such
+            constraint.
+          </p>
+        </details>
+      </section>
+    </main>
+
+    <footer>
+      <a href="https://github.com/cnap-tech/akua">source</a>
+      ·
+      <a href="https://jsr.io/@akua/sdk">@akua/sdk on JSR</a>
+      ·
+      <a href="https://github.com/cnap-tech/akua/releases">CLI releases</a>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
