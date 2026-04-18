@@ -67,9 +67,18 @@ impl Default for RenderOptions {
     }
 }
 
-/// Write the umbrella chart to `chart_dir`, resolve dependencies, and render.
+/// Write the umbrella chart to `chart_dir`, resolve dependencies
+/// using akua's native fetcher (no `helm dependency update` network
+/// round), and render via `helm template`.
 ///
-/// Returns the rendered YAML manifest stream (Helm's `template` output).
+/// Why akua's fetcher instead of helm's: `helm dependency update`
+/// re-enters the network using helm's own config / redirect / auth
+/// rules, which bypass akua's SSRF guard + size caps. Pre-populating
+/// `charts/` ourselves keeps every network byte inside the audited
+/// `akua-core::fetch` code path, even when the render engine is
+/// `helm-cli`. Helm then sees fully-materialised subcharts on disk.
+///
+/// Returns the rendered YAML manifest stream.
 ///
 /// `chart_dir` is created if missing. Existing contents are overwritten.
 pub fn render_umbrella(
@@ -78,7 +87,20 @@ pub fn render_umbrella(
     opts: &RenderOptions,
 ) -> Result<String, RenderError> {
     write_umbrella(chart, chart_dir)?;
-    helm_dependency_update(chart_dir, &opts.helm_bin)?;
+    let charts_dir = chart_dir.join("charts");
+    if charts_dir.exists() {
+        std::fs::remove_dir_all(&charts_dir).map_err(|source| RenderError::Write {
+            path: charts_dir.clone(),
+            source,
+        })?;
+    }
+    crate::fetch::fetch_dependencies(&chart.chart_yaml.dependencies, &charts_dir).map_err(|e| {
+        RenderError::HelmFailed {
+            cmd: "akua fetch".to_string(),
+            status: -1,
+            stderr: e.to_string(),
+        }
+    })?;
     helm_template(chart_dir, opts)
 }
 
@@ -217,24 +239,6 @@ fn write(path: PathBuf, bytes: &[u8]) -> Result<(), RenderError> {
     std::fs::write(&path, bytes).map_err(|source| RenderError::Write { path, source })
 }
 
-fn helm_dependency_update(chart_dir: &Path, helm_bin: &Path) -> Result<(), RenderError> {
-    let output = Command::new(helm_bin)
-        .args(["dependency", "update", "--skip-refresh"])
-        .arg(chart_dir)
-        .output()
-        .map_err(|source| RenderError::Spawn {
-            cmd: format!("{} dependency update", helm_bin.display()),
-            source,
-        })?;
-    if !output.status.success() {
-        return Err(RenderError::HelmFailed {
-            cmd: "helm dependency update".to_string(),
-            status: output.status.code().unwrap_or(-1),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        });
-    }
-    Ok(())
-}
 
 fn helm_template(chart_dir: &Path, opts: &RenderOptions) -> Result<String, RenderError> {
     let mut cmd = Command::new(&opts.helm_bin);
@@ -333,8 +337,20 @@ mod tests {
 
     #[test]
     fn missing_helm_binary_surfaces_spawn_error() {
+        // Umbrella with no deps: the fetcher no-ops, then helm_template
+        // is invoked and surfaces the missing-binary spawn error.
         let tmp = tempfile::tempdir().unwrap();
-        let chart = make_chart();
+        let chart = UmbrellaChart {
+            chart_yaml: crate::umbrella::ChartYaml {
+                api_version: "v2".into(),
+                name: "demo".into(),
+                version: "0.1.0".into(),
+                description: None,
+                chart_type: Some("application".into()),
+                dependencies: Vec::new(),
+            },
+            values: serde_json::json!({}),
+        };
         let opts = RenderOptions {
             helm_bin: PathBuf::from("/nonexistent/helm-binary-akua-test"),
             ..Default::default()

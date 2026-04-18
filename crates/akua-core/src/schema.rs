@@ -278,10 +278,61 @@ pub fn apply_install_transforms(
     Ok(overrides)
 }
 
+/// Maximum CEL source length. A well-written transform is a line or
+/// two; anything larger is almost certainly an attacker DoS attempt.
+const MAX_CEL_SOURCE_LEN: usize = 8 * 1024;
+
+/// Wall-clock cap for a single CEL evaluation. `cel-interpreter` lacks
+/// internal op-counting, so we enforce a timeout from the outside via
+/// a worker thread.
+const CEL_EVAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// Evaluate a CEL expression with `value` (trimmed raw input) and `values`
 /// (the resolved-so-far object) bound in scope. `slugify` / `slugifyMax`
 /// are registered as CEL custom functions.
+///
+/// Rejects expressions longer than [`MAX_CEL_SOURCE_LEN`] and aborts
+/// evaluations exceeding [`CEL_EVAL_TIMEOUT`] — both mitigate DoS from
+/// attacker-authored schemas.
 fn eval_cel(
+    expression: &str,
+    value: &str,
+    values_so_far: &Value,
+    path: &str,
+) -> Result<String, String> {
+    if expression.len() > MAX_CEL_SOURCE_LEN {
+        return Err(format!(
+            "field `{path}`: CEL expression exceeds {MAX_CEL_SOURCE_LEN}-byte cap"
+        ));
+    }
+
+    let expr = expression.to_string();
+    let val = value.to_string();
+    let values = values_so_far.clone();
+    let path_for_thread = path.to_string();
+
+    // Spawn on a worker thread so a runaway expression (deep
+    // comprehensions, long string concat) doesn't pin the caller.
+    // The thread leaks if the interpreter hangs past the timeout —
+    // bounded by process memory; preferable to a worker-thread stall.
+    let (tx, rx) = std::sync::mpsc::channel();
+    let _handle = std::thread::Builder::new()
+        .name("akua-cel".into())
+        .spawn(move || {
+            let result = eval_cel_inner(&expr, &val, &values, &path_for_thread);
+            let _ = tx.send(result);
+        })
+        .map_err(|e| format!("field `{path}`: spawn CEL worker: {e}"))?;
+
+    match rx.recv_timeout(CEL_EVAL_TIMEOUT) {
+        Ok(result) => result,
+        Err(_) => Err(format!(
+            "field `{path}`: CEL evaluation exceeded {CEL_EVAL_TIMEOUT:?} timeout"
+        )),
+    }
+}
+
+fn eval_cel_inner(
     expression: &str,
     value: &str,
     values_so_far: &Value,
@@ -433,6 +484,19 @@ mod tests {
     use serde_json::json;
 
     // --- extract_install_fields ---
+
+    #[test]
+    fn cel_rejects_expressions_over_source_cap() {
+        let huge = "value + ".repeat(MAX_CEL_SOURCE_LEN) + "''";
+        let err = eval_cel(&huge, "x", &json!({}), "field").unwrap_err();
+        assert!(err.contains("exceeds"), "got: {err}");
+    }
+
+    #[test]
+    fn cel_basic_evaluation_returns_string() {
+        let got = eval_cel("value + '-suffix'", "hello", &json!({}), "field").unwrap();
+        assert_eq!(got, "hello-suffix");
+    }
 
     #[test]
     fn extract_with_x_user_input_true() {

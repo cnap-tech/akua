@@ -24,7 +24,7 @@ pub enum FetchError {
     #[error("unsupported repository scheme in `{0}` (expected `oci://` or `https://`/`http://`)")]
     UnsupportedRepo(String),
     #[error("HTTP request: {0}")]
-    Http(#[from] reqwest::Error),
+    Http(#[from] HttpError),
     #[error("OCI pull: {0}")]
     Oci(String),
     #[error("parsing repo index.yaml: {0}")]
@@ -43,6 +43,86 @@ pub enum FetchError {
     },
     #[error("chart tarball entry `{path}` attempts path traversal (absolute or `..`)")]
     UnsafeEntryPath { path: String },
+}
+
+/// Wrapper around `reqwest::Error` whose `Display` strips the URL.
+/// reqwest's default `Display` embeds the full request URL — if a
+/// user-authored `package.yaml` contained `oci://user:pass@host/...`,
+/// the credentials could leak into logs or error chains. The
+/// underlying error is still accessible via `source()` for debugging
+/// by developers who already have the credential material.
+#[derive(Debug)]
+pub struct HttpError(reqwest::Error);
+
+impl std::fmt::Display for HttpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The `without_url` method returns a `reqwest::Error` whose
+        // Display no longer includes the URL. Safe for logs.
+        let sanitised = self.0.to_string();
+        // `without_url` is only available on owned errors (it mutates).
+        // We hold a reference — hand-strip any `https://user:pass@` prefix
+        // that might appear in the Display output of transport errors.
+        write!(f, "{}", redact_userinfo(&sanitised))
+    }
+}
+
+impl std::error::Error for HttpError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
+    }
+}
+
+impl From<reqwest::Error> for HttpError {
+    fn from(e: reqwest::Error) -> Self {
+        Self(e)
+    }
+}
+
+/// Let `?` on a `reqwest::Error` flow straight into `FetchError::Http`
+/// through the redacting `HttpError` wrapper.
+impl From<reqwest::Error> for FetchError {
+    fn from(e: reqwest::Error) -> Self {
+        FetchError::Http(HttpError(e))
+    }
+}
+
+/// Scrub any `<scheme>://user:password@` userinfo fragment in the
+/// given string. Used at error-message construction time so a
+/// credential-bearing URL authored by an attacker can't ride an error
+/// chain into logs.
+pub(crate) fn redact_userinfo(s: &str) -> String {
+    // Pattern: `scheme://user[:pass]@host` — replace with `scheme://<redacted>@host`.
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    let bytes = s.as_bytes();
+    while i < bytes.len() {
+        // Look for `://` followed by `@` before any `/`.
+        if bytes[i..].starts_with(b"://") {
+            out.push_str("://");
+            i += 3;
+            // Scan to the next `@`, `/`, space, or end.
+            let mut j = i;
+            let mut saw_at = false;
+            while j < bytes.len() {
+                match bytes[j] {
+                    b'@' => {
+                        saw_at = true;
+                        break;
+                    }
+                    b'/' | b' ' | b'"' | b'`' => break,
+                    _ => j += 1,
+                }
+            }
+            if saw_at {
+                out.push_str("<redacted>@");
+                i = j + 1;
+            }
+            continue;
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
 }
 
 /// Which download-safety limit tripped. Backs [`FetchError::LimitExceeded`].
@@ -78,19 +158,77 @@ impl std::fmt::Display for LimitKind {
 }
 
 // Download-safety limits. Defaults protect against malicious sources
-// that serve huge bodies or gzip bombs; env vars override per caller.
-// Public charts we've surveyed stay well under every default here.
+// that serve huge bodies or gzip bombs.
+//
+// Resolution order per call:
+//  1. Per-call [`FetchOptions`] override (threaded via [`CALL_OPTIONS`]).
+//  2. Env var (`AKUA_MAX_*`) — process-global default.
+//  3. Hardcoded default below.
+
+/// Per-call overrides for the fetch safety limits. `None` fields fall
+/// back to the env var / default. Useful for multi-tenant hosts that
+/// want per-request limits without touching process-global state.
+#[derive(Debug, Clone, Default)]
+pub struct FetchOptions {
+    pub max_download_bytes: Option<u64>,
+    pub max_extracted_bytes: Option<u64>,
+    pub max_tar_entries: Option<u64>,
+    /// Disable the content-addressed cache for this call (equivalent
+    /// to setting `AKUA_NO_CACHE=1` but scoped to one call).
+    pub disable_cache: bool,
+}
+
+thread_local! {
+    /// Call-scoped override; only set via [`with_options`] for the
+    /// duration of a single `fetch_dependencies_*` invocation.
+    static CALL_OPTIONS: std::cell::RefCell<Option<FetchOptions>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// RAII guard that installs `options` onto the current thread's
+/// `CALL_OPTIONS` and clears it on drop.
+struct OptionsGuard {
+    previous: Option<FetchOptions>,
+}
+
+impl OptionsGuard {
+    fn install(options: FetchOptions) -> Self {
+        let previous = CALL_OPTIONS.with(|cell| cell.replace(Some(options)));
+        Self { previous }
+    }
+}
+
+impl Drop for OptionsGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        CALL_OPTIONS.with(|cell| *cell.borrow_mut() = previous);
+    }
+}
+
+fn call_option<T, F: FnOnce(&FetchOptions) -> Option<T>>(extract: F) -> Option<T> {
+    CALL_OPTIONS.with(|cell| cell.borrow().as_ref().and_then(extract))
+}
 
 fn max_download_bytes() -> u64 {
-    env_bytes("AKUA_MAX_DOWNLOAD_BYTES", 100 * 1024 * 1024)
+    call_option(|o| o.max_download_bytes)
+        .unwrap_or_else(|| env_bytes("AKUA_MAX_DOWNLOAD_BYTES", 100 * 1024 * 1024))
 }
 
 fn max_extracted_bytes() -> u64 {
-    env_bytes("AKUA_MAX_EXTRACTED_BYTES", 500 * 1024 * 1024)
+    call_option(|o| o.max_extracted_bytes)
+        .unwrap_or_else(|| env_bytes("AKUA_MAX_EXTRACTED_BYTES", 500 * 1024 * 1024))
 }
 
 fn max_tar_entries() -> u64 {
-    env_bytes("AKUA_MAX_TAR_ENTRIES", 20_000)
+    call_option(|o| o.max_tar_entries).unwrap_or_else(|| env_bytes("AKUA_MAX_TAR_ENTRIES", 20_000))
+}
+
+/// Whether the on-disk cache should be bypassed for the current call.
+fn cache_disabled() -> bool {
+    if CALL_OPTIONS.with(|cell| cell.borrow().as_ref().is_some_and(|o| o.disable_cache)) {
+        return true;
+    }
+    std::env::var_os("AKUA_NO_CACHE").is_some()
 }
 
 fn env_bytes(var: &str, default: u64) -> u64 {
@@ -148,6 +286,22 @@ pub fn fetch_dependencies(deps: &[Dependency], charts_dir: &Path) -> Result<(), 
     fetch_dependencies_with_auth(deps, charts_dir, &OciAuth::default())
 }
 
+/// Like [`fetch_dependencies_with_auth`] but with per-call safety
+/// limits (`max_download_bytes`, `max_extracted_bytes`, `max_tar_entries`)
+/// and a cache-bypass toggle. Overrides the `AKUA_MAX_*` / `AKUA_NO_CACHE`
+/// env vars for the duration of this call only. Multi-tenant hosts
+/// (Temporal workers with many concurrent activities) can set
+/// per-tenant limits without process-global state.
+pub fn fetch_dependencies_with_options(
+    deps: &[Dependency],
+    charts_dir: &Path,
+    auth: &OciAuth,
+    options: FetchOptions,
+) -> Result<(), FetchError> {
+    let _guard = OptionsGuard::install(options);
+    fetch_dependencies_with_auth(deps, charts_dir, auth)
+}
+
 /// Like [`fetch_dependencies`] but with explicit per-host credentials
 /// for private OCI registries. See [`OciAuth`].
 pub fn fetch_dependencies_with_auth(
@@ -162,7 +316,7 @@ pub fn fetch_dependencies_with_auth(
 
     // Partition deps up-front: file:// and cache hits need no network;
     // only the remainder needs a runtime.
-    let no_cache = std::env::var_os("AKUA_NO_CACHE").is_some();
+    let no_cache = cache_disabled();
     let mut needs_network: Vec<(String, Dependency)> = Vec::new();
     let mut sync_paths: Vec<(String, PathBuf)> = Vec::new();
 
@@ -327,16 +481,39 @@ async fn fetch_http_to_file(
     dep: &Dependency,
     scratch_dir: &Path,
 ) -> Result<(tempfile::NamedTempFile, String), FetchError> {
-    let url = resolve_http_chart_url(dep).await?;
+    let resolved = resolve_http_chart_url(dep).await?;
     let resp = ssrf_safe_client(5)?
-        .get(&url)
+        .get(&resolved.url)
         .send()
         .await?
         .error_for_status()?;
-    stream_response_to_file(resp, max_download_bytes(), scratch_dir).await
+    let (tempfile, digest) =
+        stream_response_to_file(resp, max_download_bytes(), scratch_dir).await?;
+    // Parity with the SDK's HTTP pull: verify the downloaded tarball
+    // against `digest` from index.yaml when the repo publishes one.
+    // Rejects a registry that serves tampered bytes alongside a
+    // correct index entry.
+    if let Some(advertised) = resolved.digest {
+        let normalised = advertised
+            .strip_prefix("sha256:")
+            .unwrap_or(&advertised)
+            .to_ascii_lowercase();
+        if normalised != digest {
+            return Err(FetchError::Oci(format!(
+                "digest mismatch for {}: index advertised {advertised}, got {digest}",
+                redact_userinfo(&resolved.url)
+            )));
+        }
+    }
+    Ok((tempfile, digest))
 }
 
-async fn resolve_http_chart_url(dep: &Dependency) -> Result<String, FetchError> {
+struct ResolvedHttpChart {
+    url: String,
+    digest: Option<String>,
+}
+
+async fn resolve_http_chart_url(dep: &Dependency) -> Result<ResolvedHttpChart, FetchError> {
     let index = fetch_repo_index(&dep.repository).await?;
     let entry = index
         .entries
@@ -349,13 +526,17 @@ async fn resolve_http_chart_url(dep: &Dependency) -> Result<String, FetchError> 
     let chart_url = entry.urls.first().ok_or_else(|| FetchError::NoChartUrl {
         name: dep.name.clone(),
     })?;
-    Ok(
-        if chart_url.starts_with("http://") || chart_url.starts_with("https://") {
-            chart_url.clone()
-        } else {
-            format!("{}/{}", dep.repository.trim_end_matches('/'), chart_url)
-        },
-    )
+    let url = if chart_url.starts_with("http://") || chart_url.starts_with("https://") {
+        chart_url.clone()
+    } else {
+        format!("{}/{}", dep.repository.trim_end_matches('/'), chart_url)
+    };
+    let digest = if entry.digest.is_empty() {
+        None
+    } else {
+        Some(entry.digest.clone())
+    };
+    Ok(ResolvedHttpChart { url, digest })
 }
 
 /// Streaming OCI pull — bypasses `oci-client::pull` (which buffers the
@@ -418,11 +599,13 @@ impl OciRef {
     pub fn parse(repo: &str, name: &str, version: &str) -> Result<Self, FetchError> {
         let without_scheme = repo
             .strip_prefix("oci://")
-            .ok_or_else(|| FetchError::UnsupportedRepo(repo.to_string()))?;
+            .ok_or_else(|| FetchError::UnsupportedRepo(redact_userinfo(repo)))?;
         let trimmed = without_scheme.trim_end_matches('/');
         let (host, path) = trimmed
             .split_once('/')
-            .ok_or_else(|| FetchError::Oci(format!("no repository path in {repo}")))?;
+            .ok_or_else(|| {
+                FetchError::Oci(format!("no repository path in {}", redact_userinfo(repo)))
+            })?;
         validate_oci_host(host)?;
         let repository = if path.is_empty() {
             name.to_string()
@@ -453,8 +636,10 @@ fn validate_oci_host(host: &str) -> Result<(), FetchError> {
             || ch == '['
             || ch == ']';
         if !ok {
+            // Don't echo the full host — it may contain `user:pass@`
+            // userinfo that an attacker stuffed in to leak via logs.
             return Err(FetchError::Oci(format!(
-                "disallowed character `{ch}` in OCI host `{host}`"
+                "disallowed character in OCI host (character `{ch}` not allowed; hosts must match hostname[:port])"
             )));
         }
     }
@@ -495,17 +680,55 @@ fn pick_helm_layer(manifest: &OciManifestJson) -> Result<&OciManifestLayer, Fetc
         })
 }
 
-/// Sync wrapper over [`fetch_oci_manifest_digest`] that manages its
-/// own current-thread runtime. Prefer this from non-async callers.
+/// Sync wrapper over [`fetch_oci_manifest_digest`]. When a Tokio
+/// runtime is already active (typical inside Temporal workers / async
+/// bin crates), calls `block_on` on the current handle via a
+/// `spawn_blocking` detour — avoids building a second runtime. Falls
+/// back to a fresh current-thread runtime for non-async callers (the
+/// CLI `akua inspect` path).
 pub fn fetch_oci_manifest_digest_blocking(
     parts: &OciRef,
     user_auth: &OciAuth,
 ) -> Result<String, FetchError> {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        // We're inside a runtime; block_on on the existing handle would
+        // panic ("Cannot start a runtime from within a runtime"), so
+        // push the work into a blocking task that spawns a one-shot
+        // driver for the future.
+        return tokio::task::block_in_place(|| {
+            handle.block_on(fetch_oci_manifest_digest(parts, user_auth))
+        });
+    }
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(FetchError::Unpack)?
         .block_on(fetch_oci_manifest_digest(parts, user_auth))
+}
+
+const MANIFEST_ACCEPT: &str = "application/vnd.oci.image.manifest.v1+json, \
+    application/vnd.docker.distribution.manifest.v2+json";
+
+/// Build a `reqwest::Request` for the manifest URL. Shared by the
+/// HEAD-for-digest path (`fetch_oci_manifest_digest`) and the
+/// GET-for-layers path (`fetch_manifest_json`).
+fn manifest_request(
+    parts: &OciRef,
+    auth_header: Option<&str>,
+    method: reqwest::Method,
+) -> Result<reqwest::RequestBuilder, FetchError> {
+    let url = format!(
+        "https://{}/v2/{}/manifests/{}",
+        parts.host, parts.repository, parts.tag
+    );
+    let http = ssrf_safe_client(5)?;
+    let mut req = http
+        .request(method, &url)
+        .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT);
+    if let Some(h) = auth_header {
+        req = req.header(reqwest::header::AUTHORIZATION, h);
+    }
+    Ok(req)
 }
 
 /// Fetch the manifest digest for an OCI reference via a single HEAD
@@ -517,21 +740,11 @@ pub async fn fetch_oci_manifest_digest(
     user_auth: &OciAuth,
 ) -> Result<String, FetchError> {
     crate::ssrf::validate_host(&parts.host)?;
-    const MANIFEST_ACCEPT: &str = "application/vnd.oci.image.manifest.v1+json, \
-         application/vnd.docker.distribution.manifest.v2+json";
     let auth_header = resolve_oci_auth(parts, user_auth).await;
-    let url = format!(
-        "https://{}/v2/{}/manifests/{}",
-        parts.host, parts.repository, parts.tag
-    );
-    let http = ssrf_safe_client(5)?;
-    let mut req = http
-        .head(&url)
-        .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT);
-    if let Some(h) = &auth_header {
-        req = req.header(reqwest::header::AUTHORIZATION, h);
-    }
-    let resp = req.send().await?.error_for_status()?;
+    let resp = manifest_request(parts, auth_header.as_deref(), reqwest::Method::HEAD)?
+        .send()
+        .await?
+        .error_for_status()?;
     resp.headers()
         .get("docker-content-digest")
         .ok_or_else(|| FetchError::Oci("registry did not return Docker-Content-Digest".into()))?
@@ -544,20 +757,10 @@ async fn fetch_manifest_json(
     parts: &OciRef,
     auth_header: Option<&str>,
 ) -> Result<OciManifestJson, FetchError> {
-    const MANIFEST_ACCEPT: &str = "application/vnd.oci.image.manifest.v1+json, \
-         application/vnd.docker.distribution.manifest.v2+json";
-    let url = format!(
-        "https://{}/v2/{}/manifests/{}",
-        parts.host, parts.repository, parts.tag
-    );
-    let http = ssrf_safe_client(5)?;
-    let mut req = http
-        .get(&url)
-        .header(reqwest::header::ACCEPT, MANIFEST_ACCEPT);
-    if let Some(h) = auth_header {
-        req = req.header(reqwest::header::AUTHORIZATION, h);
-    }
-    let resp = req.send().await?.error_for_status()?;
+    let resp = manifest_request(parts, auth_header, reqwest::Method::GET)?
+        .send()
+        .await?
+        .error_for_status()?;
     resp.json::<OciManifestJson>()
         .await
         .map_err(|e| FetchError::Oci(format!("manifest parse: {e}")))
@@ -702,9 +905,14 @@ async fn download_with_limit(
     if resp.content_length().is_some_and(|d| d > limit) {
         return Err(limit_exceeded(LimitKind::DownloadBytes, limit));
     }
+    // Cap the upfront allocation so a server advertising a spoofed
+    // Content-Length can't force a 100 MB reservation before any bytes
+    // arrive. 4 MB is generous for an index.yaml and grows naturally
+    // via `extend_from_slice`.
+    const MAX_INITIAL_ALLOC: usize = 4 * 1024 * 1024;
     let initial = resp
         .content_length()
-        .map(|n| n.min(limit) as usize)
+        .map(|n| n.min(limit).min(MAX_INITIAL_ALLOC as u64) as usize)
         .unwrap_or(4096);
     let mut buf: Vec<u8> = Vec::with_capacity(initial);
     while let Some(chunk) = resp.chunk().await? {
@@ -780,6 +988,10 @@ struct RepoEntry {
     version: String,
     #[serde(default)]
     urls: Vec<String>,
+    /// Hex-encoded sha256 (Helm convention: bare hex, no `sha256:` prefix).
+    /// Verified against the downloaded bytes when present.
+    #[serde(default)]
+    digest: String,
 }
 
 /// Unpack a `tar+gzip` chart tarball into `charts_dir/target_name/`.
@@ -1022,7 +1234,65 @@ mod cache {
         } else {
             temp.persist(&blob_path).map_err(|e| e.error)?;
         }
-        write_ref(&refs_dir, key, digest)
+        write_ref(&refs_dir, key, digest)?;
+        // Best-effort LRU trim. A failing evict shouldn't break the
+        // write that just landed.
+        let _ = evict_if_over_cap(&blobs_dir, &refs_dir);
+        Ok(())
+    }
+
+    /// Approximate LRU eviction by mtime. Reads `AKUA_MAX_CACHE_BYTES`
+    /// (default 5 GB). Removes oldest `blobs/*.tgz` first; orphan refs
+    /// get cleaned up on next read (they just miss).
+    fn evict_if_over_cap(
+        blobs_dir: &std::path::Path,
+        refs_dir: &std::path::Path,
+    ) -> std::io::Result<()> {
+        let cap = max_cache_bytes();
+        if cap == 0 {
+            return Ok(());
+        }
+        let mut entries: Vec<(PathBuf, std::time::SystemTime, u64)> = Vec::new();
+        let mut total: u64 = 0;
+        for e in std::fs::read_dir(blobs_dir)? {
+            let e = e?;
+            let meta = e.metadata()?;
+            if !meta.is_file() {
+                continue;
+            }
+            let mtime = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+            total += meta.len();
+            entries.push((e.path(), mtime, meta.len()));
+        }
+        if total <= cap {
+            return Ok(());
+        }
+        // Oldest first.
+        entries.sort_by_key(|(_, mtime, _)| *mtime);
+        for (path, _, size) in entries {
+            if total <= cap {
+                break;
+            }
+            if std::fs::remove_file(&path).is_ok() {
+                total = total.saturating_sub(size);
+            }
+        }
+        // Sweep orphan ref files (refs pointing at no-longer-existing blobs).
+        for e in std::fs::read_dir(refs_dir)?.flatten() {
+            if let Ok(contents) = std::fs::read_to_string(e.path()) {
+                let digest = contents.trim();
+                let blob = blobs_dir.join(format!("{digest}.tgz"));
+                if !blob.exists() {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn max_cache_bytes() -> u64 {
+        // Default 5 GB. Set to 0 to disable eviction entirely.
+        super::env_bytes("AKUA_MAX_CACHE_BYTES", 5 * 1024 * 1024 * 1024)
     }
 
     /// Look up the cached blob path for `key` without reading its
@@ -1183,6 +1453,26 @@ mod tests {
                 }
             ),
             "unexpected: {err:?}"
+        );
+    }
+
+    #[test]
+    fn redact_userinfo_strips_basic_userinfo() {
+        assert_eq!(
+            redact_userinfo("https://alice:s3cret@registry.example.com/v2/foo"),
+            "https://<redacted>@registry.example.com/v2/foo"
+        );
+        assert_eq!(
+            redact_userinfo("oci://u:p@ghcr.io/parent/chart"),
+            "oci://<redacted>@ghcr.io/parent/chart"
+        );
+    }
+
+    #[test]
+    fn redact_userinfo_leaves_clean_urls_alone() {
+        assert_eq!(
+            redact_userinfo("https://ghcr.io/stefanprodan/charts/podinfo"),
+            "https://ghcr.io/stefanprodan/charts/podinfo"
         );
     }
 

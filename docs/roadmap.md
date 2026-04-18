@@ -24,7 +24,9 @@ the *when*.
 | **7a — Helm-engine WASM** | ✅ Landed | Go→wasip1 wrapper around `helm/v4/pkg/engine` hosted via wasmtime. `akua render --engine helm-wasm` is the default. Kills `helm template` shell-out. |
 | **7b — Native dep fetching** | ✅ Landed | `akua-core::fetch` pulls OCI + HTTP chart deps in-process (oci-client + reqwest). Replaces `helm dependency update`. Default render now has zero `helm` CLI dep. |
 | **7c — Library hardening** | ✅ Landed | Dropped `std::env::set_current_dir` in `load_package`; source paths absolutised up-front so engines are CWD-independent. Safe for concurrent / multi-threaded library use. |
-| **8 — Install UI reference** | 🔮 Near-term | React + rjsf + WASM bindings; demos the customer-facing flow end-to-end |
+| **7d — @akua/sdk on JSR** | ✅ Landed | 0.1/0.2/0.3 published to JSR. Node entry + browser entry + `@akua/sdk/cache` Node-only. `pullChart` (OCI + HTTP Helm), `packChart` with metadata/schema, `dockerConfigAuth`, streaming, LRU cache, SSRF guard, tar bombs + symlink escapes blocked. See `SECURITY.md`. |
+| **7e — Security hardening** | ✅ Landed | P0 tar symlink rejection, P0 helmfile gated behind opt-in feature, P1 SSRF guard (Rust + SDK), P1 source-path confinement, credential redaction in Debug + error messages, CEL timeout + source cap, strict OCI media type, LRU cache eviction. |
+| **8 — Install UI reference** | 🔮 Near-term | React + rjsf + `@akua/sdk/browser`; demos the customer-facing flow end-to-end |
 | **9 — Gen 4 bundle output** | 🔮 Post-v1 | `akua publish --bundle` emits multi-layer OCI: engine.wasm (shared digest) + sources + schema + attestation. Reference consumer `akua render-bundle <oci-ref>`. See [`vision.md`](vision.md). |
 | **10 — Gen 4 ecosystem bridges** | 🔮 Post-v1 | `akua-cmp` sidecar for ArgoCD, Flux post-renderer plugin, `helm install --wasm` plugin. De-facto spec before CNCF standardisation. |
 | **11 — Package Studio IDE** | 🔮 Multi-quarter | Full in-browser authoring IDE |

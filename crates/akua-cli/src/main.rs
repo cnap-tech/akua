@@ -756,7 +756,13 @@ fn inspect_oci(reference: &str, auth_args: OciAuthArgs) -> Result<()> {
     };
     akua_core::fetch_dependencies_with_auth(std::slice::from_ref(&dep), &charts_dir, &oci_auth)
         .with_context(|| {
-            format!("pulling {reference} (chart `{chart}` version `{version}`) from {repository}")
+            // Scrub any `user:pass@` that the user may have embedded
+            // in the reference/repository.
+            format!(
+                "pulling {} (chart `{chart}` version `{version}`) from {}",
+                redact_userinfo_simple(reference),
+                redact_userinfo_simple(&repository),
+            )
         })?;
 
     // Resolve the upstream manifest digest via a single HEAD request so
@@ -808,6 +814,25 @@ fn build_oci_auth(host: &str, args: OciAuthArgs) -> Result<akua_core::OciAuth> {
 /// Require a fully-tagged `oci://host/path/chart:version`. Returns
 /// `(repository, chart, version)`. Delegates parsing to
 /// `akua_core::source::parse_oci_url` (shared with the fetcher).
+/// Strip `user:pass@` userinfo fragments from a URL-like string for
+/// use in user-facing error messages. Mirrors the redaction in
+/// `akua-core::fetch::redact_userinfo` but kept local so the CLI
+/// doesn't depend on a private symbol.
+fn redact_userinfo_simple(s: &str) -> String {
+    if let Some(colon_slash) = s.find("://") {
+        let prefix = &s[..colon_slash + 3];
+        let rest = &s[colon_slash + 3..];
+        if let Some(at) = rest.find('@') {
+            let path_start = rest[..at].find('/').unwrap_or(at);
+            if path_start > at {
+                return format!("{prefix}<redacted>@{}", &rest[at + 1..]);
+            }
+            return format!("{prefix}<redacted>@{}", &rest[at + 1..]);
+        }
+    }
+    s.to_string()
+}
+
 fn parse_oci_inspect_ref(reference: &str) -> Result<(String, String, String)> {
     let parsed = akua_core::source::parse_oci_url(reference)
         .ok_or_else(|| anyhow::anyhow!("`{reference}` is not a valid oci:// URL"))?;
@@ -893,6 +918,27 @@ struct RenderArgs<'a> {
     inputs_file: Option<&'a Path>,
 }
 
+/// Resolve the `--helm-bin` argument to an absolute, non-ambiguous
+/// path. PATH-based resolution is rejected for the `helm-cli` engine —
+/// a writable directory on `$PATH` (e.g. a malicious drop in
+/// `~/.local/bin`) would otherwise let an attacker shadow the real
+/// `helm` binary. Accept only absolute paths.
+fn resolve_helm_bin(helm_bin: &Path, engine: &str) -> Result<PathBuf> {
+    if engine != "helm-cli" {
+        return Ok(helm_bin.to_path_buf());
+    }
+    if helm_bin.is_absolute() {
+        return Ok(helm_bin.to_path_buf());
+    }
+    bail!(
+        "--helm-bin must be an absolute path when --engine=helm-cli (got `{}`). \
+         PATH-based resolution is rejected to prevent a writable directory on \
+         $PATH from shadowing the real `helm` binary. Pass the full path, e.g. \
+         `--helm-bin /usr/local/bin/helm`.",
+        helm_bin.display()
+    );
+}
+
 fn run_render(args: RenderArgs<'_>) -> Result<()> {
     // Stage the umbrella in a throwaway temp dir. Render is a transient
     // operation — the durable chart artifact is what `akua build` emits.
@@ -900,8 +946,9 @@ fn run_render(args: RenderArgs<'_>) -> Result<()> {
     let (_, umbrella) = load_package(args.package_dir, scratch.path())?;
     let override_values =
         resolve_inputs_to_values(args.package_dir, args.inputs_inline, args.inputs_file)?;
+    let helm_bin = resolve_helm_bin(args.helm_bin, args.engine)?;
     let opts = RenderOptions {
-        helm_bin: args.helm_bin.to_path_buf(),
+        helm_bin,
         release_name: args.release.to_string(),
         namespace: args.namespace.to_string(),
         override_values,

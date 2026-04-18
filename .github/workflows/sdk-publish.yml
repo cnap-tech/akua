@@ -23,6 +23,11 @@ permissions:
   contents: read
   id-token: write  # required for JSR OIDC auth
 
+env:
+  # Opt into Node 24 for actions that still default to Node 20.
+  # See GitHub's 2025-09-19 deprecation announcement.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   publish:
     runs-on: ubuntu-latest

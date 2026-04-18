@@ -1,0 +1,92 @@
+name: cli-release
+
+# Build `akua` CLI binaries for common targets on tag push.
+#
+# Trigger: push a tag `akua-v<semver>` (e.g. `akua-v0.1.0`). Version
+# must match workspace.package.version in Cargo.toml.
+#
+# Outputs: one `.tar.gz` per target, uploaded as a GitHub Release
+# attachment. Shasum file included for checksum verification.
+
+on:
+  push:
+    tags:
+      - 'akua-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write  # required to create Releases
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+          cache: true
+
+      - name: Cross-compile for linux/arm64
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> $GITHUB_ENV
+
+      - name: Rust target
+        run: mise exec -- rustup target add ${{ matrix.target }}
+
+      - name: Build WASM artifacts (needed by helm-wasm feature)
+        run: mise exec -- task sdk:wasm
+
+      - name: Build akua CLI
+        run: mise exec -- cargo build -p akua-cli --release --target ${{ matrix.target }}
+
+      - name: Package
+        run: |
+          name="akua-${GITHUB_REF_NAME#akua-}-${{ matrix.target }}"
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/akua dist/
+          cp README.md SECURITY.md LICENSE dist/ 2>/dev/null || true
+          cd dist && tar -czf "${name}.tar.gz" akua README.md SECURITY.md LICENSE
+          shasum -a 256 "${name}.tar.gz" > "${name}.tar.gz.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: akua-${{ matrix.target }}
+          path: dist/*.tar.gz*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/akua-v')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create release
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "akua ${GITHUB_REF_NAME#akua-v}" \
+            --notes "See [CHANGELOG.md](https://github.com/cnap-tech/akua/blob/main/CHANGELOG.md) for details." \
+            dist/*.tar.gz dist/*.sha256
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

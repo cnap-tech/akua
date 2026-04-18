@@ -69,9 +69,15 @@ export async function* streamTgzEntries(
   const maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
   const maxTotalBytes = options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
   const maxEntryBytes = options.maxEntryBytes ?? DEFAULT_MAX_ENTRY_BYTES;
-  const source = toReadableStream(tgz).pipeThrough(new DecompressionStream('gzip'));
+  // DecompressionStream's type surface changed between TS lib versions:
+  // it expects `Uint8Array<ArrayBuffer>` in some and `BufferSource` in
+  // others. The runtime is compatible across the board — cast to silence
+  // the variance without losing type safety for callers.
+  const source = toReadableStream(tgz).pipeThrough(
+    new DecompressionStream('gzip') as unknown as ReadableWritablePair<Uint8Array, Uint8Array>,
+  );
   const reader = source.getReader();
-  let buf = new Uint8Array(0);
+  let buf: Uint8Array = new Uint8Array(0);
   let entryCount = 0;
   let totalBytes = 0;
 
@@ -80,7 +86,7 @@ export async function* streamTgzEntries(
     while (buf.length < needed) {
       const { value, done } = await reader.read();
       if (done) return buf.length >= needed;
-      buf = concatPair(buf, value);
+      buf = concatPair(buf, value as Uint8Array);
     }
     return true;
   };
@@ -256,7 +262,9 @@ export function packTgzStream(rootDir: string, entries: PackEntries): ReadableSt
       }
     },
   });
-  return raw.pipeThrough(new CompressionStream('gzip'));
+  return raw.pipeThrough(
+    new CompressionStream('gzip') as unknown as ReadableWritablePair<Uint8Array, Uint8Array>,
+  );
 }
 
 /**

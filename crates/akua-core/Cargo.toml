@@ -15,7 +15,10 @@ authors.workspace = true
 # package you build. See SECURITY.md §"Helmfile engine".
 default = ["helm-cli", "engine-kcl", "publish", "helm-wasm"]
 # Shell-to-helm rendering (not WASM-safe — requires std::process and tempfile).
-helm-cli = ["dep:tempfile"]
+# Depends on `fetch` so helm-cli render can pre-populate `charts/` via
+# akua's audited fetcher (SSRF guard + size caps) and skip the unsafe
+# `helm dependency update` network path.
+helm-cli = ["dep:tempfile", "fetch"]
 # Embedded Helm v4 template engine via helm-engine-wasm (Go→wasip1 +
 # wasmtime). Kills the helm CLI dep for template rendering. Remote-dep
 # fetching still requires a separate tool until a native oras-based

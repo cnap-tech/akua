@@ -89,11 +89,46 @@ function splitLast(s: string, sep: string): [string, string | undefined] {
 export async function pullChart(ref: string, opts: PullChartOptions = {}): Promise<Uint8Array> {
   const stream = await pullChartStream(ref, opts);
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
-  const buf = await new Response(stream).arrayBuffer();
-  if (buf.byteLength > maxBytes) {
-    throw new OciPullError(`received ${buf.byteLength} bytes, over limit ${maxBytes}`);
+  return collectStream(stream, maxBytes, (received, limit) =>
+    new OciPullError(`received ${received} bytes, over limit ${limit}`),
+  );
+}
+
+/**
+ * Drain a `ReadableStream<Uint8Array>` into a single `Uint8Array`,
+ * aborting mid-stream when accumulated byte count exceeds `maxBytes`.
+ * The stream reader is cancelled on overrun so the underlying fetch
+ * doesn't keep pulling from a malicious server after we've given up.
+ */
+async function collectStream(
+  stream: ReadableStream<Uint8Array>,
+  maxBytes: number,
+  overflow: (received: number, limit: number) => Error,
+): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel(`over limit ${maxBytes}`).catch(() => {});
+        throw overflow(total, maxBytes);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
   }
-  return new Uint8Array(buf);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.byteLength;
+  }
+  return out;
 }
 
 /**
@@ -152,6 +187,15 @@ export async function pullChartStream(
   if (!blobResp.ok) {
     throw new OciPullError(
       `layer ${blobResp.status} ${blobResp.statusText} for ${layer.digest}`,
+    );
+  }
+  // Second preflight against the actual response headers — registries
+  // that serve a mismatched Content-Length vs manifest size shouldn't
+  // get to stream-OOM us.
+  const advertised = Number(blobResp.headers.get('content-length') ?? '');
+  if (Number.isFinite(advertised) && advertised > maxBytes) {
+    throw new OciPullError(
+      `layer Content-Length ${advertised} > limit ${maxBytes} — override with maxBytes`,
     );
   }
   if (!blobResp.body) {

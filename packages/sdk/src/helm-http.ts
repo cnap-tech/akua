@@ -155,11 +155,35 @@ async function fetchHelmHttpChart(
 ): Promise<{ bytes: Uint8Array }> {
   const { resp, chartUrl, digest } = await resolveHelmHttpChart(ref, opts);
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_BYTES;
-  const buf = await resp.arrayBuffer();
-  if (buf.byteLength > maxBytes) {
-    throw new HelmHttpError(`received ${buf.byteLength} bytes, over limit ${maxBytes}`);
+  if (!resp.body) {
+    throw new HelmHttpError(`chart response has no body for ${chartUrl}`);
   }
-  const bytes = new Uint8Array(buf);
+  // Stream-consume with a running byte cap — a server that lies about
+  // Content-Length or omits it entirely can't OOM us by sending more
+  // than we asked for.
+  const reader = resp.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel(`over limit ${maxBytes}`).catch(() => {});
+        throw new HelmHttpError(`received ${total} bytes, over limit ${maxBytes}`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    bytes.set(c, offset);
+    offset += c.byteLength;
+  }
   if (digest) {
     await verifySha256(bytes, digest, chartUrl);
   }
