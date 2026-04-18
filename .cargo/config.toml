@@ -14,6 +14,10 @@
 linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 
+# aarch64 cross: `aarch64-linux-gnu-gcc` doesn't pick up `setup-mold`'s
+# host-installed mold without extra plumbing (needs its own mold binary
+# under the right `binutils`-style name, or `--ld-path`). Skip the mold
+# override here — rust-cache still gives the big win, and cross-link
+# is never the bottleneck on realistic Rust projects.
 [target.aarch64-unknown-linux-gnu]
 linker = "aarch64-linux-gnu-gcc"
-rustflags = ["-C", "link-arg=-fuse-ld=mold"]
