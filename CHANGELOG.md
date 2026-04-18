@@ -158,6 +158,20 @@ Initial published SDK.
 
 ### Added (since last release)
 
+- **`akua diff <before> <after>`** — structural chart comparison.
+  Each argument accepts either a local chart directory or an
+  `oci://` reference. Output covers `Chart.yaml` metadata shifts,
+  dependency adds/removes/updates (keyed on alias-or-name),
+  `values.yaml` default-value deltas (dot-path flattened), and
+  schema input-field changes (required↔optional, type, default,
+  `x-input` CEL transforms). Non-zero exit code when there are
+  changes, `diff(1)`-style, so CI can gate on "no unintended
+  delta". `--format json` for piping to `jq`.
+
+  Why: `helm diff` renders templates (needs values + a cluster).
+  Nothing in the ecosystem shows the *shape* of what customers will
+  be asked to configure differently between versions. Closes the
+  3am-pager gap.
 - `akua init` — scaffolds `package.yaml` + `values.schema.json` +
   `README.md`.
 - `akua inspect --oci` — output now includes `ociManifestDigest`

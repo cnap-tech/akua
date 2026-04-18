@@ -137,6 +137,10 @@ akua publish --chart dist/chart --to oci://ghcr.io/you/my-pkg
 
 akua attest --chart dist/chart      # SLSA v1 provenance predicate for cosign
 akua inspect --chart dist/chart     # show .akua/metadata.yaml provenance
+
+akua diff oci://ghcr.io/you/chart:1.0.0 oci://ghcr.io/you/chart:1.1.0
+                                    # structural diff — metadata, deps,
+                                    # values defaults, schema fields
 ```
 
 ### TypeScript SDK ([@akua/sdk](https://jsr.io/@akua/sdk))

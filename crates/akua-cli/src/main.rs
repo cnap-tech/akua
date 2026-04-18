@@ -196,6 +196,36 @@ enum Commands {
         #[arg(long, env = "AKUA_REGISTRY_PASSWORD")]
         password: Option<String>,
     },
+    /// Structurally diff two Helm charts.
+    ///
+    /// Each argument is either a local chart directory or an
+    /// `oci://host/path/chart:version` reference — e.g.:
+    ///
+    ///   akua diff oci://ghcr.io/stefanprodan/charts/podinfo:6.6.0 \
+    ///             oci://ghcr.io/stefanprodan/charts/podinfo:6.7.1
+    ///
+    /// Reports Chart.yaml shifts, dependency adds/removes/updates,
+    /// defaults in values.yaml that changed, and schema input-field
+    /// deltas (required ↔ optional, type, default, x-input transforms).
+    /// Does NOT render templates — that's `helm diff`'s job.
+    Diff {
+        /// Baseline chart (local dir or oci:// ref).
+        before: String,
+        /// Candidate chart (local dir or oci:// ref).
+        after: String,
+        /// Output format: `text` (default, human-readable) or `json`
+        /// for piping into `jq` / CI checks.
+        #[arg(long, default_value = "text")]
+        format: String,
+        /// Auth for private OCI registries. Applies to both arguments
+        /// when either is an `oci://` ref.
+        #[arg(long, env = "AKUA_OCI_USERNAME")]
+        oci_username: Option<String>,
+        #[arg(long, env = "AKUA_OCI_PASSWORD")]
+        oci_password: Option<String>,
+        #[arg(long, env = "AKUA_OCI_TOKEN")]
+        oci_token: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -233,6 +263,7 @@ fn command_name(cmd: &Commands) -> &'static str {
         Commands::Render { .. } => "render",
         Commands::Package { .. } => "package",
         Commands::Publish { .. } => "publish",
+        Commands::Diff { .. } => "diff",
     }
 }
 
@@ -304,6 +335,23 @@ fn dispatch(command: Commands) -> Result<()> {
             username,
             password,
         } => run_publish(&chart, &to, username, password),
+        Commands::Diff {
+            before,
+            after,
+            format,
+            oci_username,
+            oci_password,
+            oci_token,
+        } => run_diff(
+            &before,
+            &after,
+            &format,
+            OciAuthArgs {
+                username: oci_username,
+                password: oci_password,
+                token: oci_token,
+            },
+        ),
     }
 }
 
@@ -870,6 +918,296 @@ fn read_chart_contents(chart_dir: &Path) -> Result<ChartContents> {
     })
 }
 
+// ---------------------------------------------------------------------------
+// `akua diff`
+// ---------------------------------------------------------------------------
+
+fn run_diff(before: &str, after: &str, format: &str, auth_args: OciAuthArgs) -> Result<()> {
+    if format != "text" && format != "json" {
+        bail!("--format must be `text` or `json` (got `{format}`)");
+    }
+
+    // The same auth applies to both sides — consumers diffing against
+    // a private registry always authenticate identically on both.
+    let oci_auth = if before.starts_with("oci://") || after.starts_with("oci://") {
+        Some(build_auth_from_reference(
+            if before.starts_with("oci://") {
+                before
+            } else {
+                after
+            },
+            auth_args,
+        )?)
+    } else {
+        None
+    };
+
+    let before_snap = resolve_snapshot("before", before, oci_auth.as_ref())?;
+    let after_snap = resolve_snapshot("after", after, oci_auth.as_ref())?;
+
+    let diff = akua_core::compare_charts(&before_snap, &after_snap);
+
+    match format {
+        "json" => println!("{}", serde_json::to_string_pretty(&diff)?),
+        _ => print_diff_text(before, after, &diff),
+    }
+
+    // Non-zero exit when there are changes. Lets CI tasks gate on
+    // "no unintended delta" without parsing the output. Borrowed from
+    // `diff(1)` and `helm diff`'s convention.
+    if !diff.is_empty() {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn build_auth_from_reference(
+    reference: &str,
+    auth_args: OciAuthArgs,
+) -> Result<akua_core::OciAuth> {
+    let (repository, _, _) = parse_oci_inspect_ref(reference)?;
+    let host = repository
+        .trim_start_matches("oci://")
+        .split('/')
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    build_oci_auth(&host, auth_args)
+}
+
+/// Resolve a CLI argument to a `ChartSnapshot`. Accepts:
+/// - `oci://host/path/chart:version` — pulled via the native fetcher
+///   (SSRF-guarded, size-capped).
+/// - A local directory — read directly.
+fn resolve_snapshot(
+    side: &str,
+    arg: &str,
+    oci_auth: Option<&akua_core::OciAuth>,
+) -> Result<akua_core::ChartSnapshot> {
+    if arg.starts_with("oci://") {
+        resolve_oci_snapshot(side, arg, oci_auth)
+    } else {
+        resolve_local_snapshot(side, Path::new(arg))
+    }
+}
+
+fn resolve_oci_snapshot(
+    side: &str,
+    reference: &str,
+    oci_auth: Option<&akua_core::OciAuth>,
+) -> Result<akua_core::ChartSnapshot> {
+    let (repository, chart, version) = parse_oci_inspect_ref(reference)?;
+    // `tempfile::tempdir` leaks on panic but cleans up on drop, which
+    // is fine — we only need the contents around long enough to build
+    // the snapshot.
+    let tmp = tempfile::tempdir()
+        .with_context(|| format!("creating scratch dir for `{side}` chart"))?;
+    let charts_dir = tmp.path().join("charts");
+    let dep = akua_core::Dependency {
+        name: chart.clone(),
+        version: version.clone(),
+        repository: repository.clone(),
+        alias: Some(format!("__diff_{side}")),
+        condition: None,
+    };
+    let empty_auth = akua_core::OciAuth::default();
+    let auth = oci_auth.unwrap_or(&empty_auth);
+    akua_core::fetch_dependencies_with_auth(std::slice::from_ref(&dep), &charts_dir, auth)
+        .with_context(|| {
+            format!(
+                "pulling `{side}` chart {} (chart `{chart}` version `{version}`) from {}",
+                akua_core::redact_userinfo(reference),
+                akua_core::redact_userinfo(&repository),
+            )
+        })?;
+    read_snapshot(&charts_dir.join(format!("__diff_{side}")))
+}
+
+fn resolve_local_snapshot(
+    side: &str,
+    chart_dir: &Path,
+) -> Result<akua_core::ChartSnapshot> {
+    if !chart_dir.is_dir() {
+        bail!(
+            "`{side}` argument `{}` is neither an `oci://` reference nor a chart directory",
+            chart_dir.display()
+        );
+    }
+    read_snapshot(chart_dir)
+}
+
+/// Read Chart.yaml + values.yaml + values.schema.json from a chart
+/// directory into a [`ChartSnapshot`]. values.yaml is optional — a
+/// chart with no defaults is valid.
+fn read_snapshot(chart_dir: &Path) -> Result<akua_core::ChartSnapshot> {
+    let contents = read_chart_contents(chart_dir)?;
+
+    let values_yaml_path = chart_dir.join("values.yaml");
+    let values_yaml = match std::fs::read(&values_yaml_path) {
+        Ok(bytes) => serde_yaml::from_slice::<serde_json::Value>(&bytes)
+            .with_context(|| format!("parsing {}", values_yaml_path.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::Value::Null,
+        Err(e) => return Err(e).context(format!("reading {}", values_yaml_path.display())),
+    };
+
+    Ok(akua_core::ChartSnapshot {
+        chart_yaml: contents.chart_yaml,
+        values_yaml,
+        values_schema: contents.values_schema,
+    })
+}
+
+/// Pretty-text formatter. Aimed at a human reading the output during
+/// an upgrade triage — concise, grouped by section, copy-paste-able
+/// into a PR description.
+fn print_diff_text(before: &str, after: &str, diff: &akua_core::ChartDiff) {
+    println!("akua diff");
+    println!("  before:  {}", akua_core::redact_userinfo(before));
+    println!("  after:   {}", akua_core::redact_userinfo(after));
+    println!();
+
+    if diff.is_empty() {
+        println!("(no structural changes)");
+        return;
+    }
+
+    if !diff.metadata.changes.is_empty() {
+        println!("Metadata:");
+        for (key, change) in &diff.metadata.changes {
+            println!(
+                "  {key}: {} → {}",
+                render_value(&change.before),
+                render_value(&change.after)
+            );
+        }
+        println!();
+    }
+
+    let deps = &diff.dependencies;
+    if !deps.added.is_empty() || !deps.removed.is_empty() || !deps.updated.is_empty() {
+        println!("Dependencies:");
+        for d in &deps.added {
+            println!(
+                "  + {} ({} @ {}, from {})",
+                d.key, d.name, d.version, d.repository
+            );
+        }
+        for d in &deps.removed {
+            println!(
+                "  - {} ({} @ {}, from {})",
+                d.key, d.name, d.version, d.repository
+            );
+        }
+        for u in &deps.updated {
+            if u.before.version != u.after.version {
+                println!(
+                    "  ~ {}: {} → {}",
+                    u.key, u.before.version, u.after.version
+                );
+            } else if u.before.repository != u.after.repository {
+                println!(
+                    "  ~ {}: repository {} → {}",
+                    u.key, u.before.repository, u.after.repository
+                );
+            } else {
+                println!("  ~ {}: (name changed)", u.key);
+            }
+        }
+        println!();
+    }
+
+    let values = &diff.values;
+    if !values.added.is_empty() || !values.removed.is_empty() || !values.changed.is_empty() {
+        println!("Values:");
+        for (path, v) in &values.added {
+            println!("  + {path}: {}", render_value(&Some(v.clone())));
+        }
+        for (path, v) in &values.removed {
+            println!("  - {path}: {}", render_value(&Some(v.clone())));
+        }
+        for (path, change) in &values.changed {
+            println!(
+                "  ~ {path}: {} → {}",
+                render_value(&change.before),
+                render_value(&change.after)
+            );
+        }
+        println!();
+    }
+
+    let schema = &diff.schema;
+    if !schema.fields_added.is_empty()
+        || !schema.fields_removed.is_empty()
+        || !schema.fields_changed.is_empty()
+    {
+        println!("Schema:");
+        for (path, field) in &schema.fields_added {
+            println!(
+                "  + {path}{}{}",
+                field
+                    .type_
+                    .as_deref()
+                    .map(|t| format!(" ({t})"))
+                    .unwrap_or_default(),
+                if field.required { " required" } else { "" }
+            );
+        }
+        for (path, field) in &schema.fields_removed {
+            println!(
+                "  - {path}{}",
+                field
+                    .type_
+                    .as_deref()
+                    .map(|t| format!(" ({t})"))
+                    .unwrap_or_default()
+            );
+        }
+        for (path, changes) in &schema.fields_changed {
+            if let Some(c) = &changes.type_changed {
+                println!(
+                    "  ~ {path} type: {} → {}",
+                    render_value(&c.before),
+                    render_value(&c.after)
+                );
+            }
+            if let Some(c) = &changes.required_changed {
+                println!(
+                    "  ~ {path} required: {} → {}",
+                    render_value(&c.before),
+                    render_value(&c.after)
+                );
+            }
+            if let Some(c) = &changes.default_changed {
+                println!(
+                    "  ~ {path} default: {} → {}",
+                    render_value(&c.before),
+                    render_value(&c.after)
+                );
+            }
+            if let Some(c) = &changes.enum_changed {
+                println!(
+                    "  ~ {path} enum: {} → {}",
+                    render_value(&c.before),
+                    render_value(&c.after)
+                );
+            }
+            if changes.x_input_changed.is_some() {
+                println!("  ~ {path} x-input: <transform changed>");
+            }
+        }
+        println!();
+    }
+}
+
+fn render_value(v: &Option<serde_json::Value>) -> String {
+    match v {
+        None => "<absent>".to_string(),
+        Some(serde_json::Value::Null) => "null".to_string(),
+        Some(serde_json::Value::String(s)) => format!("{s:?}"),
+        Some(other) => other.to_string(),
+    }
+}
+
 fn run_attest(chart_dir: &Path, out: &Path) -> Result<()> {
     let metadata = read_akua_metadata(chart_dir)?;
     let (name, version) = read_chart_yaml(chart_dir)?;
@@ -1138,6 +1476,8 @@ mod tests {
         assert_eq!(command_name(&cli.command), "render");
         let cli = Cli::parse_from(["akua", "inspect", "--chart", "."]);
         assert_eq!(command_name(&cli.command), "inspect");
+        let cli = Cli::parse_from(["akua", "diff", "./a", "./b"]);
+        assert_eq!(command_name(&cli.command), "diff");
         let cli = Cli::parse_from(["akua", "package", "--chart", "."]);
         assert_eq!(command_name(&cli.command), "package");
     }

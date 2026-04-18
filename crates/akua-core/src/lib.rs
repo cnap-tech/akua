@@ -28,6 +28,7 @@
 #![allow(dead_code)]
 
 pub mod attest;
+pub mod diff;
 pub mod engine;
 #[cfg(feature = "fetch")]
 pub mod fetch;
@@ -49,6 +50,7 @@ pub mod values;
 pub(crate) mod test_util;
 
 pub use attest::{build_provenance, SlsaProvenance};
+pub use diff::{compare as compare_charts, ChartDiff, ChartSnapshot};
 pub use engine::{Engine, EngineError, HelmEngine, PrepareContext, PreparedSource};
 #[cfg(feature = "fetch")]
 pub use fetch::{
