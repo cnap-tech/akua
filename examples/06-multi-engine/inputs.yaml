@@ -1,0 +1,4 @@
+appName:  checkout
+hostname: checkout.example.com
+replicas: 5
+team:     payments

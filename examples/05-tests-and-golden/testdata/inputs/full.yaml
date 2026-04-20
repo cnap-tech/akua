@@ -1,0 +1,4 @@
+appName:  demo
+hostname: demo.example.com
+replicas: 5
+tls:      false

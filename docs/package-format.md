@@ -397,7 +397,7 @@ outputs = [
 ]
 ```
 
-See [examples/01-hello-webapp](examples/01-hello-webapp/) for the fully runnable version.
+See [examples/01-hello-webapp](../examples/01-hello-webapp/) for the fully runnable version.
 
 ---
 
@@ -495,4 +495,4 @@ Packages without tests ship with a lint warning; platform teams can enforce a po
 - **[policy-format.md](policy-format.md)** — how Rego policies evaluate against rendered resources (separate concern from `check:` blocks)
 - **[krm-vocabulary.md](krm-vocabulary.md)** — how App, Environment, Policy KRMs interact with Packages
 - **[embedded-engines.md](embedded-engines.md)** — which engines run your tests
-- **[examples/](examples/)** — runnable Packages at increasing complexity
+- **[examples/](../examples/)** — runnable Packages at increasing complexity

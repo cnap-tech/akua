@@ -1,0 +1,38 @@
+# Passes the tier: has team label, within CPU budget, package v2+.
+# `akua policy check --tier=./policies --input=fixtures/good.yaml` → verdict: allow
+resource:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: checkout
+    labels:
+      team: payments
+    annotations:
+      akua.dev/package: "oci://pkg.akua.dev/webapp-postgres@sha256:2.0.1"
+  spec:
+    replicas: 3
+    template:
+      spec:
+        containers:
+          - name: app
+            image: acme/webapp:3.2.0
+            resources:
+              requests:
+                cpu: "500m"
+
+resources:
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: checkout
+      labels: { team: payments }
+    spec:
+      template:
+        spec:
+          containers:
+            - resources: { requests: { cpu: "500m" } }
+
+environment:
+  name: production
+  budget:
+    cpu_millicores: 2000

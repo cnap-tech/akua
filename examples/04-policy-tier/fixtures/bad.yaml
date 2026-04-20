@@ -1,0 +1,40 @@
+# Fails the tier: no team label on the Deployment.
+# `akua policy check --tier=./policies --input=fixtures/bad.yaml` → verdict: deny
+#
+# Expected violation:
+#   "production Deployment \"checkout\" must have a metadata.labels.team"
+#   source: policies/production.rego:<line>
+resource:
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: checkout
+    # labels.team is missing — this is the violation.
+    annotations:
+      akua.dev/package: "oci://pkg.akua.dev/webapp-postgres@sha256:2.0.1"
+  spec:
+    replicas: 3
+    template:
+      spec:
+        containers:
+          - name: app
+            image: acme/webapp:3.2.0
+            resources:
+              requests:
+                cpu: "500m"
+
+resources:
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: checkout
+    spec:
+      template:
+        spec:
+          containers:
+            - resources: { requests: { cpu: "500m" } }
+
+environment:
+  name: production
+  budget:
+    cpu_millicores: 2000

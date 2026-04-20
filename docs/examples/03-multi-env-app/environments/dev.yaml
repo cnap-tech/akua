@@ -1,8 +1,0 @@
-apiVersion: akua.dev/v1alpha1
-kind: Environment
-metadata:
-  name: dev
-spec:
-  policy: tier/dev
-  cluster: dev-eu
-  region:  eu-central-1

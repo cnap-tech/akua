@@ -1,0 +1,13 @@
+[["webapp"]]
+oci       = "oci://ghcr.io/acme/charts/webapp"
+version   = "2.1.0"
+digest    = "sha256:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+signature = "MEUCIQD...<cosign signature>...=="
+signed_by = "acme@acme.corp"
+
+[["platform"]]
+oci       = "oci://pkg.akua.dev/rgds/platform-glue"
+version   = "0.4.1"
+digest    = "sha256:2d4f6a8b0c1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1b3c5d7e9f1a3b5c7d9e1f3a"
+signature = "MEUCIQD...<cosign signature>...=="
+signed_by = "akua-release@akua.dev"

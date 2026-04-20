@@ -46,7 +46,7 @@ Plus: deploy driver (`akua deploy`), observability query (`akua query`), policy 
 | TypeScript SDK | [docs/sdk.md](docs/sdk.md) |
 | Roadmap + phasing | [docs/roadmap.md](docs/roadmap.md) |
 | Implementation plan (agent-driven) | [docs/impl-plan.md](docs/impl-plan.md) |
-| Runnable examples | [docs/examples/](docs/examples/) |
+| Runnable examples | [examples/](examples/) |
 | Agent-executable workflows | [skills/](skills/) |
 | Strategic spine (internal, maintainers) | `../cortex/workspaces/robin/akua-masterplan.md` |
 

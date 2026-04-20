@@ -160,5 +160,5 @@ After `akua render`, `./rendered/` contains well-formed Kubernetes YAML, one fil
 ## Reference
 
 - Full CLI: [docs/cli.md](../../docs/cli.md)
-- Examples: [docs/examples/](../../docs/examples/)
+- Examples: [examples/](../../examples/)
 - Package format spec: `docs/package-format.md` (forthcoming)

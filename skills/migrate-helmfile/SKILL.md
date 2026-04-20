@@ -155,7 +155,7 @@ Once the akua Package renders identically and a production run has succeeded, de
 
 - **Helmfile hooks** (`hooks.prepare`, `hooks.postsync`) — akua has no equivalent by design; use Argo/Flux PreSync/PostSync hooks or a Runbook.
 - **Helmfile's `needs:` ordering** — replaced by Kubernetes' level-triggered reconciliation (works for most cases) or by emitting `kro` RGD output for explicit runtime late-binding.
-- **Helmfile's `selectors` for partial apply** — use named outputs and per-environment inputs instead; see [examples/03-multi-env-app](../../docs/examples/03-multi-env-app/).
+- **Helmfile's `selectors` for partial apply** — use named outputs and per-environment inputs instead; see [examples/03-multi-env-app](../../examples/03-multi-env-app/).
 
 ## Failure modes
 
@@ -166,5 +166,5 @@ Once the akua Package renders identically and a production run has succeeded, de
 ## Reference
 
 - [cli.md — akua add](../../docs/cli.md#akua-add)
-- [examples/02-webapp-postgres](../../docs/examples/02-webapp-postgres/) — canonical multi-source example
+- [examples/02-webapp-postgres](../../examples/02-webapp-postgres/) — canonical multi-source example
 - [new-package](../new-package/SKILL.md) — if starting fresh instead of migrating

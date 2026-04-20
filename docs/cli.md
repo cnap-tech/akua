@@ -1332,7 +1332,7 @@ From [cli-contract.md](cli-contract.md):
 - Implementation details (Rust crate structure, KCL plugin ABI).
 - The TypeScript SDK (see [sdk.md](sdk.md)).
 - The CLI contract (see [cli-contract.md](cli-contract.md)).
-- Examples of usage (see [examples/](examples/)).
+- Examples of usage (see [examples/](../examples/)).
 - Architecture (see [architecture.md](architecture.md)).
 
 ## Spec cross-references

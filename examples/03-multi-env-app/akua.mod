@@ -1,0 +1,19 @@
+# akua.mod — workspace root. Declares this monorepo's members and shared deps.
+# Machine-maintained digest + signature ledger lives in akua.sum.
+
+[package]
+name    = "03-multi-env-app"
+version = "0.1.0"
+edition = "akua.dev/v1alpha1"
+
+# Workspace members — the Package and the App share deps through this root.
+[workspace]
+members = ["./package"]
+
+[dependencies]
+# Charts consumed by the Package.
+cnpg   = { oci = "oci://ghcr.io/cloudnative-pg/charts/cluster", version = "0.20.0" }
+webapp = { oci = "oci://ghcr.io/acme/charts/webapp",            version = "2.1.0" }
+
+# Policy tier referenced by the production Environment.
+tier-prod = { oci = "oci://policies.akua.dev/tier/production", version = "1.2.0" }

@@ -118,7 +118,7 @@ akua dev
 # watching ./ for changes · target: local (kind cluster) · ui: http://localhost:5173
 ```
 
-Full CLI reference: [`docs/cli.md`](docs/cli.md). Universal contract (the invariants every verb honors): [`docs/cli-contract.md`](docs/cli-contract.md). Runnable examples: [`docs/examples/`](docs/examples/).
+Full CLI reference: [`docs/cli.md`](docs/cli.md). Universal contract (the invariants every verb honors): [`docs/cli-contract.md`](docs/cli-contract.md). Runnable examples: [`examples/`](examples/).
 
 ## TypeScript SDK
 
@@ -172,7 +172,7 @@ Deep dives:
 [`docs/lockfile-format.md`](docs/lockfile-format.md) ·
 [`docs/embedded-engines.md`](docs/embedded-engines.md) ·
 [`skills/`](skills/) ·
-[`docs/examples/`](docs/examples/) ·
+[`examples/`](examples/) ·
 [`docs/vision.md`](docs/vision.md) ·
 [`docs/roadmap.md`](docs/roadmap.md)
 

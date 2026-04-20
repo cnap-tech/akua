@@ -1,0 +1,10 @@
+# Local Kustomize overlay consumed by `kustomize.build("./overlays")` in
+# package.k. Adds a ServiceMonitor for the app and patches a ConfigMap.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - servicemonitor-patch.yaml
+
+commonLabels:
+  app.kubernetes.io/managed-by: akua

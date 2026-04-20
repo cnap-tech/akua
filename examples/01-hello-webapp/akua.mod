@@ -1,0 +1,11 @@
+# akua.mod — declared deps. Human-edited.
+# Machine-maintained digest + signature ledger lives in akua.sum.
+
+[package]
+name    = "01-hello-webapp"
+version = "0.1.0"
+edition = "akua.dev/v1alpha1"
+
+[dependencies]
+# Upstream nginx Helm chart.
+nginx = { oci = "oci://registry-1.docker.io/bitnamicharts/nginx", version = "18.2.0" }
