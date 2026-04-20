@@ -82,15 +82,16 @@ If any of these are set, the invocation is considered to be running in an **agen
 | `akua render` in a human shell | text — default |
 | `akua render` in an agent context | JSON — auto-detected |
 
-**Signalling:**
+**No signal, by design.**
 
-When auto-detection activates, a single structured log entry is written to stderr at `info` level before any output:
+When detection activates, akua adapts behavior silently. No banner. No stderr announcement. No prelude on stdout. The behavior change is observable from the output itself (JSON vs text); agents that set `CLAUDECODE=1` or `AGENT=goose` already know they're in an agent context — akua repeating it back is noise.
 
-```json
-{"level":"info","event":"agent_context_detected","agent":"claude-code","source":"CLAUDECODE"}
-```
+Detection is introspectable when needed:
 
-The primary stdout output is unchanged — agents parse a clean JSON document without prelude. Only the stderr log carries the signal.
+- `akua whoami --json` includes an `agent_context` field with the detected agent name and source env var.
+- `--log-level=debug` emits a single `agent_context_detected` event in debug logs — useful for post-hoc diagnosis, silent in normal operation.
+
+Otherwise: invisible by default, discoverable on demand. That's the discipline.
 
 **Opt-out:**
 

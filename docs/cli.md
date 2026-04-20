@@ -822,9 +822,16 @@ akua whoami [flags]
     {"url": "ghcr.io", "user": "robin", "expires_at": null},
     {"url": "akua.dev", "user": "robin", "tier": "team", "expires_at": "2026-05-20"}
   ],
-  "scopes": ["packages:write", "policy:read"]
+  "scopes": ["packages:write", "policy:read"],
+  "agent_context": {
+    "detected": true,
+    "agent": "claude-code",
+    "source_env": "CLAUDECODE"
+  }
 }
 ```
+
+`agent_context` is present when akua auto-detected an agent session (see [cli-contract.md §1.5](cli-contract.md#15-agent-context-auto-detection)). When no agent is detected, the field is `{"detected": false}`.
 
 ---
 
