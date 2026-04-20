@@ -31,8 +31,10 @@ pub mod diff;
 pub mod engine;
 #[cfg(feature = "fetch")]
 pub mod fetch;
+pub mod lock_file;
 pub mod manifest;
 pub mod metadata;
+pub mod mod_file;
 #[cfg(feature = "publish")]
 pub mod publish;
 #[cfg(feature = "helm-cli")]
@@ -48,6 +50,11 @@ pub mod values;
 pub(crate) mod test_util;
 
 pub use attest::{build_provenance, SlsaProvenance};
+pub use lock_file::{AkuaLock, LockError, LockedPackage, Replaced, CURRENT_VERSION as LOCK_VERSION};
+pub use mod_file::{
+    AkuaManifest, Dependency as ManifestDependency, DependencySource, ManifestError,
+    PackageSection, Replace, WorkspaceSection,
+};
 pub use diff::{compare as compare_charts, ChartDiff, ChartSnapshot};
 pub use engine::{Engine, EngineError, HelmEngine, PrepareContext, PreparedSource};
 #[cfg(feature = "fetch")]

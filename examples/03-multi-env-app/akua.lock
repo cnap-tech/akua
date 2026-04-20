@@ -1,4 +1,24 @@
-# akua.lock — machine-maintained.
-cnpg 0.20.0 oci://ghcr.io/cloudnative-pg/charts/cluster sha256:3c5d9e7f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d cosign:sigstore:cloudnative-pg
-tier-prod 1.2.0 oci://policies.akua.dev/tier/production sha256:9f4cc2e0f8a1b3d6e7c5a8b9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9 cosign:sigstore:akua-release
-webapp 2.1.0 oci://ghcr.io/acme/charts/webapp sha256:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2 cosign:key:acme
+# akua.lock — machine-maintained. Never hand-edit.
+
+version = 1
+
+[[package]]
+name      = "cnpg"
+version   = "0.20.0"
+source    = "oci://ghcr.io/cloudnative-pg/charts/cluster"
+digest    = "sha256:3c5d9e7f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d"
+signature = "cosign:sigstore:cloudnative-pg"
+
+[[package]]
+name      = "tier-prod"
+version   = "1.2.0"
+source    = "oci://policies.akua.dev/tier/production"
+digest    = "sha256:9f4cc2e0f8a1b3d6e7c5a8b9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9"
+signature = "cosign:sigstore:akua-release"
+
+[[package]]
+name      = "webapp"
+version   = "2.1.0"
+source    = "oci://ghcr.io/acme/charts/webapp"
+digest    = "sha256:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+signature = "cosign:key:acme"
