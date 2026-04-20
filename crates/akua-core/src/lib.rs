@@ -52,10 +52,12 @@ pub(crate) mod test_util;
 
 pub use attest::{build_provenance, SlsaProvenance};
 pub use cli_contract::{AgentContext, AgentSource, ExitCode, StructuredError};
-pub use lock_file::{AkuaLock, LockError, LockedPackage, Replaced, CURRENT_VERSION as LOCK_VERSION};
+pub use lock_file::{
+    AkuaLock, LockError, LockLoadError, LockedPackage, Replaced, CURRENT_VERSION as LOCK_VERSION,
+};
 pub use mod_file::{
     AkuaManifest, Dependency as ManifestDependency, DependencySource, ManifestError,
-    PackageSection, Replace, WorkspaceSection,
+    ManifestLoadError, PackageSection, Replace, WorkspaceSection,
 };
 pub use diff::{compare as compare_charts, ChartDiff, ChartSnapshot};
 pub use engine::{Engine, EngineError, HelmEngine, PrepareContext, PreparedSource};

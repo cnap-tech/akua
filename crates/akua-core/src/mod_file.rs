@@ -129,12 +129,50 @@ pub enum ManifestError {
     BadPackageName(String),
 }
 
+/// Result of loading an `akua.toml` from disk. Distinguishes the file
+/// being absent (workspace not set up) from other I/O errors, and
+/// preserves the file path on parse errors for diagnostics.
+#[derive(Debug, thiserror::Error)]
+pub enum ManifestLoadError {
+    #[error("akua.toml not found at {path}")]
+    Missing { path: std::path::PathBuf },
+
+    #[error("i/o error reading {path}: {source}")]
+    Io {
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to parse {path}: {source}")]
+    Parse {
+        path: std::path::PathBuf,
+        #[source]
+        source: ManifestError,
+    },
+}
+
 impl AkuaManifest {
     /// Parse an `akua.toml` from a string.
     pub fn parse(s: &str) -> Result<Self, ManifestError> {
         let manifest: AkuaManifest = toml::from_str(s)?;
         manifest.validate()?;
         Ok(manifest)
+    }
+
+    /// Load `akua.toml` from a workspace directory. Maps filesystem
+    /// NotFound to [`ManifestLoadError::Missing`] so callers can
+    /// distinguish "no manifest" from "disk broke."
+    pub fn load(workspace: &std::path::Path) -> Result<Self, ManifestLoadError> {
+        let path = workspace.join("akua.toml");
+        let content = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(ManifestLoadError::Missing { path });
+            }
+            Err(e) => return Err(ManifestLoadError::Io { path, source: e }),
+        };
+        Self::parse(&content).map_err(|source| ManifestLoadError::Parse { path, source })
     }
 
     /// Serialize back to canonical TOML. Fields in deterministic order;

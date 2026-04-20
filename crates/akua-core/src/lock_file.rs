@@ -105,6 +105,28 @@ pub enum LockError {
     BadDigest(String),
 }
 
+/// Result of loading an `akua.lock` from disk. Distinguishes missing
+/// (lockfile not yet generated) from other I/O errors.
+#[derive(Debug, thiserror::Error)]
+pub enum LockLoadError {
+    #[error("akua.lock not found at {path}")]
+    Missing { path: std::path::PathBuf },
+
+    #[error("i/o error reading {path}: {source}")]
+    Io {
+        path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to parse {path}: {source}")]
+    Parse {
+        path: std::path::PathBuf,
+        #[source]
+        source: LockError,
+    },
+}
+
 impl AkuaLock {
     /// Parse an `akua.lock` from a string. Performs format-version,
     /// alphabetical-order, and digest-prefix checks.
@@ -112,6 +134,21 @@ impl AkuaLock {
         let lock: AkuaLock = toml::from_str(s)?;
         lock.validate()?;
         Ok(lock)
+    }
+
+    /// Load `akua.lock` from a workspace directory. Maps NotFound to
+    /// [`LockLoadError::Missing`] so callers can distinguish "lockfile
+    /// not generated yet" from other I/O errors.
+    pub fn load(workspace: &std::path::Path) -> Result<Self, LockLoadError> {
+        let path = workspace.join("akua.lock");
+        let content = match std::fs::read_to_string(&path) {
+            Ok(s) => s,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(LockLoadError::Missing { path });
+            }
+            Err(e) => return Err(LockLoadError::Io { path, source: e }),
+        };
+        Self::parse(&content).map_err(|source| LockLoadError::Parse { path, source })
     }
 
     /// Serialize back to canonical TOML. Package order is what the caller

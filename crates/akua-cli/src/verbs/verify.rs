@@ -18,7 +18,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
-use akua_core::{AkuaLock, AkuaManifest, LockError, ManifestError};
+use akua_core::{AkuaLock, AkuaManifest, LockLoadError, ManifestLoadError};
 use serde::Serialize;
 
 use crate::contract::{emit_output, Context};
@@ -64,89 +64,65 @@ impl VerifyOutput {
 /// from [`Violation`]s which are check failures on well-formed inputs.
 #[derive(Debug, thiserror::Error)]
 pub enum VerifyError {
-    #[error("akua.toml not found at {0}")]
-    ManifestMissing(PathBuf),
+    #[error(transparent)]
+    Manifest(#[from] ManifestLoadError),
 
-    #[error("akua.lock not found at {0}")]
-    LockMissing(PathBuf),
-
-    #[error("i/o error on {path}: {source}")]
-    Io {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-
-    #[error("failed to parse akua.toml: {0}")]
-    Manifest(#[from] ManifestError),
-
-    #[error("failed to parse akua.lock: {0}")]
-    Lock(#[from] LockError),
+    #[error(transparent)]
+    Lock(#[from] LockLoadError),
 }
 
 impl VerifyError {
     pub fn to_structured(&self) -> StructuredError {
         match self {
-            VerifyError::ManifestMissing(path) => {
+            VerifyError::Manifest(ManifestLoadError::Missing { path }) => {
                 StructuredError::new(codes::E_MANIFEST_MISSING, "akua.toml not found")
                     .with_path(path.display().to_string())
                     .with_suggestion("run `akua init` or check the working directory")
                     .with_default_docs()
             }
-            VerifyError::LockMissing(path) => {
+            VerifyError::Manifest(ManifestLoadError::Io { path, source }) => {
+                StructuredError::new(codes::E_IO, source.to_string())
+                    .with_path(path.display().to_string())
+                    .with_default_docs()
+            }
+            VerifyError::Manifest(ManifestLoadError::Parse { path, source }) => {
+                StructuredError::new(codes::E_MANIFEST_PARSE, source.to_string())
+                    .with_path(path.display().to_string())
+                    .with_default_docs()
+            }
+            VerifyError::Lock(LockLoadError::Missing { path }) => {
                 StructuredError::new(codes::E_LOCK_MISSING, "akua.lock not found")
                     .with_path(path.display().to_string())
                     .with_suggestion("run `akua add` to resolve deps and generate the lockfile")
                     .with_default_docs()
             }
-            VerifyError::Io { path, source } => StructuredError::new(codes::E_IO, source.to_string())
-                .with_path(path.display().to_string())
-                .with_default_docs(),
-            VerifyError::Manifest(e) => {
-                StructuredError::new(codes::E_MANIFEST_PARSE, e.to_string()).with_default_docs()
+            VerifyError::Lock(LockLoadError::Io { path, source }) => {
+                StructuredError::new(codes::E_IO, source.to_string())
+                    .with_path(path.display().to_string())
+                    .with_default_docs()
             }
-            VerifyError::Lock(e) => {
-                StructuredError::new(codes::E_LOCK_PARSE, e.to_string()).with_default_docs()
+            VerifyError::Lock(LockLoadError::Parse { path, source }) => {
+                StructuredError::new(codes::E_LOCK_PARSE, source.to_string())
+                    .with_path(path.display().to_string())
+                    .with_default_docs()
             }
         }
     }
 
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            VerifyError::ManifestMissing(_)
-            | VerifyError::LockMissing(_)
-            | VerifyError::Manifest(_)
-            | VerifyError::Lock(_) => ExitCode::UserError,
-            VerifyError::Io { .. } => ExitCode::SystemError,
+            VerifyError::Manifest(ManifestLoadError::Io { .. })
+            | VerifyError::Lock(LockLoadError::Io { .. }) => ExitCode::SystemError,
+            _ => ExitCode::UserError,
         }
-    }
-}
-
-/// Read a file, mapping `NotFound` to the caller's preferred typed
-/// variant so verify can distinguish "workspace isn't set up" from
-/// "disk broke."
-fn read_or<F>(path: &Path, missing: F) -> Result<String, VerifyError>
-where
-    F: FnOnce(PathBuf) -> VerifyError,
-{
-    match std::fs::read_to_string(path) {
-        Ok(s) => Ok(s),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(missing(path.to_path_buf())),
-        Err(e) => Err(VerifyError::Io {
-            path: path.to_path_buf(),
-            source: e,
-        }),
     }
 }
 
 /// Core check: load both files, run the cross-consistency checks, and
 /// return a [`VerifyOutput`]. Pure; no writes.
 pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
-    let manifest_path = workspace.join("akua.toml");
-    let lock_path = workspace.join("akua.lock");
-
-    let manifest = AkuaManifest::parse(&read_or(&manifest_path, VerifyError::ManifestMissing)?)?;
-    let lock = AkuaLock::parse(&read_or(&lock_path, VerifyError::LockMissing)?)?;
+    let manifest = AkuaManifest::load(workspace)?;
+    let lock = AkuaLock::load(workspace)?;
 
     let mut violations = Vec::new();
 
@@ -204,8 +180,11 @@ pub fn run<W: Write>(
     stdout: &mut W,
 ) -> Result<ExitCode, VerifyError> {
     let output = check(workspace)?;
+    // stdout write failure surfaces as a Lock I/O variant pointing at
+    // the pseudo-path "<stdout>" — the workspace files were fine;
+    // something downstream of them broke.
     emit_output(stdout, ctx, &output, |w| write_text(w, &output)).map_err(|e| {
-        VerifyError::Io {
+        LockLoadError::Io {
             path: PathBuf::from("<stdout>"),
             source: e,
         }
@@ -437,7 +416,7 @@ digest  = "sha256:22222222222222222222222222222222222222222222222222222222222222
         let dir = TempDir::new().expect("tmp");
         fs::write(dir.path().join("akua.lock"), "version = 1\n").expect("write lock");
         let err = check(dir.path()).expect_err("should fail");
-        assert!(matches!(err, VerifyError::ManifestMissing(_)));
+        assert!(matches!(err, VerifyError::Manifest(ManifestLoadError::Missing { .. })));
         let structured = err.to_structured();
         assert_eq!(structured.code, "E_MANIFEST_MISSING");
         assert_eq!(err.exit_code(), ExitCode::UserError);
@@ -448,7 +427,7 @@ digest  = "sha256:22222222222222222222222222222222222222222222222222222222222222
         let dir = TempDir::new().expect("tmp");
         fs::write(dir.path().join("akua.toml"), MANIFEST_TWO_OCI).expect("write toml");
         let err = check(dir.path()).expect_err("should fail");
-        assert!(matches!(err, VerifyError::LockMissing(_)));
+        assert!(matches!(err, VerifyError::Lock(LockLoadError::Missing { .. })));
         let structured = err.to_structured();
         assert_eq!(structured.code, "E_LOCK_MISSING");
         assert!(structured.suggestion.is_some());
@@ -458,7 +437,7 @@ digest  = "sha256:22222222222222222222222222222222222222222222222222222222222222
     fn malformed_manifest_surfaces_parse_error() {
         let ws = write_workspace("this is not toml {{{", LOCK_MATCHING);
         let err = check(ws.path()).expect_err("should fail");
-        assert!(matches!(err, VerifyError::Manifest(_)));
+        assert!(matches!(err, VerifyError::Manifest(ManifestLoadError::Parse { .. })));
         let structured = err.to_structured();
         assert_eq!(structured.code, "E_MANIFEST_PARSE");
     }
