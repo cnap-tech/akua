@@ -10,7 +10,8 @@ use clap::{Args, Parser, Subcommand};
 
 use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::{
-    render as render_verb, verify as verify_verb, version as version_verb, whoami as whoami_verb,
+    init as init_verb, render as render_verb, verify as verify_verb, version as version_verb,
+    whoami as whoami_verb,
 };
 use akua_core::cli_contract::{AgentContext, ExitCode, StructuredError};
 
@@ -25,6 +26,21 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Scaffold a new Package (akua.toml + package.k + inputs.example.yaml).
+    Init {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Name for the new Package. When provided, also the directory
+        /// name (created under the current working directory). When
+        /// absent, scaffolds into `.` and uses the CWD basename.
+        name: Option<String>,
+
+        /// Overwrite existing scaffold files instead of aborting.
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Identity + agent-context introspection.
     Whoami {
         #[command(flatten)]
@@ -59,8 +75,8 @@ enum Commands {
 
 #[derive(Args, Clone, Debug)]
 struct RenderCliArgs {
-    /// Path to the `Package.k` file.
-    #[arg(long, default_value = "./Package.k")]
+    /// Path to the `package.k` file.
+    #[arg(long, default_value = "./package.k")]
     package: PathBuf,
 
     /// Inputs file (JSON or YAML).
@@ -92,10 +108,40 @@ fn main() {
 
 fn dispatch(command: Commands) -> ExitCode {
     match command {
+        Commands::Init { args, name, force } => run_init(&args, name.as_deref(), force),
         Commands::Whoami { args } => run_whoami(&args),
         Commands::Version { args } => run_version(&args),
         Commands::Verify { args, workspace } => run_verify(&args, &workspace),
         Commands::Render { args, render_args } => run_render(&args, &render_args),
+    }
+}
+
+fn run_init(args: &UniversalArgs, name: Option<&str>, force: bool) -> ExitCode {
+    let ctx = resolve_ctx(args);
+
+    // When `name` is absent, scaffold into CWD and derive the package
+    // name from its basename. When provided, scaffold into `./<name>/`.
+    let (target, pkg_name) = match name {
+        Some(n) => (PathBuf::from(n), n.to_string()),
+        None => {
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let derived = cwd
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+            (cwd, derived)
+        }
+    };
+    let verb_args = init_verb::InitArgs {
+        target: &target,
+        package_name: &pkg_name,
+        force,
+    };
+    let mut stdout = io::stdout().lock();
+    match init_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
 }
 
@@ -212,6 +258,30 @@ mod tests {
                 assert_eq!(workspace, PathBuf::from("."));
             }
             _ => panic!("expected verify"),
+        }
+    }
+
+    #[test]
+    fn parses_init_with_name_and_force() {
+        let cli = Cli::parse_from(["akua", "init", "my-pkg", "--force"]);
+        match cli.command {
+            Commands::Init { name, force, .. } => {
+                assert_eq!(name.as_deref(), Some("my-pkg"));
+                assert!(force);
+            }
+            _ => panic!("expected init"),
+        }
+    }
+
+    #[test]
+    fn init_without_name_is_valid() {
+        let cli = Cli::parse_from(["akua", "init"]);
+        match cli.command {
+            Commands::Init { name, force, .. } => {
+                assert!(name.is_none());
+                assert!(!force);
+            }
+            _ => panic!("expected init"),
         }
     }
 }

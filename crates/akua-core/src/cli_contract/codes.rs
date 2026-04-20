@@ -25,6 +25,11 @@ pub const E_RENDER_OUTPUT_AMBIGUOUS: &str = "E_RENDER_OUTPUT_AMBIGUOUS";
 pub const E_RENDER_UNSUPPORTED_KIND: &str = "E_RENDER_UNSUPPORTED_KIND";
 pub const E_RENDER_YAML: &str = "E_RENDER_YAML";
 
+// ----- Init ----------------------------------------------------------------
+
+pub const E_INIT_EXISTS: &str = "E_INIT_EXISTS";
+pub const E_INIT_EMPTY_NAME: &str = "E_INIT_EMPTY_NAME";
+
 // ----- General -------------------------------------------------------------
 
 pub const E_IO: &str = "E_IO";
