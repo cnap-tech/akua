@@ -1,6 +1,6 @@
 [package]
 name = "akua-cli"
-description = "Akua command-line tool — build, preview, test, publish cloud-native packages"
+description = "Akua command-line tool"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -18,11 +18,10 @@ path = "src/main.rs"
 [dependencies]
 akua-core = { path = "../akua-core" }
 clap = { workspace = true }
-anyhow = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
 tempfile = "3"

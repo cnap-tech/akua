@@ -1,9 +1,5 @@
 name: CI
 
-# Local debugging: `task ci` runs exactly what this workflow runs. Any
-# command you see here either lives in Taskfile.yml or is mise/actions
-# boilerplate.
-
 on:
   push:
     branches: [main]
@@ -24,7 +20,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # mise owns every tool version — pinned in .mise.toml.
       - uses: jdx/mise-action@v2
         with:
           install: true
@@ -32,6 +27,5 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # `task ci` = build wasm → fmt:check → lint → test → wasm:smoke.
       - name: task ci
         run: mise exec -- task ci

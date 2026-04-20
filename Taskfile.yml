@@ -1,15 +1,12 @@
 version: "3"
 
 # Akua dev tasks. Run `task --list` to see available tasks.
-# Install tools first: `mise install`.
 
 tasks:
   default:
     desc: List available tasks
     cmds:
       - task --list
-
-  # ---------- Rust workspace ----------
 
   build:
     desc: Build the Rust workspace
@@ -21,70 +18,16 @@ tasks:
     cmds:
       - cargo test --workspace
 
-  test:real-world-charts:
-    desc: Render real public Helm charts end-to-end (network + slow, ignored by default)
-    cmds:
-      - cargo test -p akua-core --test real_world_charts -- --ignored --nocapture --test-threads=1
-
   check:
     desc: cargo check + clippy
     cmds:
       - cargo check --workspace
-      - cargo clippy --workspace -- -D warnings
+      - cargo clippy --workspace --all-targets -- -D warnings
 
   fmt:
     desc: Format Rust code
     cmds:
       - cargo fmt --all
-
-  # ---------- CLI shortcuts ----------
-
-  preview:
-    desc: Run `akua preview` on the hello-package example
-    cmds:
-      - >-
-        cargo run -q -p akua-cli -- preview
-        --package examples/hello-package
-        --inputs '{"config.adminEmail":"admin@example.com","httpRoute.hostname":"My App!"}'
-
-  tree:
-    desc: Print the umbrella chart tree for hello-package
-    cmds:
-      - cargo run -q -p akua-cli -- tree --package examples/hello-package
-
-  render:
-    desc: Render hello-package to Kubernetes manifests (writes dist/manifests.yaml)
-    cmds:
-      - >-
-        cargo run -q -p akua-cli -- render
-        --package examples/hello-package --out dist/manifests.yaml --release demo
-        --inputs '{"config.adminEmail":"admin@example.com","httpRoute.hostname":"My App!"}'
-
-  package:
-    desc: Build hello-package and write a Helm-compatible .tgz into dist/
-    cmds:
-      - cargo run -q -p akua-cli -- build --package examples/hello-package --out dist/chart
-      - cargo run -q -p akua-cli -- package --chart dist/chart --out-dir dist
-
-  hybrid:
-    desc: Render the hybrid-package example (helm+kcl) — exercises mixed-engine assembly
-    cmds:
-      - cargo run -q -p akua-cli -- tree --package examples/hybrid-package
-      - >-
-        cargo run -q -p akua-cli -- render
-        --package examples/hybrid-package --out dist/hybrid.yaml --release demo
-
-  # ---------- WASM bindings ----------
-
-  ci:
-    desc: Run the full CI pipeline locally (mirrors .github/workflows/ci.yml)
-    cmds:
-      - task: build:helm-engine-wasm
-      - task: fmt:check
-      - task: lint
-      - task: test
-      - task: wasm:smoke
-      - task: sdk:test
 
   fmt:check:
     desc: Check Rust formatting (no writes)
@@ -96,10 +39,16 @@ tasks:
     cmds:
       - cargo clippy --workspace --all-targets -- -D warnings
 
-  release:local:
-    desc: Build the release binary locally (matches what CI ships to GitHub releases)
+  ci:
+    desc: Run the full CI pipeline locally
     cmds:
-      - task: build:helm-engine-wasm
+      - task: fmt:check
+      - task: lint
+      - task: test
+
+  release:local:
+    desc: Build the release binary locally
+    cmds:
       - cargo build --release -p akua-cli
       - ls -lh target/release/akua
 
@@ -109,92 +58,10 @@ tasks:
       TARGET: '{{.TARGET | default "x86_64-unknown-linux-gnu"}}'
       CARGO: '{{.CARGO | default "cargo"}}'
     cmds:
-      - task: build:helm-engine-wasm
       - '{{.CARGO}} build --release -p akua-cli --target {{.TARGET}}'
       - ls -lh target/{{.TARGET}}/release/akua
 
-  build:helm-engine-wasm:
-    desc: Build the embedded Helm v4 template engine (Go→wasip1)
-    dir: crates/helm-engine-wasm/go-src
-    cmds:
-      - go mod tidy
-      # -buildmode=c-shared produces a *reactor* module: Go runtime + package
-      # init()s run on `_initialize`, then exports stay callable. Without it,
-      # `runtime.main()` exits after init and exports can't be invoked.
-      - GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -o ../assets/helm-engine.wasm .
-      - ls -lh ../assets/helm-engine.wasm
-
-  wasm:build:
-    desc: Build WASM bindings for bundler targets
-    cmds:
-      - wasm-pack build crates/akua-wasm --target bundler --out-dir ../../packages/core-wasm
-      # wasm-pack emits a .gitignore with `*` that shadows our repo rules — drop it.
-      - rm -f packages/core-wasm/.gitignore
-
-  wasm:build:node:
-    desc: Build WASM bindings for direct Node.js consumption
-    cmds:
-      - wasm-pack build crates/akua-wasm --target nodejs --out-dir ../../packages/core-wasm
-      - rm -f packages/core-wasm/.gitignore
-
-  wasm:smoke:
-    desc: Build WASM (node target) + run the smoke test
-    deps: [wasm:build:node]
-    cmds:
-      - bun packages/core-wasm/smoke-test.mjs
-
-  # ---------- TypeScript SDK (@akua/sdk) ----------
-
-  sdk:wasm:
-    desc: Build both wasm-pack targets and copy into packages/sdk/wasm/{nodejs,bundler}/
-    cmds:
-      - task: wasm:build:node
-      - mkdir -p packages/sdk/wasm/nodejs
-      - >-
-        cp packages/core-wasm/akua_wasm.js packages/core-wasm/akua_wasm.d.ts
-        packages/core-wasm/akua_wasm_bg.wasm packages/core-wasm/akua_wasm_bg.wasm.d.ts
-        packages/sdk/wasm/nodejs/
-      - task: wasm:build
-      - mkdir -p packages/sdk/wasm/bundler
-      # bundler target needs akua_wasm_bg.js too — it's the wasm-bindgen glue
-      # that akua_wasm.js imports (`import { __wbg_set_wasm } from "./akua_wasm_bg.js"`).
-      # Missing it leaves the browser entry unresolvable at bundle time.
-      - >-
-        cp packages/core-wasm/akua_wasm.js packages/core-wasm/akua_wasm.d.ts
-        packages/core-wasm/akua_wasm_bg.js
-        packages/core-wasm/akua_wasm_bg.wasm packages/core-wasm/akua_wasm_bg.wasm.d.ts
-        packages/sdk/wasm/bundler/
-
-  sdk:test:
-    desc: Run the SDK vitest suite (re-uses the nodejs wasm-pack output)
-    deps: [sdk:wasm]
-    dir: packages/sdk
-    cmds:
-      - bun install
-      - bun run test
-
-  sdk:publish:dry-run:
-    desc: JSR dry-run — shows files that would be published to @akua/sdk on jsr.io
-    deps: [sdk:wasm]
-    dir: packages/sdk
-    cmds:
-      - npx --yes jsr publish --dry-run --allow-dirty
-
-  sdk:publish:
-    desc: >-
-      Publish @akua/sdk to jsr.io. Opens a browser for auth (interactive).
-      For CI, push a `sdk-v<version>` tag — `.github/workflows/sdk-publish.yml`
-      publishes via GitHub OIDC, no token required.
-    deps: [sdk:test]
-    dir: packages/sdk
-    cmds:
-      - npx --yes jsr publish --allow-dirty
-
-  # ---------- Cleanup ----------
-
   clean:
-    desc: Remove Rust target/ and generated WASM artifacts
+    desc: Remove Rust target/
     cmds:
       - cargo clean
-      - rm -rf dist/
-      - rm -f packages/core-wasm/*.wasm packages/core-wasm/*.js packages/core-wasm/*.d.ts packages/core-wasm/package.json packages/core-wasm/.gitignore

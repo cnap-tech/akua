@@ -222,9 +222,11 @@ impl Dependency {
             });
         };
         match source {
-            DependencySource::Oci if self.version.is_none() => Err(ManifestError::OciMissingVersion {
-                name: name.to_string(),
-            }),
+            DependencySource::Oci if self.version.is_none() => {
+                Err(ManifestError::OciMissingVersion {
+                    name: name.to_string(),
+                })
+            }
             DependencySource::Git if self.tag.is_none() && self.rev.is_none() => {
                 Err(ManifestError::GitMissingTagOrRev {
                     name: name.to_string(),

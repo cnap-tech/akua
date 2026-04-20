@@ -29,8 +29,8 @@ pub fn run<W: Write>(ctx: &Context, stdout: &mut W) -> std::io::Result<ExitCode>
     let output = VersionOutput::default();
     match ctx.output {
         OutputMode::Json => {
-            let json = serde_json::to_string(&output)
-                .expect("VersionOutput serialization is infallible");
+            let json =
+                serde_json::to_string(&output).expect("VersionOutput serialization is infallible");
             writeln!(stdout, "{json}")?;
         }
         OutputMode::Text => {

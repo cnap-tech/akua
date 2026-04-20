@@ -293,7 +293,10 @@ outputs = [{ kind: "RawManifests", target: "./" }]
         let pkg = PackageK::load(&path).expect("load");
         let rendered = pkg.render(&empty_inputs()).expect("render");
         // Default is `replicas: int = 2`.
-        assert_eq!(rendered.resources[0]["data"]["count"], Value::String("2".into()));
+        assert_eq!(
+            rendered.resources[0]["data"]["count"],
+            Value::String("2".into())
+        );
     }
 
     #[test]
@@ -441,7 +444,10 @@ outputs = [{ kind: "RawManifests", target: "./" }]
 
         // Nested input value across two schema levels.
         let mut db = Mapping::new();
-        db.insert(Value::String("user".into()), Value::String("checkout_app".into()));
+        db.insert(
+            Value::String("user".into()),
+            Value::String("checkout_app".into()),
+        );
         db.insert(Value::String("port".into()), Value::Number(6543.into()));
 
         let rendered = pkg

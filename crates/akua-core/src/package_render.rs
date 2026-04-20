@@ -154,8 +154,10 @@ fn write_raw_manifests(
     let mut hasher = Sha256::new();
     for (i, resource) in resources.iter().enumerate() {
         let filename = manifest_filename(i, resource);
-        let yaml = serde_yaml::to_string(resource)
-            .map_err(|e| RenderError::Yaml { index: i, source: e })?;
+        let yaml = serde_yaml::to_string(resource).map_err(|e| RenderError::Yaml {
+            index: i,
+            source: e,
+        })?;
         hasher.update(filename.as_os_str().as_encoded_bytes());
         hasher.update(b"\n");
         hasher.update(yaml.as_bytes());
@@ -247,7 +249,10 @@ mod tests {
         let mut meta = serde_yaml::Mapping::new();
         meta.insert(Value::String("name".into()), Value::String(name.into()));
         let mut r = serde_yaml::Mapping::new();
-        r.insert(Value::String("apiVersion".into()), Value::String("v1".into()));
+        r.insert(
+            Value::String("apiVersion".into()),
+            Value::String("v1".into()),
+        );
         r.insert(Value::String("kind".into()), Value::String(kind.into()));
         r.insert(Value::String("metadata".into()), Value::Mapping(meta));
         Value::Mapping(r)
@@ -324,10 +329,7 @@ mod tests {
         let tmp1 = TempDir::new().unwrap();
         let tmp2 = TempDir::new().unwrap();
         let pkg = package(
-            vec![
-                mk_resource("ConfigMap", "a"),
-                mk_resource("Service", "b"),
-            ],
+            vec![mk_resource("ConfigMap", "a"), mk_resource("Service", "b")],
             vec![raw_manifests_output(None, "./")],
         );
         let a = render_outputs(&pkg, tmp1.path(), None, false).unwrap();
@@ -369,7 +371,10 @@ mod tests {
         assert_eq!(summary.outputs.len(), 1);
         assert_eq!(summary.outputs[0].name.as_deref(), Some("static"));
         assert!(tmp.path().join("static").exists());
-        assert!(!tmp.path().join("audit").exists(), "audit should not be rendered");
+        assert!(
+            !tmp.path().join("audit").exists(),
+            "audit should not be rendered"
+        );
     }
 
     #[test]
@@ -404,7 +409,10 @@ mod tests {
     fn resource_without_metadata_name_uses_unnamed_filename() {
         let tmp = TempDir::new().unwrap();
         let mut r = serde_yaml::Mapping::new();
-        r.insert(Value::String("kind".into()), Value::String("Namespace".into()));
+        r.insert(
+            Value::String("kind".into()),
+            Value::String("Namespace".into()),
+        );
         let pkg = package(
             vec![Value::Mapping(r)],
             vec![raw_manifests_output(None, "./")],
@@ -444,10 +452,7 @@ mod tests {
     fn multiple_outputs_each_receive_all_resources() {
         let tmp = TempDir::new().unwrap();
         let pkg = package(
-            vec![
-                mk_resource("ConfigMap", "a"),
-                mk_resource("Service", "b"),
-            ],
+            vec![mk_resource("ConfigMap", "a"), mk_resource("Service", "b")],
             vec![
                 raw_manifests_output(Some("one"), "./one"),
                 raw_manifests_output(Some("two"), "./two"),

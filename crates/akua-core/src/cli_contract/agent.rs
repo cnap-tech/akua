@@ -219,9 +219,7 @@ mod tests {
     fn precedence_generic_agent_beats_specific_markers() {
         // If AGENT is set, it wins over CLAUDECODE (per cli-contract §1.5 order).
         let ctx = AgentContext::from_reader(
-            &MapEnv::new()
-                .with("AGENT", "goose")
-                .with("CLAUDECODE", "1"),
+            &MapEnv::new().with("AGENT", "goose").with("CLAUDECODE", "1"),
         );
         assert_eq!(ctx.source, Some(AgentSource::Agent));
         assert_eq!(ctx.name.as_deref(), Some("goose"));
@@ -289,12 +287,12 @@ mod tests {
         let ctx = AgentContext::from_reader(&MapEnv::new().with("CLAUDECODE", "1"));
         let json = serde_json::to_value(&ctx).expect("serialize");
         assert_eq!(json["detected"], serde_json::Value::Bool(true));
-        assert_eq!(json["source"], serde_json::Value::String("claude_code".into()));
-        assert_eq!(json["name"], serde_json::Value::String("1".into()));
         assert_eq!(
-            json["disabled_via_env"],
-            serde_json::Value::Bool(false)
+            json["source"],
+            serde_json::Value::String("claude_code".into())
         );
+        assert_eq!(json["name"], serde_json::Value::String("1".into()));
+        assert_eq!(json["disabled_via_env"], serde_json::Value::Bool(false));
     }
 
     #[test]

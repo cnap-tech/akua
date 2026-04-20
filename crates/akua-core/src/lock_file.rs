@@ -300,7 +300,10 @@ attestation = "sha256:e9d2c7f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c1d3e5f7a9b1c3d5e7f9a1
         assert!(base.attestation.is_some());
         let kyv = lock.packages.iter().find(|p| p.name == "kyv-sec").unwrap();
         assert!(kyv.kyverno_source_digest.is_some());
-        assert_eq!(kyv.converter_version.as_deref(), Some("akua-kyverno-rego@1.4.2"));
+        assert_eq!(
+            kyv.converter_version.as_deref(),
+            Some("akua-kyverno-rego@1.4.2")
+        );
     }
 
     #[test]

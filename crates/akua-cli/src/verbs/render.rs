@@ -5,12 +5,12 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::contract::{emit_output, Context};
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
 use akua_core::{
     package_k::PackageKError, render_outputs, OutputSummary, PackageK, PackageRenderError,
     RenderSummary,
 };
-use crate::contract::{emit_output, Context};
 
 #[derive(Debug, Clone)]
 pub struct RenderArgs<'a> {
@@ -126,11 +126,8 @@ impl RenderError {
                     .with_default_docs()
             }
             RenderError::Render(PackageRenderError::Yaml { index, source }) => {
-                StructuredError::new(
-                    codes::E_RENDER_YAML,
-                    format!("resource #{index}: {source}"),
-                )
-                .with_default_docs()
+                StructuredError::new(codes::E_RENDER_YAML, format!("resource #{index}: {source}"))
+                    .with_default_docs()
             }
             RenderError::StdoutMultiOutput(_) => {
                 StructuredError::new(codes::E_RENDER_OUTPUT_AMBIGUOUS, self.to_string())
@@ -176,11 +173,12 @@ pub fn run<W: Write>(
         return Ok(ExitCode::Success);
     }
 
-    let summary =
-        render_outputs(&rendered, args.out_dir, args.output_filter, args.dry_run)?;
+    let summary = render_outputs(&rendered, args.out_dir, args.output_filter, args.dry_run)?;
 
-    emit_output(stdout, ctx, &summary, |w| write_text(w, &summary, args.dry_run))
-        .map_err(RenderError::StdoutWrite)?;
+    emit_output(stdout, ctx, &summary, |w| {
+        write_text(w, &summary, args.dry_run)
+    })
+    .map_err(RenderError::StdoutWrite)?;
     Ok(ExitCode::Success)
 }
 
@@ -208,8 +206,7 @@ fn write_multi_doc_yaml<W: Write>(
         if i > 0 {
             writeln!(writer, "---")?;
         }
-        let yaml = serde_yaml::to_string(resource)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let yaml = serde_yaml::to_string(resource).map_err(std::io::Error::other)?;
         writer.write_all(yaml.as_bytes())?;
     }
     Ok(())
@@ -319,7 +316,10 @@ outputs = [{ kind: "RawManifests", target: "./" }]
         let tmp = TempDir::new().unwrap();
         let pkg = write_package(&tmp, MINIMAL_PACKAGE);
         let out = tmp.path().join("deploy");
-        let a = RenderArgs { dry_run: true, ..args(&pkg, &out) };
+        let a = RenderArgs {
+            dry_run: true,
+            ..args(&pkg, &out)
+        };
         let mut stdout = Vec::new();
         let code = run(&Context::human(), &a, &mut stdout).expect("run");
         assert_eq!(code, ExitCode::Success);
@@ -341,7 +341,10 @@ resources = [
 outputs = [{ kind: "RawManifests", target: "./" }]
 "#;
         let pkg = write_package(&tmp, body);
-        let a = RenderArgs { stdout_mode: true, ..args(&pkg, tmp.path()) };
+        let a = RenderArgs {
+            stdout_mode: true,
+            ..args(&pkg, tmp.path())
+        };
         let mut stdout = Vec::new();
         run(&Context::human(), &a, &mut stdout).expect("run");
         let text = String::from_utf8(stdout).unwrap();
@@ -363,7 +366,10 @@ outputs = [
 ]
 "#;
         let pkg = write_package(&tmp, body);
-        let a = RenderArgs { stdout_mode: true, ..args(&pkg, tmp.path()) };
+        let a = RenderArgs {
+            stdout_mode: true,
+            ..args(&pkg, tmp.path())
+        };
         let mut stdout = Vec::new();
         let err = run(&Context::human(), &a, &mut stdout).expect_err("should fail");
         assert!(matches!(err, RenderError::StdoutMultiOutput(2)));
@@ -378,7 +384,10 @@ outputs = [
         fs::write(&inputs, "replicas: 7\n").unwrap();
 
         let out = tmp.path().join("deploy");
-        let a = RenderArgs { inputs_path: Some(&inputs), ..args(&pkg, &out) };
+        let a = RenderArgs {
+            inputs_path: Some(&inputs),
+            ..args(&pkg, &out)
+        };
         let mut stdout = Vec::new();
         run(&ctx_json(), &a, &mut stdout).expect("run");
 
@@ -397,7 +406,10 @@ outputs = [
         fs::write(&inputs, r#"{"replicas": 5}"#).unwrap();
 
         let out = tmp.path().join("deploy");
-        let a = RenderArgs { inputs_path: Some(&inputs), ..args(&pkg, &out) };
+        let a = RenderArgs {
+            inputs_path: Some(&inputs),
+            ..args(&pkg, &out)
+        };
         let mut stdout = Vec::new();
         run(&Context::human(), &a, &mut stdout).expect("run");
         assert!(fs::read_to_string(out.join("000-configmap-demo.yaml"))
@@ -409,7 +421,10 @@ outputs = [
     fn missing_package_surfaces_typed_error() {
         let tmp = TempDir::new().unwrap();
         let missing = tmp.path().join("missing.k");
-        let a = RenderArgs { dry_run: true, ..args(&missing, tmp.path()) };
+        let a = RenderArgs {
+            dry_run: true,
+            ..args(&missing, tmp.path())
+        };
         let err = run(&Context::human(), &a, &mut Vec::new()).unwrap_err();
         assert_eq!(err.to_structured().code, codes::E_PACKAGE_MISSING);
         assert_eq!(err.exit_code(), ExitCode::UserError);
@@ -448,7 +463,10 @@ outputs = [
     fn kcl_eval_error_surfaces_typed() {
         let tmp = TempDir::new().unwrap();
         let pkg = write_package(&tmp, "this is not valid kcl");
-        let a = RenderArgs { dry_run: true, ..args(&pkg, tmp.path()) };
+        let a = RenderArgs {
+            dry_run: true,
+            ..args(&pkg, tmp.path())
+        };
         let err = run(&Context::human(), &a, &mut Vec::new()).unwrap_err();
         assert_eq!(err.to_structured().code, codes::E_RENDER_KCL);
     }
@@ -475,7 +493,10 @@ resources = []
 outputs = [{ kind: "ResourceGraphDefinition", target: "./" }]
 "#;
         let pkg = write_package(&tmp, body);
-        let a = RenderArgs { dry_run: true, ..args(&pkg, tmp.path()) };
+        let a = RenderArgs {
+            dry_run: true,
+            ..args(&pkg, tmp.path())
+        };
         let err = run(&Context::human(), &a, &mut Vec::new()).unwrap_err();
         assert_eq!(err.to_structured().code, codes::E_RENDER_UNSUPPORTED_KIND);
     }

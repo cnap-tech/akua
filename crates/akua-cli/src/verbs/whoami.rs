@@ -42,13 +42,18 @@ fn write_text<W: Write>(stdout: &mut W, output: &WhoamiOutput) -> std::io::Resul
     writeln!(stdout, "not logged in")?;
     writeln!(stdout, "akua version: {}", output.version)?;
     if output.agent_context.detected {
-        if let (Some(src), Some(name)) =
-            (output.agent_context.source, &output.agent_context.name)
-        {
-            writeln!(stdout, "agent context: {name} (detected via {})", src.env_var())?;
+        if let (Some(src), Some(name)) = (output.agent_context.source, &output.agent_context.name) {
+            writeln!(
+                stdout,
+                "agent context: {name} (detected via {})",
+                src.env_var()
+            )?;
         }
     } else if output.agent_context.disabled_via_env {
-        writeln!(stdout, "agent context: detection disabled (AKUA_NO_AGENT_DETECT)")?;
+        writeln!(
+            stdout,
+            "agent context: detection disabled (AKUA_NO_AGENT_DETECT)"
+        )?;
     }
     Ok(())
 }
@@ -104,7 +109,10 @@ mod tests {
         let mut buf = Vec::new();
         run(&ctx, &mut buf).expect("run");
         let out = String::from_utf8(buf).expect("utf-8");
-        assert!(out.contains("agent context: 1 (detected via CLAUDECODE)"), "{out}");
+        assert!(
+            out.contains("agent context: 1 (detected via CLAUDECODE)"),
+            "{out}"
+        );
     }
 
     #[test]

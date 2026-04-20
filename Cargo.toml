@@ -3,8 +3,6 @@ resolver = "2"
 members = [
 	"crates/akua-core",
 	"crates/akua-cli",
-	"crates/akua-wasm",
-	"crates/helm-engine-wasm",
 ]
 
 [workspace.package]
@@ -15,10 +13,6 @@ repository = "https://github.com/cnap-tech/akua"
 authors = ["CNAP Tech <hello@cnap.tech>"]
 
 [workspace.dependencies]
-# Async runtime
-tokio = { version = "1", features = ["full"] }
-async-trait = "0.1"
-
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -27,38 +21,15 @@ toml = "0.8"
 
 # Error handling
 thiserror = "2"
-anyhow = "1"
 
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
-
-# WASM / runtime (future)
-# extism = "1"
-# extism-pdk = "1"
-
-# OCI
-# oci-distribution = "0.11"
-
-# Git
-# git2 = "0.20"
-
-# HTTP
-reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
-
-# Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
 [profile.release]
 lto = true
 codegen-units = 1
 strip = true
 
-# Release profile tuned for CI: prioritises build wall-clock over the
-# last ~5-10% of runtime throughput. Use via `cargo build --profile
-# ci-release`. Downstream binary release uses this (see
-# .github/workflows/cli-release.yml); local `cargo build --release`
-# stays on the maxed-out profile above.
 [profile.ci-release]
 inherits = "release"
 lto = false

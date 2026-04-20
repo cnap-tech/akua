@@ -59,8 +59,7 @@ fn every_example_lockfile_parses() {
         }
         let content = fs::read_to_string(&lock_path)
             .unwrap_or_else(|e| panic!("read {}: {e}", lock_path.display()));
-        AkuaLock::parse(&content)
-            .unwrap_or_else(|e| panic!("parse {}: {e}", lock_path.display()));
+        AkuaLock::parse(&content).unwrap_or_else(|e| panic!("parse {}: {e}", lock_path.display()));
     }
 }
 
@@ -110,14 +109,14 @@ fn every_manifest_declared_dep_is_locked() {
             continue;
         }
 
-        let manifest = AkuaManifest::parse(&fs::read_to_string(&toml_path).unwrap())
-            .expect("parse manifest");
+        let manifest =
+            AkuaManifest::parse(&fs::read_to_string(&toml_path).unwrap()).expect("parse manifest");
         let lock = AkuaLock::parse(&fs::read_to_string(&lock_path).unwrap()).expect("parse lock");
 
         let locked_names: std::collections::HashSet<&str> =
             lock.packages.iter().map(|p| p.name.as_str()).collect();
 
-        for (dep_name, _) in &manifest.dependencies {
+        for dep_name in manifest.dependencies.keys() {
             assert!(
                 locked_names.contains(dep_name.as_str()),
                 "dep `{dep_name}` declared in {} is not present in {}",

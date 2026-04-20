@@ -18,7 +18,12 @@ use super::context::{Context, OutputMode};
 /// intermediate `String`) followed by a trailing newline. Text mode
 /// delegates to the caller's closure so each verb owns its human
 /// rendering.
-pub fn emit_output<W, T, F>(writer: &mut W, ctx: &Context, value: &T, text: F) -> std::io::Result<()>
+pub fn emit_output<W, T, F>(
+    writer: &mut W,
+    ctx: &Context,
+    value: &T,
+    text: F,
+) -> std::io::Result<()>
 where
     W: Write,
     T: Serialize,
@@ -26,8 +31,7 @@ where
 {
     match ctx.output {
         OutputMode::Json => {
-            serde_json::to_writer(&mut *writer, value)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            serde_json::to_writer(&mut *writer, value).map_err(std::io::Error::other)?;
             writeln!(writer)?;
         }
         OutputMode::Text => text(writer)?,
@@ -37,7 +41,11 @@ where
 
 /// Write a structured error to the given stderr writer. Code appears
 /// in both JSON and text modes so scripts can grep either.
-pub fn emit_error<W: Write>(writer: &mut W, ctx: &Context, err: &StructuredError) -> std::io::Result<()> {
+pub fn emit_error<W: Write>(
+    writer: &mut W,
+    ctx: &Context,
+    err: &StructuredError,
+) -> std::io::Result<()> {
     match ctx.output {
         OutputMode::Json => {
             writeln!(writer, "{}", err.to_json_line())?;
@@ -45,7 +53,11 @@ pub fn emit_error<W: Write>(writer: &mut W, ctx: &Context, err: &StructuredError
         OutputMode::Text => {
             writeln!(writer, "error[{}]: {}", err.code, err.message)?;
             if let Some(path) = &err.path {
-                writeln!(writer, "  at {}", format_location(path, err.field.as_deref(), err.line))?;
+                writeln!(
+                    writer,
+                    "  at {}",
+                    format_location(path, err.field.as_deref(), err.line)
+                )?;
             }
             if let Some(suggestion) = &err.suggestion {
                 writeln!(writer, "  suggestion: {suggestion}")?;
@@ -102,8 +114,7 @@ mod tests {
         let out = String::from_utf8(buf).expect("utf-8");
         // Exactly one line, ending with newline.
         assert_eq!(out.matches('\n').count(), 1);
-        let parsed: serde_json::Value =
-            serde_json::from_str(out.trim_end()).expect("valid json");
+        let parsed: serde_json::Value = serde_json::from_str(out.trim_end()).expect("valid json");
         assert_eq!(parsed["code"], "E_TEST");
         assert_eq!(parsed["message"], "something broke");
     }
@@ -130,7 +141,10 @@ mod tests {
             .with_next_action("edit apps/api/inputs.yaml and re-run akua lint");
         emit_error(&mut buf, &text_ctx(), &err).expect("write");
         let out = String::from_utf8(buf).expect("utf-8");
-        assert!(out.contains("at apps/api/inputs.yaml:14 (spec.replicas)"), "{out}");
+        assert!(
+            out.contains("at apps/api/inputs.yaml:14 (spec.replicas)"),
+            "{out}"
+        );
         assert!(out.contains("suggestion: remove quotes around 3"), "{out}");
         assert!(out.contains("docs: https://akua.dev/errors/E_SCHEMA_INVALID"));
         assert!(out.contains("next:"));

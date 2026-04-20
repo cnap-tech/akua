@@ -237,15 +237,17 @@ mod tests {
             .with_next_action("akua pull --refresh oci://ghcr.io/foo");
 
         let json = original.to_json_line();
-        let parsed: StructuredError =
-            serde_json::from_str(&json).expect("round-trip parse");
+        let parsed: StructuredError = serde_json::from_str(&json).expect("round-trip parse");
         assert_eq!(parsed, original);
     }
 
     #[test]
     fn default_docs_uses_canonical_url() {
         let err = StructuredError::new("E_FOO_BAR", "m").with_default_docs();
-        assert_eq!(err.docs.as_deref(), Some("https://akua.dev/errors/E_FOO_BAR"));
+        assert_eq!(
+            err.docs.as_deref(),
+            Some("https://akua.dev/errors/E_FOO_BAR")
+        );
     }
 
     #[test]

@@ -200,9 +200,7 @@ fn write_text<W: Write>(stdout: &mut W, output: &VerifyOutput) -> std::io::Resul
     writeln!(
         stdout,
         "verify: {} declared, {} locked, strict_signing={}",
-        output.summary.declared_deps,
-        output.summary.locked_packages,
-        output.summary.strict_signing,
+        output.summary.declared_deps, output.summary.locked_packages, output.summary.strict_signing,
     )?;
 
     if output.is_ok() {
@@ -320,7 +318,11 @@ signature = \"cosign:key:x\"
             matches!(v, Violation::OrphanLocked { name, version }
                 if name == "zzz-extra" && version == "9.9.9")
         });
-        assert!(has_orphan, "expected orphan-locked violation, got: {:?}", result.violations);
+        assert!(
+            has_orphan,
+            "expected orphan-locked violation, got: {:?}",
+            result.violations
+        );
     }
 
     #[test]
@@ -344,10 +346,15 @@ signature = "cosign:key:acme"
         let ws = write_workspace(MANIFEST_TWO_OCI, lock_unsigned);
         let result = check(ws.path()).expect("check");
         assert_eq!(result.status, "fail");
-        let has_missing = result.violations.iter().any(|v| {
-            matches!(v, Violation::MissingSignature { name, .. } if name == "cnpg")
-        });
-        assert!(has_missing, "expected missing-signature for cnpg: {:?}", result.violations);
+        let has_missing = result
+            .violations
+            .iter()
+            .any(|v| matches!(v, Violation::MissingSignature { name, .. } if name == "cnpg"));
+        assert!(
+            has_missing,
+            "expected missing-signature for cnpg: {:?}",
+            result.violations
+        );
     }
 
     #[test]
@@ -408,7 +415,12 @@ digest  = "sha256:22222222222222222222222222222222222222222222222222222222222222
         let result = check(ws.path()).expect("check");
         assert_eq!(result.status, "fail");
         // 2 unlocked-deps + 2 orphan-lockeds + 2 missing-sigs (strict on) = 6
-        assert_eq!(result.violations.len(), 6, "violations: {:?}", result.violations);
+        assert_eq!(
+            result.violations.len(),
+            6,
+            "violations: {:?}",
+            result.violations
+        );
     }
 
     #[test]
@@ -416,7 +428,10 @@ digest  = "sha256:22222222222222222222222222222222222222222222222222222222222222
         let dir = TempDir::new().expect("tmp");
         fs::write(dir.path().join("akua.lock"), "version = 1\n").expect("write lock");
         let err = check(dir.path()).expect_err("should fail");
-        assert!(matches!(err, VerifyError::Manifest(ManifestLoadError::Missing { .. })));
+        assert!(matches!(
+            err,
+            VerifyError::Manifest(ManifestLoadError::Missing { .. })
+        ));
         let structured = err.to_structured();
         assert_eq!(structured.code, "E_MANIFEST_MISSING");
         assert_eq!(err.exit_code(), ExitCode::UserError);
@@ -427,7 +442,10 @@ digest  = "sha256:22222222222222222222222222222222222222222222222222222222222222
         let dir = TempDir::new().expect("tmp");
         fs::write(dir.path().join("akua.toml"), MANIFEST_TWO_OCI).expect("write toml");
         let err = check(dir.path()).expect_err("should fail");
-        assert!(matches!(err, VerifyError::Lock(LockLoadError::Missing { .. })));
+        assert!(matches!(
+            err,
+            VerifyError::Lock(LockLoadError::Missing { .. })
+        ));
         let structured = err.to_structured();
         assert_eq!(structured.code, "E_LOCK_MISSING");
         assert!(structured.suggestion.is_some());
@@ -437,7 +455,10 @@ digest  = "sha256:22222222222222222222222222222222222222222222222222222222222222
     fn malformed_manifest_surfaces_parse_error() {
         let ws = write_workspace("this is not toml {{{", LOCK_MATCHING);
         let err = check(ws.path()).expect_err("should fail");
-        assert!(matches!(err, VerifyError::Manifest(ManifestLoadError::Parse { .. })));
+        assert!(matches!(
+            err,
+            VerifyError::Manifest(ManifestLoadError::Parse { .. })
+        ));
         let structured = err.to_structured();
         assert_eq!(structured.code, "E_MANIFEST_PARSE");
     }
@@ -507,9 +528,8 @@ signature = "cosign:sigstore:cloudnative-pg"
             if !path.join("akua.toml").exists() || !path.join("akua.lock").exists() {
                 continue;
             }
-            let result = check(&path).unwrap_or_else(|e| {
-                panic!("verify failed on {}: {e}", path.display())
-            });
+            let result =
+                check(&path).unwrap_or_else(|e| panic!("verify failed on {}: {e}", path.display()));
             assert_eq!(
                 result.status,
                 "ok",
