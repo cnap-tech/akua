@@ -27,6 +27,7 @@
 #![allow(dead_code)]
 
 pub mod attest;
+pub mod cli_contract;
 pub mod diff;
 pub mod engine;
 #[cfg(feature = "fetch")]
@@ -50,6 +51,7 @@ pub mod values;
 pub(crate) mod test_util;
 
 pub use attest::{build_provenance, SlsaProvenance};
+pub use cli_contract::{AgentContext, AgentSource, ExitCode, StructuredError};
 pub use lock_file::{AkuaLock, LockError, LockedPackage, Replaced, CURRENT_VERSION as LOCK_VERSION};
 pub use mod_file::{
     AkuaManifest, Dependency as ManifestDependency, DependencySource, ManifestError,
