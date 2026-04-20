@@ -22,7 +22,8 @@ pub struct AkuaManifest {
     pub workspace: Option<WorkspaceSection>,
 
     /// Dependencies keyed by local alias (the name as it appears in `import`
-    /// statements). Ordering is preserved on round-trip by using `BTreeMap`.
+    /// statements). `BTreeMap` canonicalizes order alphabetically on
+    /// serialize — the on-disk order is not preserved across round-trip.
     #[serde(default)]
     pub dependencies: BTreeMap<String, Dependency>,
 }
@@ -159,62 +160,47 @@ impl AkuaManifest {
 }
 
 impl Dependency {
-    /// Which source form is this? Errors if the triple of `oci` / `git` /
-    /// `path` doesn't have exactly one set.
-    pub fn source(&self) -> Result<DependencySource, ManifestError> {
-        let count = self.oci.is_some() as usize
-            + self.git.is_some() as usize
-            + self.path.is_some() as usize;
-        if count != 1 {
-            return Err(ManifestError::AmbiguousSource {
-                // This error doesn't have the dep name; callers that know the
-                // name wrap it via validate(name) below.
-                name: String::new(),
-                count,
-            });
-        }
-        if self.oci.is_some() {
-            Ok(DependencySource::Oci)
-        } else if self.git.is_some() {
-            Ok(DependencySource::Git)
-        } else {
-            Ok(DependencySource::Path)
+    /// Which source form is this? `Some` when exactly one of `oci` /
+    /// `git` / `path` is set; `None` when zero or more than one are set
+    /// (which is a validation error handled by [`validate`]).
+    pub fn source(&self) -> Option<DependencySource> {
+        match (self.oci.is_some(), self.git.is_some(), self.path.is_some()) {
+            (true, false, false) => Some(DependencySource::Oci),
+            (false, true, false) => Some(DependencySource::Git),
+            (false, false, true) => Some(DependencySource::Path),
+            _ => None,
         }
     }
 
     /// Full validation. Callers pass the local alias so errors name the dep.
     pub fn validate(&self, name: &str) -> Result<(), ManifestError> {
-        let source = self.source().map_err(|e| match e {
-            ManifestError::AmbiguousSource { count, .. } => ManifestError::AmbiguousSource {
+        let Some(source) = self.source() else {
+            let count = self.oci.is_some() as usize
+                + self.git.is_some() as usize
+                + self.path.is_some() as usize;
+            return Err(ManifestError::AmbiguousSource {
                 name: name.to_string(),
                 count,
-            },
-            other => other,
-        })?;
+            });
+        };
         match source {
-            DependencySource::Oci => {
-                if self.version.is_none() {
-                    return Err(ManifestError::OciMissingVersion {
-                        name: name.to_string(),
-                    });
-                }
+            DependencySource::Oci if self.version.is_none() => Err(ManifestError::OciMissingVersion {
+                name: name.to_string(),
+            }),
+            DependencySource::Git if self.tag.is_none() && self.rev.is_none() => {
+                Err(ManifestError::GitMissingTagOrRev {
+                    name: name.to_string(),
+                })
             }
-            DependencySource::Git => {
-                if self.tag.is_none() && self.rev.is_none() {
-                    return Err(ManifestError::GitMissingTagOrRev {
-                        name: name.to_string(),
-                    });
-                }
+            DependencySource::Path
+                if self.version.is_some() || self.tag.is_some() || self.rev.is_some() =>
+            {
+                Err(ManifestError::PathHasPin {
+                    name: name.to_string(),
+                })
             }
-            DependencySource::Path => {
-                if self.version.is_some() || self.tag.is_some() || self.rev.is_some() {
-                    return Err(ManifestError::PathHasPin {
-                        name: name.to_string(),
-                    });
-                }
-            }
+            _ => Ok(()),
         }
-        Ok(())
     }
 }
 

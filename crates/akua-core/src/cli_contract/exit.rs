@@ -76,9 +76,10 @@ impl ExitCode {
         !matches!(self, ExitCode::Success)
     }
 
-    /// `true` when retrying with the same inputs might succeed
-    /// (rate-limited, timeout, and arguably needs-approval). Agents
-    /// can use this to decide whether backoff-and-retry is worthwhile.
+    /// `true` when retrying with the same inputs might succeed without
+    /// caller intervention — rate-limited and timeout. `needs-approval`
+    /// is not retriable; it requires a human to approve before a retry
+    /// will produce a different outcome.
     pub const fn is_retriable(self) -> bool {
         matches!(self, ExitCode::RateLimited | ExitCode::Timeout)
     }

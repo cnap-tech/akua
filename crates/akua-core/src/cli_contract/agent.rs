@@ -64,8 +64,7 @@ pub struct AgentContext {
 }
 
 impl AgentContext {
-    /// Detect from the current process environment. Equivalent to
-    /// [`Self::from_env_vars`] on `std::env::var_os` lookups.
+    /// Detect from the current process environment via `std::env::var_os`.
     pub fn detect() -> Self {
         Self::from_reader(&StdEnvReader)
     }
@@ -74,8 +73,8 @@ impl AgentContext {
     /// but library consumers that model their own env (e.g. a web-based
     /// playground passing fake env vars) can call this directly.
     pub fn from_reader(reader: &dyn EnvReader) -> Self {
-        // Opt-out wins first.
-        if reader.get("AKUA_NO_AGENT_DETECT").is_some() {
+        // Opt-out wins first. Presence check only — no allocation.
+        if reader.is_set("AKUA_NO_AGENT_DETECT") {
             return Self {
                 detected: false,
                 source: None,
@@ -92,12 +91,9 @@ impl AgentContext {
             (AgentSource::CursorCli, "CURSOR_CLI"),
             (AgentSource::AkuaAgent, "AKUA_AGENT"),
         ] {
-            if let Some(value) = reader.get(var) {
-                // An empty string is not a valid signal. Agents that set
-                // these vars always provide non-empty values.
-                if value.is_empty() {
-                    continue;
-                }
+            // Shells sometimes export a variable with empty value; that
+            // shouldn't be treated as a positive agent signal.
+            if let Some(value) = reader.get(var).filter(|v| !v.is_empty()) {
                 return Self {
                     detected: true,
                     source: Some(source),
@@ -107,12 +103,7 @@ impl AgentContext {
             }
         }
 
-        Self {
-            detected: false,
-            source: None,
-            name: None,
-            disabled_via_env: false,
-        }
+        Self::none()
     }
 
     /// Convenience: build an explicitly-not-detected context (e.g. for
@@ -127,9 +118,17 @@ impl AgentContext {
     }
 }
 
-/// Abstraction over `std::env::var_os` so tests can inject a fixture.
+/// Abstraction over `std::env` so tests can inject a fixture.
 pub trait EnvReader {
+    /// Read a variable's value as a UTF-8 string.
     fn get(&self, key: &str) -> Option<String>;
+
+    /// Cheap presence check. Default impl delegates to `get`, but the
+    /// production impl overrides with `env::var_os` to avoid the
+    /// allocation when only presence matters (the opt-out path).
+    fn is_set(&self, key: &str) -> bool {
+        self.get(key).is_some()
+    }
 }
 
 /// Production implementation backed by `std::env`.
@@ -137,7 +136,11 @@ pub struct StdEnvReader;
 
 impl EnvReader for StdEnvReader {
     fn get(&self, key: &str) -> Option<String> {
-        std::env::var(key).ok()
+        std::env::var_os(key).and_then(|v| v.into_string().ok())
+    }
+
+    fn is_set(&self, key: &str) -> bool {
+        std::env::var_os(key).is_some()
     }
 }
 
