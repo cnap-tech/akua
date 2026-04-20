@@ -1,0 +1,19 @@
+apiVersion: akua.dev/v1alpha1
+kind: Environment
+metadata:
+  name: production
+spec:
+  policy: tier/production
+  cluster: prod-eu
+  region:  eu-central-1
+  budget:
+    monthly: "$1500"
+    alertAt: [0.75, 0.9, 1.0]
+  approvers:
+    - "@team/platform"
+    - "@team/payments-lead"
+  soak:
+    after_deploy: "15m"
+    fail_fast_on:
+      - "error_rate p99 > 0.01 for 3m"
+      - "p99_latency > 2s for 5m"

@@ -11,14 +11,14 @@
 //! - [`apply_input_transforms`] — validate + transform customer-provided
 //!   values according to each field's `x-input` config (template + slugify +
 //!   uniqueness hint; uniqueness check is left to the caller).
-//! - [`validate_values_schema`] — structural validation with CNAP rules:
+//! - [`validate_values_schema`] — structural validation with Akua rules:
 //!   root must be `type: object`; `x-user-input` only on leaves;
 //!   `x-input.template` requires `{{value}}`.
 //!
 //! # Note on naming
 //!
-//! This module currently supports both the legacy CEP-0006 vocabulary
-//! (`x-install`, `x-hostname`) and the generalized CEP-0008 names
+//! This module currently supports both the legacy vocabulary
+//! (`x-install`, `x-hostname`) and the generalized names
 //! (`x-user-input`, `x-input`). Legacy names are accepted as aliases for
 //! one migration window, then removed.
 

@@ -127,7 +127,7 @@ pub fn fetch_dependencies(deps: &[Dependency], charts_dir: &Path) -> Result<(), 
 /// limits (`max_download_bytes`, `max_extracted_bytes`, `max_tar_entries`)
 /// and a cache-bypass toggle. Overrides the `AKUA_MAX_*` / `AKUA_NO_CACHE`
 /// env vars for the duration of this call only. Multi-tenant hosts
-/// (Temporal workers with many concurrent activities) can set
+/// (worker pools with many concurrent activities) can set
 /// per-tenant limits without process-global state.
 pub fn fetch_dependencies_with_options(
     deps: &[Dependency],

@@ -1,0 +1,10 @@
+apiVersion: akua.dev/v1alpha1
+kind: Environment
+metadata:
+  name: staging
+spec:
+  policy: tier/startup
+  cluster: staging-eu
+  region:  eu-central-1
+  budget:
+    monthly: "$200"

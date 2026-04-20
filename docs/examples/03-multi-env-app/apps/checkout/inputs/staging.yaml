@@ -1,0 +1,6 @@
+appName:  checkout
+hostname: checkout.staging.example.com
+replicas: 2
+team:     payments
+database:
+  user: checkout_app

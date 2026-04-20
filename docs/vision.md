@@ -309,14 +309,14 @@ See [`spec-markers.md`](./spec-markers.md) for the marker spec itself.
 6. Applies to the cluster or packages for `helm install` or whatever
    deploy mechanism fits.
 
-**Install UI (Chart Studio, customer-facing install form):**
+**Install UI (Package Studio, customer-facing install form):**
 
 1. Pulls the bundle (or fetches just the schema + cel-evaluator layers
    — they're small).
 2. Calls `schema({})` → initial form.
 3. User types → calls `schema({partial})` → re-renders form.
 4. On submit → calls `render(final)` → obtains manifests or submits
-   inputs to a build worker that renders server-side.
+   inputs to a build worker that invokes `@akua/sdk` server-side.
 
 Neither consumer needs to know about Helm, KCL, helmfile, Kustomize,
 CEL semantics, or JSON Schema validation. The bundle handles its own

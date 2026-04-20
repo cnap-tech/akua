@@ -1,0 +1,6 @@
+appName:  checkout
+hostname: checkout.dev.example.com
+replicas: 1
+team:     payments
+database:
+  user: checkout_app

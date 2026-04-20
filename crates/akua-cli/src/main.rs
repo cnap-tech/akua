@@ -22,8 +22,8 @@ use akua_core::{
 #[command(version)]
 struct Cli {
     /// Log output format. `text` (default) is human-readable; `json`
-    /// emits one structured record per event, suitable for Temporal's
-    /// `ApplicationFailure.details` or log-aggregator ingestion.
+    /// emits one structured record per event, suitable for structured
+    /// error payloads or log-aggregator ingestion.
     #[arg(long, value_enum, default_value_t = LogFormat::Text, global = true)]
     log_format: LogFormat,
 
@@ -268,7 +268,7 @@ fn command_name(cmd: &Commands) -> &'static str {
 }
 
 /// Stable pipeline phase tag attached to top-level log events so
-/// downstream aggregators (Temporal workers, log shippers) can group
+/// downstream aggregators (worker processes, log shippers) can group
 /// events without parsing the subcommand label. At the CLI layer
 /// `phase` matches `command` 1:1; library callers can emit richer
 /// sub-phases (e.g. `fetch_deps`) on their own events.
@@ -450,7 +450,7 @@ fn starter_readme(name: &str) -> String {
 /// Initialise the global tracing subscriber. Text format (default) goes
 /// to stderr as compact human-readable output; JSON goes to stderr as
 /// one newline-delimited record per event for downstream parsers
-/// (Temporal's `ApplicationFailure.details`, log aggregators, etc.).
+/// (structured error payloads, log aggregators, etc.).
 fn init_tracing(format: LogFormat) {
     let filter = tracing_subscriber::EnvFilter::from_default_env();
     let base = tracing_subscriber::fmt()

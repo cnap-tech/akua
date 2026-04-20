@@ -1,109 +1,147 @@
 # Roadmap
 
-Akua is being extracted from CNAP's internal chart generation service. See
-[`design-notes.md`](design-notes.md) for the current-design *why*,
-[`vision.md`](vision.md) for the long-range Gen 4 *ambition*; this doc is
-the *when*.
+> **Status:** v0.3 shipped the pre-pivot design (`package.yaml` + JSON-Schema authoring, `x-user-input` / `x-input` vocabulary, Helm-centric output). The project is pivoting to the interface-spec target: KCL-authored Packages, Rego-authored Policies, 30 verbs, `@akua/sdk` parity, embedded multi-engine pipeline, browser playground.
+>
+> This doc describes the **forward plan**. The historical v0.3 phases are archived below for continuity.
 
-## Phase status
+The strategic spine lives in the masterplan (private, internal). This doc is the operational "when" that matches the OSS-visible surface.
+
+---
+
+## Current state — v0.3 (pre-pivot)
+
+What shipped:
+- Rust core (`crates/akua-core`, `crates/akua-cli`) with `akua render / build / publish / inspect / attest`.
+- Embedded Helm v4 engine via wasmtime (`crates/helm-engine-wasm`).
+- Native KCL engine via `kcl-lang` Rust crate.
+- Native OCI + HTTP chart-dep fetcher (no `helm dependency update` shell-out).
+- `@akua/sdk` v0.3 on JSR (browser + Node entry points, SSRF guard, tar-bomb rejection).
+- Security hardening: tar-symlink rejection, SSRF guard, cred redaction, CEL caller-timeout bound.
+
+What this lets us do today: author a multi-source Helm package with JSON-Schema inputs, CEL expressions, publish a signed OCI artifact, render it back to manifests. Does not match the interface-spec target.
+
+---
+
+## Forward plan — toward the interface-spec target
+
+The target is defined by the specs in `docs/`: [`cli.md`](./cli.md), [`cli-contract.md`](./cli-contract.md), [`package-format.md`](./package-format.md), [`policy-format.md`](./policy-format.md), [`krm-vocabulary.md`](./krm-vocabulary.md), [`lockfile-format.md`](./lockfile-format.md), [`embedded-engines.md`](./embedded-engines.md), [`sdk.md`](./sdk.md), [`agent-usage.md`](./agent-usage.md).
+
+Implementation plan details (agent-driven rewrite, milestone criteria, task decomposition) live in [`impl-plan.md`](./impl-plan.md).
+
+### Phase A — Foundation (weeks 0–6)
+
+Goal: the interface-spec's load-bearing contracts exist as working code, even if surface is minimal.
+
+- CLI skeleton honoring [`cli-contract.md`](./cli-contract.md): `--json`, `--plan`, typed exit codes, idempotency keys, `--timeout`, agent auto-detection, structured errors.
+- `akua.mod` + `akua.sum` parser and resolver (go-mod shape; see [`lockfile-format.md`](./lockfile-format.md)).
+- `Package.k` loader: parse KCL Package with the embedded `kclvm-rs` interpreter; extract schema, resolve imports.
+- `akua check` (fast syntax + type check, no execution), `akua fmt`, `akua lint` (embedded Regal + kcl lint).
+- `akua render` on a single-engine Package (KCL-only to start).
+- `akua publish` + `akua verify` (cosign + SLSA v1); reuse v0.3 OCI client.
+- `akua whoami` + agent context auto-detection (`CLAUDECODE` / `CURSOR_CLI` / `GEMINI_CLI` / `AGENT`).
+- `@akua/sdk` typed wrapper with capability parity to the above verbs.
+
+Exit gate: `akua render`, `akua publish`, `akua verify` round-trip on the [`examples/01-hello-webapp`](./examples/01-hello-webapp/) sample. `@akua/sdk.render()` produces byte-identical output to the CLI.
+
+### Phase B — Multi-engine pipeline (weeks 6–12)
+
+Goal: any source engine callable from a KCL Package produces deterministic bytes.
+
+- Embedded Helm v4 (reuse `crates/helm-engine-wasm`; polish for `helm.template()` as KCL callable).
+- Embedded Kustomize (via wasip1 Go→wasm).
+- Embedded kro offline instantiator (`rgd.instantiate(...)`).
+- Embedded CEL (already native; wire as KCL callable).
+- Embedded Kyverno-to-Rego converter for policy pipeline.
+- `akua render` handles mixed-engine Packages; input mapping validation against source schemas (`values.schema.json`, RGD `spec.schema`).
+- `akua diff` (structural, cross-version).
+- `akua inspect` full-tree output with provenance.
+
+Exit gate: [`examples/02-webapp-postgres`](./examples/02-webapp-postgres/) (CNPG + webapp) renders end-to-end with byte-identical output across three calls of the same verb.
+
+### Phase C — Policy engine (weeks 12–18)
+
+Goal: Rego as host language for Policies with compile-resolved imports; embedded OPA.
+
+- Embedded OPA evaluator.
+- `akua.mod` compile-resolved imports: `import data.akua.policies.tier.production` pulls OCI artifact, verifies signature, mounts as Rego data.
+- `akua policy check` verdict path (`allow` / `deny` / `needs-approval`).
+- `akua test` for Rego (`*_test.rego`) + KCL (`test_*.k`).
+- Policy tiers shipped as signed OCI artifacts: `tier/dev`, `tier/startup`, `tier/production`, `tier/audit-ready`.
+- `PolicySet` KRM (typed KCL, not YAML) that composes tiers + custom rules.
+
+Exit gate: policy tier published + consumed round-trip. Deny verdict on an over-quota App is line-precise.
+
+### Phase D — Deploy + dev loop (weeks 18–26)
+
+Goal: the signature experience.
+
+- `akua deploy` with reconciler drivers (`argocd`, `flux`, `kro`, `helm`, `kubectl`, custom). No non-K8s targets (see [`docs/architecture.md#what-akua-is-not`](./architecture.md)).
+- `akua dev` content-addressable build graph, `localhost:5173` browser UI, sub-500ms edit-to-applied loop against a local K8s target (kind/k3d/minikube).
+- `akua repl` (Rego + KCL).
+- `akua trace`, `akua cov` for policy evaluation inspection.
+- `akua query` against cluster-native Loki / Prom (no federation).
+
+Exit gate: solo-developer journey from [`masterplan §19.1`](../../cortex/workspaces/robin/akua-masterplan.md) runs end-to-end on a fresh laptop in under 5 minutes.
+
+### Phase E — Browser playground + Studio primitives (weeks 26–36)
+
+Goal: the in-browser authoring surface.
+
+- `akua.dev` playground: upload / paste a Package, live render, live diff, live lint.
+- `@akua/ui` component primitives (PackageEditor, FormPreview, ManifestViewer, TestRunner) ship with working demos.
+- Review surface template (open source UI component library; the hosted version lives in akua Cloud).
+
+Exit gate: a public visitor can author a working Package in the browser, see rendered output, run policy check, view the structural diff against a prior version.
+
+### Phase F — Agent-native refinements (continuous)
+
+Not a discrete phase; every prior phase honors the agent contract. Specific ongoing work:
+
+- Skills library ([`skills/`](./skills/)) grows to cover every common agent workflow.
+- `next_actions[]` in every error structure, kept actionable.
+- Terminal output budgets honored (<200 lines of scrollback in typical verb runs).
+
+---
+
+## Non-goals (in addition to [`design-notes.md §1`](./design-notes.md#what-akua-is-not))
+
+- ❌ Non-Kubernetes deploy targets (Fly / Workers / Lambda / systemd).
+- ❌ Cluster-side controllers for akua kinds.
+- ❌ Runtime rendering in-cluster.
+- ❌ Curated central package catalog.
+- ❌ A PaaS — akua is a toolkit, not a hosted runtime.
+
+---
+
+## Out of scope for v1
+
+- Cross-package composition (package-of-packages beyond umbrella deps).
+- Python / CUE engines beyond KCL + existing embedded set.
+- Upstream Helm 4 HIP contribution for template-function plugins (tracked at [helm#31498](https://github.com/helm/helm/issues/31498); post-v1).
+- Gen-4 self-contained WASM renderer bundles (vision.md framing; strategic, not immediate).
+
+---
+
+## v0.3 phase history (pre-pivot, archived)
 
 | Phase | Status | Scope |
-|-------|--------|-------|
-| **0 — Pure algorithms** | ✅ Landed | djb2 hash, source parsing, value merging, schema extraction, transforms |
-| **1a — Umbrella assembly** | ✅ Landed | Multi-source → umbrella Chart.yaml with aliases; `akua tree`, `akua build` |
-| **1b — Helm render** | ✅ Landed | Shell to `helm template`; `akua render` end-to-end |
-| **1c — WASM bindings** | ✅ Landed | wasm-pack output; browser + Node consumable; shared core with CLI |
-| **2a — Engine trait** | ✅ Landed | `Engine` trait + `PreparedSource::{Dependency,Git,LocalChart}`; `engine:` in package.yaml |
-| **2b — CEL expressions** | ✅ Landed | `x-input.cel` via `cel-interpreter`; `{{value}}` kept as sugar |
-| **2c — Provenance** | ✅ Landed | `.akua/metadata.yaml` on build; `akua inspect` reads it back; `--strip-metadata` opt-out |
-| **3a — KCL engine** | ✅ Landed | Shells to `kcl run`; writes static subchart; `examples/kcl-package` |
-| **3b — helmfile engine** | ✅ Landed | Shells to `helmfile template`; static subchart; `examples/helmfile-package` |
-| **4a — OCI publish** | ✅ Landed | `akua publish` via `oci-client` (pure Rust, no `helm` CLI); Helm-compat media types + annotations; returns OCI digest |
-| **4b — SLSA attestation** | ✅ Landed | `akua attest` emits SLSA v1 predicate for cosign + adjacent OCI push |
-| **5 — KCL as native Rust** | ✅ Landed | `engine: kcl` now calls the native `kcl-lang` Rust crate (git dep). No subprocess, no fetch, 4 ms eval. Browser renders via `@kcl-lang/wasm-lib` + JS glue (akua-wasm doesn't compile a KCL engine). |
-| **7a — Helm-engine WASM** | ✅ Landed | Go→wasip1 wrapper around `helm/v4/pkg/engine` hosted via wasmtime. `akua render --engine helm-wasm` is the default. Kills `helm template` shell-out. |
-| **7b — Native dep fetching** | ✅ Landed | `akua-core::fetch` pulls OCI + HTTP chart deps in-process (oci-client + reqwest). Replaces `helm dependency update`. Default render now has zero `helm` CLI dep. |
-| **7c — Library hardening** | ✅ Landed | Dropped `std::env::set_current_dir` in `load_package`; source paths absolutised up-front so engines are CWD-independent. Safe for concurrent / multi-threaded library use. |
-| **7d — @akua/sdk on JSR** | ✅ Landed | 0.1/0.2/0.3 published to JSR. Node entry + browser entry + `@akua/sdk/cache` Node-only. `pullChart` (OCI + HTTP Helm), `packChart` with metadata/schema, `dockerConfigAuth`, streaming, LRU cache, SSRF guard, tar bombs + symlink escapes blocked. See `SECURITY.md`. |
-| **7e — Security hardening** | ✅ Landed | P0 tar symlink rejection, P0 helmfile gated behind opt-in feature, P1 SSRF guard (Rust + SDK), P1 source-path confinement, credential redaction in Debug + error messages, CEL timeout + source cap, strict OCI media type, LRU cache eviction. |
-| **8 — Install UI reference** | 🔮 Near-term | React + rjsf + `@akua/sdk/browser`; demos the customer-facing flow end-to-end |
-| **9 — Gen 4 bundle output** | 🔮 Post-v1 | `akua publish --bundle` emits multi-layer OCI: engine.wasm (shared digest) + sources + schema + attestation. Reference consumer `akua render-bundle <oci-ref>`. See [`vision.md`](vision.md). |
-| **10 — Gen 4 ecosystem bridges** | 🔮 Post-v1 | `akua-cmp` sidecar for ArgoCD, Flux post-renderer plugin, `helm install --wasm` plugin. De-facto spec before CNCF standardisation. |
-| **11 — Package Studio IDE** | 🔮 Multi-quarter | Full in-browser authoring IDE |
-| **12 — Upstream** | 🔮 Ongoing | HIP proposals to Helm (template-function plugins), Extism contributions, CNCF TAG App Delivery spec pitch |
+|---|---|---|
+| 0 — Pure algorithms | ✅ | djb2 hash, source parsing, value merging, schema extraction, transforms |
+| 1a — Umbrella assembly | ✅ | Multi-source → umbrella Chart.yaml with aliases |
+| 1b — Helm render | ✅ | Shell to `helm template`; `akua render` end-to-end |
+| 1c — WASM bindings | ✅ | wasm-pack output; browser + Node consumable |
+| 2a — Engine trait | ✅ | `Engine` trait + `PreparedSource` variants |
+| 2b — CEL expressions | ✅ | `x-input.cel` via `cel-interpreter` |
+| 2c — Provenance | ✅ | `.akua/metadata.yaml` on build |
+| 3a — KCL engine | ✅ | Shelled to `kcl run`; later rewritten as native Rust (Phase 5) |
+| 3b — helmfile engine | ✅ | Shells to `helmfile template`; gated off by default in later hardening |
+| 4a — OCI publish | ✅ | Pure-Rust `oci-client`; Helm-compat media types |
+| 4b — SLSA attestation | ✅ | SLSA v1 predicate via cosign |
+| 5 — KCL as native Rust | ✅ | `kcl-lang` crate integration |
+| 7a — Helm-engine WASM | ✅ | Go→wasip1 via wasmtime; `--engine=embedded` default |
+| 7b — Native dep fetching | ✅ | oci-client + reqwest; zero `helm` CLI dep |
+| 7c — Library hardening | ✅ | CWD-independent source paths |
+| 7d — @akua/sdk on JSR | ✅ | 0.1 / 0.2 / 0.3 published |
+| 7e — Security hardening | ✅ | SSRF, tar-symlink rejection, cred redaction |
 
-## Phase 5 — KCL as native Rust (landed)
-
-Research into Rust/WASM embedding paths ([design-notes.md §11](./design-notes.md#11-engine-determinism-reality-check))
-surfaced the right call: KCL's evaluator is already Rust. Linking it
-directly is cleaner than embedding `kcl.wasm` via wasmtime.
-
-**Shipped:**
-- `engine: kcl` uses the `kcl-lang` crate (git dep, no crates.io publish yet).
-- No subprocess, no kcl binary on `$PATH`, no wasm blob to fetch.
-- Native perf (~4ms per eval, 12MB binary).
-- First build ~3.5min; cached thereafter.
-
-**Browser handling (composed, not unified):**
-- akua-wasm does NOT include a KCL engine (heavy Rust deps can't
-  compile to wasm32).
-- Browser apps render KCL via upstream's `@kcl-lang/wasm-lib` npm
-  package and pass the rendered YAML into akua-wasm's umbrella
-  assembler via the Engine trait boundary.
-- One spec, two implementations, identical behavior.
-
-## Phase 6 — Install UI reference
-
-- [ ] React + rjsf app reading a chart's `values.schema.json` from OCI.
-- [ ] Browser calls `@akua/core-wasm` for live CEL preview.
-- [ ] Submits resolved values → Akua builder produces per-install chart
-      (or, for Model A, just writes values into ArgoCD Application).
-- [ ] Published as `examples/install-ui/` — not a product, a template.
-
-## Phase 7 — Single-binary rendering (landed)
-
-The thesis: `akua render` has **zero external CLI dependencies** for
-the default flow. Three pieces shipped:
-
-- **7a** — [`crates/helm-engine-wasm`](../crates/helm-engine-wasm/README.md):
-  Go wrapper around `helm.sh/helm/v4/pkg/engine.Render` compiled to
-  wasip1 (reactor module via `-buildmode=c-shared`), embedded into the
-  akua binary via `include_bytes!`, hosted via wasmtime. Full Helm
-  semantics (Sprig, named templates, subcharts, `.Files`,
-  `.Capabilities`) with no `helm template` shell-out.
-- **7b** — `akua-core::fetch`: native OCI + HTTP Helm-repo chart
-  fetcher (oci-client + reqwest). Replaces `helm dependency update`.
-- **7c** — `load_package` no longer mutates the process CWD. Source
-  paths absolutised up-front. Safe for concurrent library use (CNAP
-  backend, server embedding, etc.).
-
-**Size optimisation (backlog):** the embedded `helm-engine.wasm` is
-~75 MB because Go's linker can't prune types exposed through
-`pkg/engine`'s public API (e.g., `rest.Config`). A forked build that
-vendors just the template engine + strips the `k8s.io/client-go`
-import would land at ~15 MB. Not worth the upstream-sync burden
-until users complain about binary size. See
-[`crates/helm-engine-wasm/README.md`](../crates/helm-engine-wasm/README.md)
-"Option 2" for the detailed plan.
-
-**Legacy:** `--engine helm-cli` remains for users who prefer shelling
-to their installed Helm. Helmfile engine still shells to `helmfile`
-(its whole point is orchestrating helm — embedding doesn't make sense).
-
-## Explicit non-goals
-
-- ❌ Replace Helm as a deploy runtime.
-- ❌ Replace ArgoCD / Flux.
-- ❌ Ship a custom Kubernetes controller for Akua packages.
-- ❌ Invent a new config DSL for end users (JSON Schema + CEL is enough).
-- ❌ Runtime rendering in cluster.
-- ❌ CNAP-proprietary features — marketplace, tenant isolation, secret
-      stores — stay on the CNAP side. Akua stays stateless per install.
-
-## Out of scope for v0.x (possibly later)
-
-- Python / CUE engines — only after KCL WASM validates the embedded-
-  runtime pattern.
-- Cross-package composition (package-of-packages beyond umbrella deps).
-- Upstream Helm 4 HIP contribution for template-function plugins (HIP
-  after HIP-0026 lands). Currently stub-tracked at [helm#31498](https://github.com/helm/helm/issues/31498).
+v0.3 is the commit baseline from which the forward plan diverges. Most of the v0.3 code is carry-forward (OCI client, fetch, security guards, Helm engine embedding); some is superseded (`package.yaml` authoring, `x-user-input` vocabulary, `akua build`).

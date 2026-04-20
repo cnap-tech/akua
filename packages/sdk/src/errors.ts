@@ -1,7 +1,7 @@
 /**
  * Error class hierarchy for the SDK. Everything SDK-thrown extends
  * [`AkuaError`] so consumers can `instanceof` once when mapping to
- * domain errors (Temporal `ApplicationFailure`, HTTP 4xx/5xx, etc.).
+ * domain errors (workflow-engine failures, HTTP 4xx/5xx, etc.).
  *
  * Transport errors from the global `fetch` / `DOMException` pass
  * through unwrapped — we don't catch-and-rethrow the network stack.

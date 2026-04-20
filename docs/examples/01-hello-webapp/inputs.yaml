@@ -1,0 +1,3 @@
+# Sample inputs. Satisfies the schema in package.k.
+hostname: hello.example.com
+replicas: 3
