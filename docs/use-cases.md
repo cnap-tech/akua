@@ -13,13 +13,13 @@ OCI models.
 
 | Role | Who | Does what | Uses |
 |---|---|---|---|
-| **Package author** | PaaS builder, platform team, ISV | Writes `package.yaml` + JSON Schema + engine source. Publishes chart to OCI. | Chart Studio IDE / CLI / CI |
+| **Package author** | PaaS builder, platform team, ISV | Writes `package.yaml` + JSON Schema + engine source. Publishes chart to OCI. | Package Studio IDE / CLI / CI |
 | **Operator** | Customer ops / DevOps | Installs + maintains the chart in their cluster. Binds chart digest to ArgoCD Applications. | ArgoCD / Flux / helm |
 | **Customer** | End user of the hosted product | Fills an install form. Never touches YAML. | Install UI (web) |
 
-In CNAP's managed-SaaS model, operator and customer collapse into "the
-tenant," and CNAP-internal ops owns ArgoCD. In self-hosted or CLI
-flows, all three roles may be the same person.
+In a managed-SaaS model, operator and customer collapse into "the
+tenant," and the platform operator owns the reconciler (e.g. ArgoCD).
+In self-hosted or CLI flows, all three roles may be the same person.
 
 ---
 
@@ -27,7 +27,7 @@ flows, all three roles may be the same person.
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│  Author's machine / Chart Studio IDE                           │
+│  Author's machine / Package Studio IDE                           │
 ├────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │  package.yaml ──┐                                              │
@@ -116,7 +116,7 @@ cosign attest \
 ```
 
 Same package version + same sources → same OCI digest (for engines that
-respect determinism — see `design-notes.md` §11).
+respect determinism — see `design-notes.md` §10).
 
 ---
 
@@ -155,7 +155,7 @@ small `values.yaml` applied at deploy time.
 3. Customer submits.
 4. Server-side: Akua runs `applyInputTransforms` → produces a small
    resolved `values.yaml` (KBs).
-5. CNAP creates an ArgoCD `Application` pointing at the shared chart +
+5. The hosting platform creates an ArgoCD `Application` pointing at the shared chart +
    the customer's resolved values.
 
 **ArgoCD `Application` (Model A)**
@@ -239,7 +239,7 @@ Customer B fills form ──► Akua builds ──►│ chart@sha256:bbb      �
 1. Customer opens install UI, fills form (same as A).
 2. Server-side: Akua runs the **full pipeline** — CEL, engine render,
    umbrella assembly, OCI push — producing a per-customer chart digest.
-3. CNAP creates an ArgoCD `Application` pointing at the customer's
+3. The hosting platform creates an ArgoCD `Application` pointing at the customer's
    specific digest.
 
 **ArgoCD `Application` (Model B)**
@@ -332,7 +332,7 @@ CEL evaluation at deploy time.** The chart is plain Helm.
 
 ### Example 1 — SaaS multi-tenant (Model A)
 
-CNAP ships a "Postgres + API" product to 500 tenants.
+A platform operator ships a "Postgres + API" product to 500 tenants.
 
 - Author publishes `postgres-api@1.0.0` → one OCI digest.
 - Tenants fill `{ subdomain, adminEmail, plan }`.
@@ -381,7 +381,7 @@ their templates. Deploy-time Helm handles both. Model A works.
                                    │ POST inputs
                                    ▼
                 ┌─────────────────────────────────────┐
-                │  Install backend (CNAP)             │
+                │  Install backend (hosting platform) │
                 │  - Akua applyInputTransforms      │
                 │  - Model A: write values.yaml       │
                 │  - Model B: run full build pipeline │
@@ -422,8 +422,8 @@ or with ArgoCD:
   apply an Application pointing at the chart
 ```
 
-Akua here is just a build tool. No CNAP, no install UI. The chart is
-still a vanilla Helm chart anyone can consume.
+Akua here is just a build tool. No hosting platform, no install UI.
+The chart is still a vanilla Helm chart anyone can consume.
 
 ---
 

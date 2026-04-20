@@ -1,6 +1,7 @@
 # Roadmap
 
-Akua is being extracted from CNAP's internal chart generation service. See
+akua originated as an internal chart generation service and is being
+published as a standalone toolkit. See
 [`design-notes.md`](design-notes.md) for the current-design *why*,
 [`vision.md`](vision.md) for the long-range Gen 4 *ambition*; this doc is
 the *when*.
@@ -34,7 +35,7 @@ the *when*.
 
 ## Phase 5 — KCL as native Rust (landed)
 
-Research into Rust/WASM embedding paths ([design-notes.md §11](./design-notes.md#11-engine-determinism-reality-check))
+Research into Rust/WASM embedding paths ([design-notes.md §10](./design-notes.md#10-engine-determinism-reality-check))
 surfaced the right call: KCL's evaluator is already Rust. Linking it
 directly is cleaner than embedding `kcl.wasm` via wasmtime.
 
@@ -74,8 +75,8 @@ the default flow. Three pieces shipped:
 - **7b** — `akua-core::fetch`: native OCI + HTTP Helm-repo chart
   fetcher (oci-client + reqwest). Replaces `helm dependency update`.
 - **7c** — `load_package` no longer mutates the process CWD. Source
-  paths absolutised up-front. Safe for concurrent library use (CNAP
-  backend, server embedding, etc.).
+  paths absolutised up-front. Safe for concurrent library use
+  (backend services, server embedding, etc.).
 
 **Size optimisation (backlog):** the embedded `helm-engine.wasm` is
 ~75 MB because Go's linker can't prune types exposed through
@@ -97,8 +98,9 @@ to their installed Helm. Helmfile engine still shells to `helmfile`
 - ❌ Ship a custom Kubernetes controller for Akua packages.
 - ❌ Invent a new config DSL for end users (JSON Schema + CEL is enough).
 - ❌ Runtime rendering in cluster.
-- ❌ CNAP-proprietary features — marketplace, tenant isolation, secret
-      stores — stay on the CNAP side. Akua stays stateless per install.
+- ❌ Host-platform features — marketplace, tenant isolation, secret
+      stores — stay with the hosting platform. Akua stays stateless
+      per install.
 
 ## Out of scope for v0.x (possibly later)
 

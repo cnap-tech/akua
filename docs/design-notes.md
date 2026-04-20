@@ -10,11 +10,12 @@
 > with both per-customer OCI and shared OCI models worked through —
 > see [`use-cases.md`](./use-cases.md).
 >
-> **For the canonical spec of Akua's JSON Schema extensions**
-> (`x-user-input` + `x-input`) — see [`spec-markers.md`](./spec-markers.md).
+> **For the canonical spec of Akua's JSON Schema extensions** — see
+> [`package-format.md`](./package-format.md) (UI hints via docstrings +
+> `@ui` decorators).
 
-The upstream design narrative (CEP-0008) lives in the CNAP repo. This doc
-is the condensed operational version that travels with the OSS codebase.
+This doc is the condensed operational version of Akua's design
+reasoning, traveling with the OSS codebase.
 
 ---
 
@@ -28,9 +29,9 @@ is the condensed operational version that travels with the OSS codebase.
 - The **contract + artifact + sandbox** wrapper around whatever templating
   engine the package author prefers. "Meta-packager."
 - A **library** (Rust core + WASM bindings + CLI) so the same code runs in:
-  - package authoring IDE (Chart Studio),
+  - package authoring IDE (Package Studio),
   - customer install UI (in-browser live-preview),
-  - CNAP-side build workers,
+  - server-side build workers (invoking `@akua/sdk`),
   - CI, local CLI, and AI coding agents (agents use the CLI via shell —
     no separate MCP server layer; the CLI *is* the agent interface).
 
@@ -298,7 +299,7 @@ Fields flagged `x-secret: true` should **never** land in `values.yaml`.
 Routed instead to:
 - Sealed Secrets,
 - External Secrets Operator (ESO),
-- Infisical (CNAP default),
+- Infisical,
 - or an abstract `SecretStore` reference in the chart.
 
 ### `uniqueIn` — cross-install registry
@@ -313,7 +314,7 @@ pool, Akua queries a central registry at build time:
 }
 ```
 
-Registry lives in CNAP-side infrastructure (not Akua core).
+Registry lives in the hosting platform's infrastructure (not Akua core).
 
 ---
 
@@ -326,7 +327,7 @@ package. The same functions run in:
 
 1. Native CLI (`cargo run -p akua-cli`) — also the surface AI agents
    call via their shells; no separate MCP server.
-2. Browser (Chart Studio IDE, customer install UI)
+2. Browser (Package Studio IDE, customer install UI)
 3. Node.js (build workers, tests)
 4. CI
 
@@ -400,43 +401,7 @@ transforms:
 
 ---
 
-## 9. CNAP integration
-
-### Mapping to the cortex-documented product vision
-
-| Cortex concept | Akua mechanism |
-|---|---|
-| PaaS builder authors "products" | Akua package (`package.yaml` + schema + engine source) |
-| Products expose configurable settings | `x-user-input` fields in `values.schema.json` |
-| Customers see install UI on the web | React/Svelte form driven by package schema |
-| Form live-previews resolved values | WASM `applyInputTransforms` in-browser |
-| Customer hits "Install" | Per-install values built server-side, ArgoCD Application created |
-| Deploy to cluster | ArgoCD points at `oci://…/chart@sha256:…` |
-
-### Infrastructure CNAP still owns (not Akua)
-
-1. **Build worker pool** — Temporal workers running Akua per install.
-   Fast (seconds); Akua doesn't need to know it's running as a worker.
-2. **Input registry** — central `uniqueIn` lookup (hostnames, subdomains).
-3. **Secret routing** — `x-secret` fields to Infisical / ESO.
-4. **Install lifecycle** — upgrade flow when product author publishes
-   v2 with new required fields.
-5. **Multi-tenancy surface** — tenant isolation is CNAP's; Akua is
-   stateless per install.
-
-### What Akua gives CNAP that building it from scratch wouldn't
-
-- One core across authoring UI, customer install UI, and build workers.
-  No schema/transform/validation drift.
-- Content-addressable output → "this customer runs exactly sha256:abc" is
-  ground truth.
-- Portable — packages built with Akua can run on any ArgoCD/Flux
-  deployment, not just CNAP. Customer isn't locked in.
-- OSS — external contributors, ecosystem plugins.
-
----
-
-## 10. Phase status
+## 9. Phase status
 
 Phases 0–4 landed. Current state + upcoming work lives in
 [`roadmap.md`](./roadmap.md) to keep this doc focused on *why*.
@@ -452,7 +417,7 @@ Phases 0–4 landed. Current state + upcoming work lives in
 
 ---
 
-## 11. Engine determinism reality check
+## 10. Engine determinism reality check
 
 The original vision was "all engines run as Extism WASM plugins →
 sandboxed, deterministic, browser-portable." Reality after deep
@@ -504,13 +469,13 @@ Findings captured here so we don't re-research. Revisit if:
 
 ---
 
-## 12. Open questions
+## 11. Open questions
 
 1. **`uniqueIn` semantics.** Registry protocol? Who holds state? Akua
-   side has a trait; CNAP side has the impl. Needs API spec.
+   side has a trait; the hosting platform has the impl. Needs API spec.
 2. **Per-install upgrade UX.** When v2 adds required fields, how do we
-   prompt customers without nagging? Notification via CNAP, probably;
-   Akua exposes a "needs attention" diff API.
+   prompt customers without nagging? Notification via the hosting
+   platform, probably; Akua exposes a "needs attention" diff API.
 3. **Engine plugin distribution.** OCI artifact? Crates.io? npm? Extism
    has a convention (OCI). Lean toward that.
 4. **Chart signing.** cosign is consensus; but do we sign the chart

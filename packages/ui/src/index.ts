@@ -7,7 +7,7 @@
  * - ManifestViewer (Kubernetes YAML with diff)
  * - TestRunner (live results)
  *
- * Used by CNAP's hosted Package Studio; reusable in any Svelte app.
+ * Used by hosted Package Studios; reusable in any Svelte app.
  *
  * Status: pre-alpha. Empty exports for now.
  */

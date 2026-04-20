@@ -37,8 +37,8 @@ invocations.
 The Rust core powers three equal consumers:
 
 1. **CLI** — the `akua` binary (also the surface AI coding agents call via their shells)
-2. **Browser** — Chart Studio IDE, customer install UI (via `@akua/core-wasm` from wasm-pack)
-3. **Server embedding** — CNAP's backend linking akua-core as a library in build workers
+2. **Browser** — Package Studio IDE, customer install UI (via `@akua/core-wasm` from wasm-pack)
+3. **Server embedding** — any backend linking akua-core as a library in build workers (e.g. backend services invoking `@akua/sdk`)
 
 Library consumers call into the same crate as the CLI. No privileged code
 path.
@@ -46,11 +46,11 @@ path.
 ## Three build modes
 
 All produce byte-identical OCI artifacts (deterministic engines only — see
-[`design-notes.md §11`](./design-notes.md#11-engine-determinism-reality-check)):
+[`design-notes.md §10`](./design-notes.md#10-engine-determinism-reality-check)):
 
 1. **Local** — `akua build` / `akua publish` on a developer's machine
 2. **CI** — same tool in GitHub Actions / GitLab CI / etc.
-3. **Managed** — CNAP's Temporal workflow runs the same crate server-side
+3. **Managed** — a platform's orchestration layer invokes the same core server-side, producing byte-identical output
 
 ## Component layers
 
@@ -118,9 +118,8 @@ KCL engine compiled into the browser bindings.
 ## See also
 
 - [Vision](./vision.md) — Gen 4 thesis (WASM renderer as universal distribution primitive) + bundle format sketch
-- [Marker spec](./spec-markers.md) — canonical spec for `x-user-input` and `x-input` (the only two JSON Schema extensions Akua defines)
+- [Package format](./package-format.md) — canonical spec for Packages and UI hints via docstrings + `@ui` decorators
 - [Use Cases](./use-cases.md) — end-to-end user journeys (author → install → deploy); both shared-chart and per-customer OCI models with ArgoCD YAML
 - [Design Notes](./design-notes.md) — positioning, invariants, engine determinism reality check
 - [Roadmap](./roadmap.md) — phase-by-phase status
 - [Getting Started](./getting-started.md) — build + first package
-- [CNAP CEP-0008](https://github.com/cnap-tech/cnap/blob/main/internal/cep/20260417-chart-transformation-platform.md) — upstream design narrative (private)

@@ -197,8 +197,8 @@ pub(super) async fn fetch_oci_to_file(
 }
 
 /// Sync wrapper over [`fetch_oci_manifest_digest`]. When a Tokio
-/// runtime is already active (typical inside Temporal workers / async
-/// bin crates), calls `block_on` on the current handle via a
+/// runtime is already active (typical inside async worker processes
+/// and bin crates), calls `block_on` on the current handle via a
 /// `spawn_blocking` detour — avoids building a second runtime. Falls
 /// back to a fresh current-thread runtime for non-async callers (the
 /// CLI `akua inspect` path).

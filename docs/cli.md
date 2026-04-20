@@ -576,9 +576,6 @@ Depending on `--to=<target>`:
 - `--to=kro` — deploy the RGD output to kro
 - `--to=helm` — `helm upgrade --install`
 - `--to=kubectl` — `kubectl apply` directly
-- `--to=fly` — Fly Machines
-- `--to=cf-workers` — Cloudflare Workers
-- `--to=akua` — akua Cloud (commercial)
 - `--to=<custom-driver>` — configured driver
 
 ### Subcommands
@@ -847,7 +844,7 @@ akua infra import <resource>        # bring external resource under management
 
 ## `akua login`
 
-Authenticate to OCI registries or akua Cloud.
+Authenticate to OCI registries and signing providers.
 
 ```
 akua login [registry] [flags]

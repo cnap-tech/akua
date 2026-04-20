@@ -1,7 +1,7 @@
 # Security
 
 Akua's threat model assumes the **package author is untrusted**. A
-Temporal worker, CI runner, or local developer should be able to run
+worker process, CI runner, or local developer should be able to run
 `akua build` / `akua inspect` / `akua render` / `@akua/sdk` calls
 against attacker-controlled `package.yaml` + chart tarballs **without
 an OS-level sandbox** for the vast majority of workflows.
