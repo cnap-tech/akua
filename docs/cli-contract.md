@@ -48,6 +48,65 @@ Same inputs produce byte-identical output. Includes:
 
 Human-facing progress (spinners, color, banners) is suppressed when `--json` is set. Logs go to stderr as JSON-lines if `--log=json`. A `--verbose` flag may add more detail; it must not change the output format.
 
+### 1.5 Agent context auto-detection
+
+When `akua` is invoked inside an AI-agent session, it detects this from the environment and implicitly enables agent-friendly output defaults. The user never has to remember `--json` when an agent runs the command.
+
+**Detection sources**, checked at process start in this order:
+
+| env var set | agent |
+|---|---|
+| `AGENT=<name>` | emerging standard — Goose, Amp, Codex, Cline, OpenCode |
+| `CLAUDECODE=1` | Claude Code |
+| `GEMINI_CLI=1` | Gemini CLI |
+| `CURSOR_CLI=1` | Cursor CLI |
+| `AKUA_AGENT=<name>` | akua-specific fallback for agents we haven't yet matched |
+
+If any of these are set, the invocation is considered to be running in an **agent context**. Individual agents may set additional identifier variables (`GOOSE_TERMINAL`, `AMP_THREAD_ID`, `CODEX_SANDBOX`, `CLINE_ACTIVE`); we key off the primary marker above and record the secondary ones as context.
+
+**What auto-enables when an agent is detected:**
+
+- `--json` output (equivalent to passing the flag explicitly)
+- `--log=json` (structured logs to stderr)
+- `--no-color` (colors off; implicit under `--json` anyway)
+- `--no-progress` (no spinners, no animated output)
+- `--no-interactive` (prompts fail fast with exit code 1 and a clear error instead of blocking on stdin)
+
+**Override semantics** (explicit always wins):
+
+| invocation | result |
+|---|---|
+| `akua render --json` in a human shell | JSON — flag wins |
+| `akua render --no-json` in an agent context | text — explicit opt-out wins |
+| `akua render --format=text` in an agent context | text — explicit override wins |
+| `akua render` in a human shell | text — default |
+| `akua render` in an agent context | JSON — auto-detected |
+
+**Signalling:**
+
+When auto-detection activates, a single structured log entry is written to stderr at `info` level before any output:
+
+```json
+{"level":"info","event":"agent_context_detected","agent":"claude-code","source":"CLAUDECODE"}
+```
+
+The primary stdout output is unchanged — agents parse a clean JSON document without prelude. Only the stderr log carries the signal.
+
+**Opt-out:**
+
+- `AKUA_NO_AGENT_DETECT=1` — disable detection globally (useful for testing human-like output in an agent context, or for CI systems that happen to set agent env vars).
+- `--no-agent-mode` — per-invocation override.
+
+**Telemetry (when opted in):**
+
+The detected agent name is included as an anonymized aggregate in telemetry records (`akua telemetry show` reveals the exact data). Never includes user data, prompts, or file contents — only the agent identifier string. Helps us see which agents are adopting akua and where to invest in compatibility.
+
+**Why this is in the contract:**
+
+The contract's goal is that agents drive akua reliably with minimal ceremony. Requiring `--json` on every invocation is ceremony. Detecting the context and doing the right thing is not. Same discipline as §4 (plan mode), §3 (idempotency keys), §6 (stable IDs) — default-on behaviors that make agent operation pleasant without requiring the agent to remember boilerplate.
+
+Humans running akua in a terminal never notice the detection; their env vars don't match, and the CLI behaves as it always has.
+
 ---
 
 ## 2. Exit codes

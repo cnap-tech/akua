@@ -22,6 +22,24 @@ These flags are accepted by every verb:
 | `--help` / `-h` | help for this verb |
 | `--describe --json` | machine-readable spec of this verb |
 | `--no-color` | disable terminal colors (implicit under `--json`) |
+| `--no-interactive` | never block on stdin; fail with exit 1 if input is missing (implicit in agent context) |
+| `--no-agent-mode` | disable agent-context auto-detection for this invocation |
+
+### Agent-context auto-detection
+
+When `akua` is run inside an AI-agent session, it detects this from env vars and auto-enables `--json`, `--log=json`, `--no-color`, `--no-progress`, and `--no-interactive`. Detection is keyed off `AGENT=<name>` (standard), `CLAUDECODE`, `GEMINI_CLI`, `CURSOR_CLI`, or `AKUA_AGENT`. Explicit flags always override detection.
+
+```sh
+# Human shell — text output
+$ akua render
+[pretty text output]
+
+# Agent context — auto-JSON, no flag needed
+$ CLAUDECODE=1 akua render
+{"outputs":[...],"policy":{...}}
+```
+
+See [cli-contract.md §1.5](cli-contract.md#15-agent-context-auto-detection) for the full detection rules, override semantics, and env-var reference.
 
 ---
 
@@ -873,6 +891,8 @@ Used in CI to catch contract violations before release.
 
 A minimal set. No hidden state.
 
+### akua-specific
+
 | var | purpose |
 |---|---|
 | `AKUA_REGISTRY` | default OCI registry for publish/pull |
@@ -880,8 +900,24 @@ A minimal set. No hidden state.
 | `AKUA_LOG_LEVEL` | override `--log-level` |
 | `AKUA_NO_TELEMETRY` | force telemetry off (for CI) |
 | `AKUA_TOKEN_FILE` | path to a token file for non-interactive auth |
+| `AKUA_AGENT` | signal an agent context explicitly (value is the agent name) |
+| `AKUA_NO_AGENT_DETECT` | disable agent-context auto-detection |
 
-All of these can be overridden by flags. Agents pass flags explicitly; environment variables are for convenience.
+All of these can be overridden by flags where a flag exists. Humans typically set nothing; agents typically set nothing (their environment already identifies them).
+
+### Agent-context env vars (detected, never written)
+
+These are set by agent runtimes, not by akua. akua reads them to determine whether it's running in an agent context.
+
+| var | set by |
+|---|---|
+| `AGENT=<name>` | Goose (`goose`), Amp (`amp`), Codex (`codex`), Cline (`cline`), OpenCode (`opencode`) — emerging standard |
+| `CLAUDECODE=1` | Claude Code |
+| `GEMINI_CLI=1` | Gemini CLI |
+| `CURSOR_CLI=1` | Cursor CLI |
+| `GOOSE_TERMINAL=1`, `AMP_THREAD_ID=<id>`, `CODEX_SANDBOX=<id>`, `CLINE_ACTIVE=true` | secondary identifiers per agent — recorded as context |
+
+See [cli-contract.md §1.5](cli-contract.md#15-agent-context-auto-detection) for detection rules and precedence.
 
 ---
 
