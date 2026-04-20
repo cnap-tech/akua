@@ -8,8 +8,8 @@ Read this first. Every other example adds exactly one concept over this one.
 
 ```
 01-hello-webapp/
-├── akua.mod          declared deps (one Helm chart — upstream nginx)
-├── akua.sum          digest + signature ledger (machine-maintained)
+├── akua.toml          declared deps (one Helm chart — upstream nginx)
+├── akua.lock          digest + signature ledger (machine-maintained)
 ├── package.k         the Package itself
 ├── inputs.yaml       sample inputs satisfying the Input schema
 └── README.md
@@ -17,7 +17,7 @@ Read this first. Every other example adds exactly one concept over this one.
 
 ## The four regions in `package.k`
 
-1. **Imports** — `akua.helm` (engine callable), `akua.ui` (decorator home), `charts.nginx` (resolved from `akua.mod`).
+1. **Imports** — `akua.helm` (engine callable), `akua.ui` (decorator home), `charts.nginx` (resolved from `akua.toml`).
 2. **Schema** — `Input` with four fields. `hostname` is required; `name`, `replicas`, `tls` have defaults. Docstrings become UI labels; `@ui` decorators add ordering, groups, placeholders, widget hints.
 3. **Body** — one call to `helm.template(...)` wiring our public schema into the chart's native values. No fork of the chart needed.
 4. **Outputs** — a single raw-manifest output written to `./rendered`.
@@ -25,7 +25,7 @@ Read this first. Every other example adds exactly one concept over this one.
 ## Run
 
 ```sh
-akua add                                 # resolve deps → writes akua.sum
+akua add                                 # resolve deps → writes akua.lock
 akua render --inputs inputs.yaml         # render to ./rendered/
 ls rendered/                             # deployment.yaml, service.yaml, ingress.yaml, ...
 ```

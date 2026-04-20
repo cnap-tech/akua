@@ -6,8 +6,8 @@ Two Helm charts composed into one Package. A webapp consumes a Postgres connecti
 
 ```
 02-webapp-postgres/
-├── akua.mod             declares charts.cnpg and charts.webapp
-├── akua.sum             digest + signature ledger
+├── akua.toml             declares charts.cnpg and charts.webapp
+├── akua.lock             digest + signature ledger
 ├── package.k            the Package — two helm.template() calls + aggregation
 ├── test_package.k       KCL unit tests for the schema + defaults
 ├── inputs.yaml          sample inputs

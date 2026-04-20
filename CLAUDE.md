@@ -8,7 +8,7 @@ akua is the **bun/deno pattern applied to cloud-native infrastructure**. One bin
 
 | bun / deno has | akua has |
 |---|---|
-| package manager | `akua add` / `akua pull` / `akua publish` + `akua.mod` + `akua.sum` |
+| package manager | `akua add` / `akua pull` / `akua publish` + `akua.toml` + `akua.lock` |
 | runtime (executes your program) | `akua render` (executes a Package's KCL + engine calls) |
 | test runner | `akua test` (*_test.rego + test_*.k, golden tests) |
 | formatter | `akua fmt` (.k + .rego) |
@@ -39,7 +39,7 @@ Plus: deploy driver (`akua deploy`), observability query (`akua query`), policy 
 | CLI invariants (universal contract) | [docs/cli-contract.md](docs/cli-contract.md) |
 | Package authoring shape | [docs/package-format.md](docs/package-format.md) |
 | Policy authoring shape | [docs/policy-format.md](docs/policy-format.md) |
-| `akua.mod` + `akua.sum` | [docs/lockfile-format.md](docs/lockfile-format.md) |
+| `akua.toml` + `akua.lock` | [docs/lockfile-format.md](docs/lockfile-format.md) |
 | Embedded engines (KCL / Helm / OPA / Regal / Kyverno / CEL / Kustomize) | [docs/embedded-engines.md](docs/embedded-engines.md) |
 | Agent install + skill format | [docs/agent-usage.md](docs/agent-usage.md) |
 | TypeScript SDK | [docs/sdk.md](docs/sdk.md) |
@@ -66,7 +66,7 @@ Violations of these are architectural bugs:
 ## Architecture discipline
 
 - **Substrate, not content.** We do not curate a package catalog. Upstream projects publish their own signed packages; akua provides signing + distribution + diff + audit infrastructure. Same logic for policy: Rego is a host, not a DSL we own.
-- **External engines as compile-resolved imports or callable functions.** `helm.template(...)`, `rgd.instantiate(...)`, `kustomize.build(...)` are KCL callables. Kyverno / CEL / foreign Rego are `import data.…` in Rego, resolved via `akua.mod`. Never runtime string lookups like `kyverno.check({bundle: "oci://..."})`.
+- **External engines as compile-resolved imports or callable functions.** `helm.template(...)`, `rgd.instantiate(...)`, `kustomize.build(...)` are KCL callables. Kyverno / CEL / foreign Rego are `import data.…` in Rego, resolved via `akua.toml`. Never runtime string lookups like `kyverno.check({bundle: "oci://..."})`.
 - **Embedded by default.** KCL, Helm, OPA, Regal, Kustomize, kro offline instantiator, CEL, Kyverno-to-Rego converter are all bundled into the akua binary via wasmtime (Rust engines linked directly). `$PATH` never required. Shell-out available as escape hatch via `--engine=shell`.
 - **Compose with the ecosystem, don't replace it.** ArgoCD, Flux, kro, Helm release lifecycle, kubectl, Crossplane are first-class consumers of akua output. We target their formats (`RawManifests`, `HelmChart`, `ResourceGraphDefinition`, `Crossplane`, `OCIBundle`). We don't ask customers to switch reconcilers.
 
@@ -93,7 +93,7 @@ akua check          # fast syntax / type / dep check, no execution
 akua fmt --check    # fail CI if any file needs formatting
 akua lint           # Regal + kcl lint + cross-engine
 akua test           # unit tests (*_test.rego, test_*.k) + golden
-akua verify         # akua.mod ↔ akua.sum integrity + cosign
+akua verify         # akua.toml ↔ akua.lock integrity + cosign
 akua policy check   # when policy changed; verdict must be allow
 ```
 

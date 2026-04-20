@@ -1,6 +1,6 @@
 # Example 07 — package reuse
 #
-# Composes a base Package (pinned by OCI digest in akua.mod) and adds local
+# Composes a base Package (pinned by OCI digest in akua.toml) and adds local
 # resources on top. The base's Input schema nests into this Package's Input,
 # preserving end-to-end type safety.
 #
@@ -10,7 +10,7 @@
 
 import akua.pkg                            # package-as-source engine callable
 import akua.ui as ui
-import packages.platform_base as base      # pinned via akua.mod / akua.sum
+import packages.platform_base as base      # pinned via akua.toml / akua.lock
 
 schema Input:
     """Public input. Composes the base's schema under .base."""

@@ -37,7 +37,7 @@ akua is a pre-alpha project; the pivot is a **surgical rewrite, not a greenfield
 
 | Component | Scope |
 |---|---|
-| `crates/akua-core/src/mod_file.rs` | `akua.mod` / `akua.sum` parser + resolver (go-mod shape) |
+| `crates/akua-core/src/mod_file.rs` | `akua.toml` / `akua.lock` parser + resolver (go-mod shape) |
 | `crates/akua-core/src/kcl_package.rs` | `Package.k` loader invoking embedded KCL interpreter via `kclvm-rs` |
 | `crates/akua-core/src/policy.rs` | Embedded OPA evaluator, Rego module loader, compile-resolved import graph |
 | `crates/akua-core/src/embedded/kustomize.rs` | Kustomize wasip1 embedding |
@@ -91,7 +91,7 @@ Within each phase, tasks execute in a partially ordered DAG. Agents pick up any 
 **Phase A dependency graph (example):**
 
 ```
-  [A.1] akua.mod/sum parser        ──┐
+  [A.1] akua.toml/sum parser        ──┐
                                      ├─▶  [A.4] CLI skeleton  ──▶  [A.7] examples/01 renders end-to-end
   [A.2] KCL Package loader         ──┤
                                      │
@@ -114,15 +114,15 @@ Each task below is sized for a single agent session (~1–3 hours of focused wor
 
 ### Phase A — Foundation
 
-**A.1 — `akua.mod` + `akua.sum` parser**
+**A.1 — `akua.toml` + `akua.lock` parser**
 - Spec: [`lockfile-format.md`](./lockfile-format.md)
-- Deliverable: `crates/akua-core/src/mod_file.rs` — TOML parse, dep-form discrimination (oci/git/path/replace), workspace member resolution, `akua.sum` digest+signature ledger read/write.
+- Deliverable: `crates/akua-core/src/mod_file.rs` — TOML parse, dep-form discrimination (oci/git/path/replace), workspace member resolution, `akua.lock` digest+signature ledger read/write.
 - Tests: round-trip every example in the spec; reject malformed inputs with typed errors.
 - No network calls in parser; digest resolution is a separate concern.
 
 **A.2 — `Package.k` loader (KCL evaluation)**
 - Spec: [`package-format.md`](./package-format.md)
-- Deliverable: `crates/akua-core/src/kcl_package.rs` — wrap `kclvm-rs` crate; extract schema, resolve imports (against `akua.mod`), expose `Input` schema for inspection.
+- Deliverable: `crates/akua-core/src/kcl_package.rs` — wrap `kclvm-rs` crate; extract schema, resolve imports (against `akua.toml`), expose `Input` schema for inspection.
 - Tests: `examples/01-hello-webapp/Package.k` parses, schema extractable, import graph resolves.
 - Carry-forward: reuse `kcl-lang` git dep from v0.3.
 
@@ -144,7 +144,7 @@ Each task below is sized for a single agent session (~1–3 hours of focused wor
 
 **A.6 — `akua publish` + `akua verify`**
 - Carry-forward: `crates/akua-core/src/publish.rs` + `attest.rs`.
-- Deliverable: wire existing OCI push + SLSA emission to the new verb surface. Consume `akua.sum` for reproducibility checks.
+- Deliverable: wire existing OCI push + SLSA emission to the new verb surface. Consume `akua.lock` for reproducibility checks.
 - Tests: round-trip publish + verify against local OCI registry (zot).
 - Depends on: A.1, A.4.
 
@@ -200,7 +200,7 @@ Each task below is sized for a single agent session (~1–3 hours of focused wor
 
 **C.2 — Compile-resolved policy imports**
 - Spec: [`policy-format.md`](./policy-format.md)
-- Deliverable: `akua.mod` imports like `tier-prod = { oci = "oci://policies.akua.dev/tier/production", version = "1.2.0" }` resolve at compile time; Rego modules mount as `data.akua.policies.tier.production`. Never runtime string lookups.
+- Deliverable: `akua.toml` imports like `tier-prod = { oci = "oci://policies.akua.dev/tier/production", version = "1.2.0" }` resolve at compile time; Rego modules mount as `data.akua.policies.tier.production`. Never runtime string lookups.
 
 **C.3 — `akua policy check`**
 - Deliverable: verdict path returns `{allow | deny | needs-approval}` + structured reasons.
@@ -210,13 +210,13 @@ Each task below is sized for a single agent session (~1–3 hours of focused wor
 - Spec: [`cli.md`](./cli.md) `test`.
 
 **C.5 — Kyverno-to-Rego converter**
-- Deliverable: `crates/akua-core/src/embedded/kyverno.rs` — take a Kyverno ClusterPolicy YAML, emit equivalent Rego. Consumed at compile time via `akua.mod`.
+- Deliverable: `crates/akua-core/src/embedded/kyverno.rs` — take a Kyverno ClusterPolicy YAML, emit equivalent Rego. Consumed at compile time via `akua.toml`.
 
 **C.6 — Policy tier publishing**
 - Deliverable: `tier/dev`, `tier/startup`, `tier/production`, `tier/audit-ready` authored in Rego, published as signed OCI artifacts under `oci://policies.akua.dev/...`.
 
 **C.7 — policy composition convention**
-- Deliverable: document the conventional shape of a workspace's Rego layout — local `.rego` files in `./policies/`, tiers imported via `akua.mod` as compile-resolved `data.*`. No akua-specified `PolicySet` kind; users compose Rego files freely.
+- Deliverable: document the conventional shape of a workspace's Rego layout — local `.rego` files in `./policies/`, tiers imported via `akua.toml` as compile-resolved `data.*`. No akua-specified `PolicySet` kind; users compose Rego files freely.
 
 **Phase C exit gate:** a PR on a test workspace that violates `tier/production` is blocked with a line-precise deny verdict.
 

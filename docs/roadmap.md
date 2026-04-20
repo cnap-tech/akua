@@ -33,7 +33,7 @@ Implementation plan details (agent-driven rewrite, milestone criteria, task deco
 Goal: the interface-spec's load-bearing contracts exist as working code, even if surface is minimal.
 
 - CLI skeleton honoring [`cli-contract.md`](./cli-contract.md): `--json`, `--plan`, typed exit codes, idempotency keys, `--timeout`, agent auto-detection, structured errors.
-- `akua.mod` + `akua.sum` parser and resolver (go-mod shape; see [`lockfile-format.md`](./lockfile-format.md)).
+- `akua.toml` + `akua.lock` parser and resolver (go-mod shape; see [`lockfile-format.md`](./lockfile-format.md)).
 - `Package.k` loader: parse KCL Package with the embedded `kclvm-rs` interpreter; extract schema, resolve imports.
 - `akua check` (fast syntax + type check, no execution), `akua fmt`, `akua lint` (embedded Regal + kcl lint).
 - `akua render` on a single-engine Package (KCL-only to start).
@@ -63,11 +63,11 @@ Exit gate: [`examples/02-webapp-postgres`](./examples/02-webapp-postgres/) (CNPG
 Goal: Rego as host language for Policies with compile-resolved imports; embedded OPA.
 
 - Embedded OPA evaluator.
-- `akua.mod` compile-resolved imports: `import data.akua.policies.tier.production` pulls OCI artifact, verifies signature, mounts as Rego data.
+- `akua.toml` compile-resolved imports: `import data.akua.policies.tier.production` pulls OCI artifact, verifies signature, mounts as Rego data.
 - `akua policy check` verdict path (`allow` / `deny` / `needs-approval`).
 - `akua test` for Rego (`*_test.rego`) + KCL (`test_*.k`).
 - Policy tiers shipped as signed OCI artifacts: `tier/dev`, `tier/startup`, `tier/production`, `tier/audit-ready`.
-- Workspace policy composition convention: local `.rego` files under `./policies/` importing tiers as compile-resolved data via `akua.mod`. No akua-owned PolicySet kind.
+- Workspace policy composition convention: local `.rego` files under `./policies/` importing tiers as compile-resolved data via `akua.toml`. No akua-owned PolicySet kind.
 
 Exit gate: policy tier published + consumed round-trip. Deny verdict on an over-quota App is line-precise.
 

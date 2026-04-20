@@ -39,7 +39,7 @@ Check a policy:
 
 ```sh
 cd examples/04-policy-tier
-akua add                 # resolve deps → writes akua.sum
+akua add                 # resolve deps → writes akua.lock
 akua policy check --tier=./policies --input=fixtures/good.yaml
 akua policy check --tier=./policies --input=fixtures/bad.yaml
 akua test policies/
@@ -70,6 +70,6 @@ Beyond 07, realistic workspaces combine these patterns at scale. See the [use ca
 - [cli-contract.md](../docs/cli-contract.md) — the universal verb invariants
 - [package-format.md](../docs/package-format.md) — Package authoring spec
 - [policy-format.md](../docs/policy-format.md) — Policy authoring spec
-- [lockfile-format.md](../docs/lockfile-format.md) — `akua.mod` + `akua.sum`
+- [lockfile-format.md](../docs/lockfile-format.md) — `akua.toml` + `akua.lock`
 - [sdk.md](../docs/sdk.md) — TypeScript SDK
 - [architecture.md](../docs/architecture.md) — why the pipeline is shaped this way

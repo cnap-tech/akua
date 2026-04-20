@@ -1,5 +1,5 @@
-# akua.mod — human-edited manifest of declared deps.
-# Machine-maintained digest + signature ledger lives in akua.sum.
+# akua.toml — human-edited manifest of declared deps.
+# Machine-maintained digest + signature ledger lives in akua.lock.
 
 [package]
 name    = "04-policy-tier"

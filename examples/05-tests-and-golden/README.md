@@ -18,8 +18,8 @@ akua test --update-golden   # overwrite golden with current render (use carefull
 
 ```
 05-tests-and-golden/
-├── akua.mod
-├── akua.sum
+├── akua.toml
+├── akua.lock
 ├── package.k                     the Package under test
 ├── test_package.k                KCL unit tests
 ├── policies/

@@ -1,5 +1,5 @@
-# akua.mod — declared deps. Human-edited.
-# Machine-maintained digest + signature ledger lives in akua.sum.
+# akua.toml — declared deps. Human-edited.
+# Machine-maintained digest + signature ledger lives in akua.lock.
 
 [package]
 name    = "01-hello-webapp"

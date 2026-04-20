@@ -9,7 +9,7 @@ akua's policy architecture mirrors its packaging architecture. One host language
 | Composition via | `import` + schema inheritance | `import` + rule merging |
 | External engines | `helm.template`, `rgd.instantiate`, `kustomize.build` | Kyverno, CEL, KCL `check:`, custom |
 | External engine form | KCL callable functions | **compile-resolved `import data.…`** |
-| Package manager | `akua.mod` + `akua.sum` | `akua.mod` + `akua.sum` (same file) |
+| Package manager | `akua.toml` + `akua.lock` | `akua.toml` + `akua.lock` (same file) |
 | Runtime | `kclvm` (WASM) | embedded OPA |
 
 Policy in akua is always Rego at evaluation time. Everything else is either a schema-level `check:` block in KCL (caught during package render) or a foreign artifact compiled to Rego at build time.
@@ -50,7 +50,7 @@ package akua.policies.my_org_production
 
 import future.keywords
 
-# Compile-resolved imports (pinned in akua.mod, verified via akua.sum)
+# Compile-resolved imports (pinned in akua.toml, verified via akua.lock)
 import data.akua.policies.tier.production
 import data.akua.policies.kyverno.security
 import data.akua.policies.cel.my_expressions
@@ -103,7 +103,7 @@ Three strategies for bringing non-Rego policy content in:
 Another Rego policy bundle. Direct import; no conversion.
 
 ```toml
-# akua.mod
+# akua.toml
 [dependencies]
 tier-prod = { oci = "oci://policies.akua.dev/tier/production", version = "1.2.0" }
 ```
@@ -118,7 +118,7 @@ deny[msg] { tier.production.deny[msg] }
 Kyverno ships policies as Kubernetes CRDs with a native YAML DSL. akua's `akua add policy <kyverno-ref>` uses an embedded Kyverno→Rego converter to compile the bundle into Rego modules stored under `./.akua/policies/vendor/`.
 
 ```toml
-# akua.mod
+# akua.toml
 [dependencies]
 kyverno-security = { oci = "oci://policies.akua.dev/kyverno/security", version = "2.0.0" }
 ```
@@ -269,7 +269,7 @@ akua init policy my-org-production
 
 ```sh
 akua add policy oci://policies.akua.dev/tier/production --version 1.2.0
-# adds to akua.mod + akua.sum; makes 'data.akua.policies.tier.production' importable
+# adds to akua.toml + akua.lock; makes 'data.akua.policies.tier.production' importable
 ```
 
 ### Import a Kyverno bundle

@@ -111,7 +111,7 @@ class Akua {
 
   // Deploy loop
   dev(opts?: DevOptions): Promise<DevSession>;
-  verify(opts?: VerifyOptions): Promise<VerifyResult>;  // checks akua.mod ↔ akua.sum
+  verify(opts?: VerifyOptions): Promise<VerifyResult>;  // checks akua.toml ↔ akua.lock
 
   // Session
   login(opts: LoginOptions): Promise<void>;
@@ -744,7 +744,7 @@ interface ExportResult {
 }
 
 interface VerifyResult {
-  valid: boolean;                    // akua.mod ↔ akua.sum consistency
+  valid: boolean;                    // akua.toml ↔ akua.lock consistency
   issues: Array<{
     dep: string;
     issue: 'digest-mismatch' | 'signature-invalid' | 'unsigned' | 'missing';
@@ -896,10 +896,10 @@ The SDK's types mirror the underlying format specs. For the authoritative data s
 
 - **Package** (KCL program, the one akua-specified shape) — [package-format.md](package-format.md)
 - **Policy** (Rego host + pluggable engines) — [policy-format.md](policy-format.md)
-- **Lockfile** (`akua.mod` + `akua.sum`) — [lockfile-format.md](lockfile-format.md)
+- **Lockfile** (`akua.toml` + `akua.lock`) — [lockfile-format.md](lockfile-format.md)
 - **CLI contract** (invariants every method honors) — [cli-contract.md](cli-contract.md)
 - **CLI reference** (the verbs the SDK methods mirror) — [cli.md](cli.md)
 - **Embedded engines** (`engine?: 'auto' | 'embedded' | 'shell'`) — [embedded-engines.md](embedded-engines.md)
 - **Agent usage + auto-detection** — [agent-usage.md](agent-usage.md)
 
-TypeScript types in `@akua/sdk` are generated from the same akua-specified schemas the CLI consumes (Package, Policy, akua.mod — the shapes akua owns), so a field shape in the SDK always matches the file-format spec. When the spec evolves, the generated types follow on the next `@akua/sdk` release.
+TypeScript types in `@akua/sdk` are generated from the same akua-specified schemas the CLI consumes (Package, Policy, akua.toml — the shapes akua owns), so a field shape in the SDK always matches the file-format spec. When the spec evolves, the generated types follow on the next `@akua/sdk` release.

@@ -4,12 +4,12 @@
 # four public inputs with UI hints, raw-manifest output.
 #
 # Render:
-#   akua add                              # resolve deps → writes akua.sum
+#   akua add                              # resolve deps → writes akua.lock
 #   akua render --inputs inputs.yaml      # render to ./rendered by default
 
 import akua.helm
 import akua.ui as ui            # @ui decorator lives here
-import charts.nginx as nginx    # resolved from akua.mod
+import charts.nginx as nginx    # resolved from akua.toml
 
 schema Input:
     """Public inputs for the hello-webapp Package."""

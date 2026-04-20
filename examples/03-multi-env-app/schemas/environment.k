@@ -11,7 +11,7 @@ schema Environment:
     name: str
 
     # Which policy tier the environment enforces (see ../policies/ or
-    # any `tier/*` published to OCI and pinned in akua.mod).
+    # any `tier/*` published to OCI and pinned in akua.toml).
     policy: str
 
     # Cluster + region binding.

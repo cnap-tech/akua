@@ -33,7 +33,7 @@ In a managed-SaaS model, operator and customer collapse into "the tenant," and t
     (helm / kcl /      │      akua fmt --check
      kustomize / ...)  │
                        │      akua publish       ──────────────▶  signed + attested
-    akua.mod / .sum   ─┘      (cosign + SLSA v1)                   OCI artifact
+    akua.toml / .sum   ─┘      (cosign + SLSA v1)                   OCI artifact
 ```
 
 Every verb honors [`cli-contract.md`](./cli-contract.md): `--json`, `--plan`, typed exit codes, structured errors, determinism.

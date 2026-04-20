@@ -10,7 +10,7 @@ package akua.policies.my_org_production
 
 import future.keywords
 
-# Compile-resolved imports. Declared in akua.mod, pinned by digest in akua.sum.
+# Compile-resolved imports. Declared in akua.toml, pinned by digest in akua.lock.
 # Never runtime string lookups — `kyverno.check({bundle: "oci://..."})` is
 # explicitly disallowed.
 import data.akua.policies.tier.production as base_tier

@@ -14,8 +14,8 @@ This is the "realistic monorepo Package" shape. Most production Packages have 2�
 
 ```
 06-multi-engine/
-├── akua.mod
-├── akua.sum
+├── akua.toml
+├── akua.lock
 ├── package.k                      the Package; mixes Helm + Kustomize + kro + inline KCL
 ├── overlays/                      Kustomize overlay (local source)
 │   ├── kustomization.yaml
@@ -36,7 +36,7 @@ import charts.webapp    as webapp
 import rgds.platform    as platform
 ```
 
-`charts.webapp` resolves to an OCI-published Helm chart via `akua.mod`. `rgds.platform` resolves to an OCI-published kro `ResourceGraphDefinition` via `akua.mod`. `akua.helm` / `akua.kustomize` / `akua.rgd` are engine callables shipped with the binary.
+`charts.webapp` resolves to an OCI-published Helm chart via `akua.toml`. `rgds.platform` resolves to an OCI-published kro `ResourceGraphDefinition` via `akua.toml`. `akua.helm` / `akua.kustomize` / `akua.rgd` are engine callables shipped with the binary.
 
 ### Four sources
 

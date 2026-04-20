@@ -2,7 +2,7 @@
 
 The canonical shape of an akua Package. A Package is a reusable definition authored in **KCL** and published as a signed OCI artifact. `Package.k` is the only shape akua itself specifies; higher-level workspace concepts (App / Environment / Cluster / PolicySet / etc.) are user-defined KCL schemas in the consumer's workspace, not akua-owned kinds.
 
-This document specifies what a `package.k` file may contain. Companion references: [lockfile-format.md](lockfile-format.md) for `akua.mod` / `akua.sum`, [policy-format.md](policy-format.md) for Rego.
+This document specifies what a `package.k` file may contain. Companion references: [lockfile-format.md](lockfile-format.md) for `akua.toml` / `akua.lock`, [policy-format.md](policy-format.md) for Rego.
 
 ---
 
@@ -49,10 +49,10 @@ An import brings one of three things into scope:
 | import form | purpose | pinned by |
 |---|---|---|
 | `import akua.<engine>` | a source-engine callable (`helm`, `rgd`, `kustomize`, `oci`) | the akua CLI version |
-| `import charts.<name>` | a typed source package previously added via `akua add` | `akua.mod` |
+| `import charts.<name>` | a typed source package previously added via `akua add` | `akua.toml` |
 | `import <local/path>` | a local KCL module within this package | the filesystem |
 
-Imports are resolved at build time against `akua.mod` (declared deps) and verified against `akua.sum` (digest + signature). Failed verification is a compile error. A missing pin is a compile error.
+Imports are resolved at build time against `akua.toml` (declared deps) and verified against `akua.lock` (digest + signature). Failed verification is a compile error. A missing pin is a compile error.
 
 Engine callables live at `akua.*`:
 
@@ -336,7 +336,7 @@ metadata = {
 }
 ```
 
-All fields optional; missing fields default to package-name-and-version derived from `akua.mod`. Publishing may require a `license` field depending on registry rules.
+All fields optional; missing fields default to package-name-and-version derived from `akua.toml`. Publishing may require a `license` field depending on registry rules.
 
 ---
 
@@ -360,13 +360,13 @@ Violation of any of these is a compile error with a clear message.
 
 1. Parses `package.k` and type-checks the program.
 2. Loads `input` from inputs file (YAML or KCL). Validates against the `Input` schema.
-3. Resolves dependencies via `akua.mod` / `akua.sum`. Pulls and verifies signed artifacts.
+3. Resolves dependencies via `akua.toml` / `akua.lock`. Pulls and verifies signed artifacts.
 4. Evaluates the KCL program. Every engine call happens here (in-process, sandboxed).
 5. Collects the `resources` list and partitions by output routing.
 6. Emits each output according to its `kind`.
 7. Writes `attestation.json` (SLSA v1 predicate) to the primary output directory.
 
-Every step is deterministic: same inputs + same `akua.sum` + same `akua` version → byte-identical output.
+Every step is deterministic: same inputs + same `akua.lock` + same `akua` version → byte-identical output.
 
 ---
 
@@ -491,7 +491,7 @@ Packages without tests ship with a lint warning; platform teams can enforce a po
 ## 12. Relationship to other docs
 
 - **[cli.md — `akua init` / `akua add` / `akua render` / `akua export` / `akua test` / `akua publish`](cli.md)** — the verbs that operate on packages. `render` runs the program; `export` converts the canonical form to a view.
-- **[lockfile-format.md](lockfile-format.md)** — how `akua.mod` + `akua.sum` pin imports
+- **[lockfile-format.md](lockfile-format.md)** — how `akua.toml` + `akua.lock` pin imports
 - **[policy-format.md](policy-format.md)** — how Rego policies evaluate against rendered resources (separate concern from `check:` blocks)
 - **[embedded-engines.md](embedded-engines.md)** — which engines run your tests
 - **[examples/](../examples/)** — runnable Packages at increasing complexity

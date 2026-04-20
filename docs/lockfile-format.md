@@ -1,9 +1,9 @@
-# `akua.mod` and `akua.sum`
+# `akua.toml` and `akua.lock`
 
-akua's package manager is modeled on Go's: a human-edited manifest of declared intent, and a machine-maintained ledger of resolved digests + signatures.
+akua's package manager is modeled on Go's two-file split but uses TOML for both files (the format Cargo, Poetry, and pnpm adopted for richer dep graphs than Go's directive syntax expresses).
 
-- **`akua.mod`** — what you asked for. Declared deps, version constraints, workspace members. Human-edited.
-- **`akua.sum`** — what you got. Digest and cosign signature per resolved artifact. Machine-maintained, never hand-edited.
+- **`akua.toml`** — what you asked for. Declared deps, version constraints, workspace members, package metadata. Human-edited.
+- **`akua.lock`** — what you got. One `[[package]]` entry per resolved artifact with digest + cosign signature + optional transitive dep references. Machine-maintained, never hand-edited.
 
 Both files are TOML. Both are checked into git. Both are required.
 
@@ -15,18 +15,24 @@ Clear separation of concerns:
 
 | | intent | evidence |
 |---|---|---|
-| file | `akua.mod` | `akua.sum` |
-| edited by | human | `akua add` / `akua pull` |
-| shape | small, stable | large, churn on every upgrade |
-| review focus | "do we want this dep?" | "is this the expected digest?" |
+| file | `akua.toml` | `akua.lock` |
+| edited by | human | `akua add` / `akua pull` / `akua publish` / `akua update` |
+| shape | small, stable | may be large; churns on every resolved-version change |
+| review focus | "do we want this dep?" | "is this the expected digest + signature?" |
 
-A PR that modifies `akua.sum` but not `akua.mod` is automatically suspicious (someone changed what they got without changing what they asked for). CI can lint for this.
+A PR that modifies `akua.lock` but not `akua.toml` is automatically suspicious (someone changed what they got without changing what they asked for). CI can lint for this.
 
-Merged-lockfile alternatives (npm's `package-lock.json`, Cargo's `Cargo.lock`) bundle both concerns into one file; we prefer Go's split for review hygiene.
+Merged-lockfile alternatives (npm's `package-lock.json`, Cargo's `Cargo.lock` *with* deps embedded in `Cargo.toml`) bundle both concerns differently; we take Go's split (intent vs evidence in separate files) and Cargo's structured-TOML lockfile (so we can express a richer dep graph than go.sum's line-per-hash format).
+
+### Naming
+
+- Lowercase throughout — matches `go.mod`, `poetry.lock`, `pnpm-lock.yaml`, `pyproject.toml` (every lockfile shipped after ~2014 went lowercase).
+- `.toml` extension on the manifest — honest about the format; editors pick up TOML highlighting automatically.
+- No extension on the lockfile — matches `Cargo.lock` / `poetry.lock` / `yarn.lock` / `package-lock.json` convention (lockfile name is descriptive; the tool knows the format).
 
 ---
 
-## `akua.mod`
+## `akua.toml`
 
 ### Top-level structure
 
@@ -64,15 +70,15 @@ edition = "akua.dev/v1alpha1"
 
 [dependencies]
 # KCL sources
-k8s       = { oci = "oci://ghcr.io/kcl-lang/k8s",              version = "1.31.2" }
+k8s       = { oci = "oci://ghcr.io/kcl-lang/k8s",                  version = "1.31.2" }
 cnpg      = { oci = "oci://ghcr.io/cloudnative-pg/charts/cluster", version = "0.20.0" }
-webapp    = { oci = "oci://ghcr.io/acme/charts/webapp",        version = "2.1.0" }
+webapp    = { oci = "oci://ghcr.io/acme/charts/webapp",            version = "2.1.0" }
 
 # Rego policies (compile-resolved as data. imports — see policy-format.md)
-tier-prod = { oci = "oci://policies.akua.dev/tier/production", version = "1.2.0" }
-kyv-sec   = { oci = "oci://policies.akua.dev/kyverno/security", version = "2.0.0" }
+tier-prod = { oci = "oci://policies.akua.dev/tier/production",   version = "1.2.0" }
+kyv-sec   = { oci = "oci://policies.akua.dev/kyverno/security",  version = "2.0.0" }
 
-# Local fork for debugging (points at sibling directory)
+# Local fork for debugging
 our-glue  = { oci = "oci://pkg.acme.internal/glue", version = "0.3.0",
               replace = { path = "../glue-fork" } }
 ```
@@ -90,44 +96,76 @@ our-glue  = { oci = "oci://pkg.acme.internal/glue", version = "0.3.0",
 | `[package].name` | yes | a valid KCL package identifier |
 | `[package].version` | yes | semver |
 | `[package].edition` | yes | `akua.dev/v1alpha1` for v0 compatibility |
+| `[package].strictSigning` | no | default `true`; set `false` to permit unsigned deps (discouraged) |
 | `[workspace].members` | no | glob patterns; enables monorepo |
 | `[dependencies]` | yes (can be empty) | see dependency forms above |
 
 ---
 
-## `akua.sum`
+## `akua.lock`
+
+Cargo.lock-flavored TOML: one `[[package]]` entry per resolved artifact, alphabetically ordered, with optional `dependencies` for the transitive graph.
 
 ### Format
 
-A plain-text line-per-dependency-per-version file. Each line is:
+```toml
+# akua.lock — machine-maintained. Never hand-edit.
+# Regenerated by `akua add`, `akua pull`, `akua publish`, `akua update`.
 
-```
-<name> <version> <source-ref> <digest> <signature>
+version = 1   # lockfile format version; bumped on incompatible changes
+
+[[package]]
+name    = "cnpg"
+version = "0.20.0"
+source  = "oci://ghcr.io/cloudnative-pg/charts/cluster"
+digest  = "sha256:3c5d9e7f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d"
+signature = "cosign:sigstore:cloudnative-pg"
+
+[[package]]
+name    = "webapp"
+version = "2.1.0"
+source  = "oci://ghcr.io/acme/charts/webapp"
+digest  = "sha256:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+signature = "cosign:key:acme"
+dependencies = [
+  "common@2.20.0",
+]
+
+[[package]]
+name    = "common"
+version = "2.20.0"
+source  = "oci://ghcr.io/bitnamicharts/common"
+digest  = "sha256:f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0"
+signature = "cosign:sigstore:bitnamicharts"
 ```
 
-Columns are whitespace-separated. Example:
+### Fields per `[[package]]`
 
-```
-k8s        1.31.2  oci://ghcr.io/kcl-lang/k8s                        sha256:a1b2c3…  cosign:sigstore:…
-cnpg       0.20.0  oci://ghcr.io/cloudnative-pg/charts/cluster      sha256:d4e5f6…  cosign:sigstore:…
-tier-prod  1.2.0   oci://policies.akua.dev/tier/production          sha256:g7h8i9…  cosign:sigstore:…
-kyv-sec    2.0.0   oci://policies.akua.dev/kyverno/security         sha256:j0k1l2…  cosign:sigstore:…
-```
+| field | required | notes |
+|---|---|---|
+| `name` | yes | matches the `[dependencies]` key in `akua.toml` |
+| `version` | yes | exact resolved semver (not a range) |
+| `source` | yes | full source ref: `oci://…`, `git+https://…`, or `path+file://…` |
+| `digest` | yes | content-addressable hash: `sha256:` for OCI; sha256 over tarball for git |
+| `signature` | conditional | cosign signature. Keyless: `cosign:sigstore:<issuer>`. Keyed: `cosign:key:<identity>`. Required unless `[package].strictSigning = false` in `akua.toml` |
+| `dependencies` | no | `["name@version", …]` — transitive edges for graph walks |
+| `attestation` | no | SLSA attestation digest; present when the dep's author publishes one alongside |
+| `replaced` | no | `{ path = "…" }` when a local replace is active |
+| `yanked` | no | `true` for retracted versions |
 
 ### Rules
 
-- **Digest is always content-addressable.** `sha256:` for OCI, SHA-256 over tarball for git.
-- **Signature is cosign-verifiable.** Keyless (`cosign:sigstore:…`) or keyed (`cosign:key:…`). Missing signatures allowed only when `[package].strictSigning = false` in `akua.mod` — CI should reject unsigned unless this is explicitly opted out.
-- **One line per resolved version.** Transitive dependencies appear with their actual resolved version, not the range declared upstream.
-- **Alphabetical sort.** Stable diff even across unrelated PRs.
+- **Alphabetical order by `name`.** Stable diffs even across unrelated PRs.
+- **One `[[package]]` per resolved (name, version).** Two major versions of the same dep means two entries.
+- **No mutable metadata.** No timestamps, no resolver versions, no author info. Everything is deterministic.
+- **No comments in generated content.** The tool-written `[[package]]` entries are clean; put explanations in `akua.toml`.
 - **Trailing newline.** POSIX file discipline.
 
-### What `akua.sum` does NOT contain
+### What `akua.lock` does NOT contain
 
-- Source code (not a vendor directory)
-- Mutable metadata (timestamps, author info)
-- Version ranges (those live in `akua.mod`)
-- Comments (it's machine-generated; put explanations in `akua.mod`)
+- Source code (not a vendor directory — see `akua vendor` for that)
+- Version ranges (those live in `akua.toml`)
+- User-facing comments
 
 ---
 
@@ -135,31 +173,31 @@ kyv-sec    2.0.0   oci://policies.akua.dev/kyverno/security         sha256:j0k1l
 
 ### `akua add <kind> <ref> --version=<v>`
 
-1. Reads current `akua.mod`
+1. Reads current `akua.toml`
 2. Adds the new entry to `[dependencies]`
 3. Fetches the artifact; computes digest
 4. Verifies cosign signature
-5. Appends a line to `akua.sum`
+5. Updates `akua.lock` — inserts/updates the `[[package]]` entry; adds transitive deps alphabetically
 6. If the new dep transitively pulls others, repeats for each
 
-Result: `akua.mod` and `akua.sum` both updated in one atomic operation.
+Result: both `akua.toml` and `akua.lock` updated in one atomic operation.
 
 ### `akua verify` (CI gate)
 
-1. Reads `akua.mod` and `akua.sum`
-2. Resolves every dep from `akua.mod`
-3. Compares expected (mod) vs locked (sum) digest + signature
+1. Reads `akua.toml` and `akua.lock`
+2. Resolves every dep from `akua.toml`
+3. Compares expected (manifest) vs locked (lockfile) digest + signature
 4. Exits 0 if everything matches; non-zero otherwise
 
 Run in CI on every PR to catch lockfile tampering.
 
 ### `akua update [dep]`
 
-Updates to the highest allowed version per `akua.mod` constraints; rewrites the relevant `akua.sum` line(s). Leaves other deps untouched unless their constraints also match a new version.
+Updates to the highest allowed version per `akua.toml` constraints; rewrites the relevant `[[package]]` entries in `akua.lock`. Leaves other deps untouched unless their constraints also match a new version.
 
 ### `akua vendor` (optional)
 
-Writes full dependency tree to `./vendor/` for air-gapped builds. Content matches `akua.sum` digests. Not needed for online builds.
+Writes full dependency tree to `./vendor/` for air-gapped builds. Content matches `akua.lock` digests. Not needed for online builds.
 
 ---
 
@@ -169,21 +207,21 @@ For monorepos with multiple akua packages:
 
 ```
 platform/
-├── akua.mod                     # workspace root
-├── akua.sum
+├── akua.toml                    # workspace root
+├── akua.lock
 ├── apps/
 │   ├── api/
 │   │   └── package.k            # member package
 │   ├── worker/
-│   │   └── package.k            # member package
+│   │   └── package.k
 │   └── dashboard/
-│       └── package.k            # member package
+│       └── package.k
 └── policies/
     └── org-baseline/
         └── policy.rego          # member policy module
 ```
 
-Workspace root `akua.mod`:
+Workspace root `akua.toml`:
 
 ```toml
 [workspace]
@@ -194,13 +232,13 @@ members = ["./apps/*", "./policies/*"]
 k8s = { oci = "oci://ghcr.io/kcl-lang/k8s", version = "1.31.2" }
 ```
 
-Members inherit workspace dependencies; they may override in a member-local `akua.mod` (minimal). Cross-member imports work as `path`-type deps.
+Members inherit workspace dependencies; they may override in a member-local `akua.toml` (minimal). Cross-member imports work as `path`-type deps.
 
 ---
 
 ## Compatibility with kpm
 
-Akua's `akua.mod` is not the same as KCL's `kcl.mod`. We don't try to be. akua packages can contain a `kcl.mod` in their source tree for pure-KCL consumers who want to use upstream `kcl run` against the package directly; akua's resolver honors either file when it's unambiguous.
+akua's `akua.toml` is not the same as KCL's `kcl.mod`. We don't try to be. akua packages can contain a `kcl.mod` in their source tree for pure-KCL consumers who want to use upstream `kcl run` against the package directly; akua's resolver honors either file when it's unambiguous.
 
 See [the broader architecture note](https://github.com/cnap-tech/cortex/blob/docs/cnap-masterplan/workspaces/robin/akua-masterplan.md) for the "akua is the outer package manager; kpm is the inner KCL-layer tool" framing.
 
@@ -210,8 +248,8 @@ See [the broader architecture note](https://github.com/cnap-tech/cortex/blob/doc
 
 ```
 ./
-├── akua.mod
-├── akua.sum
+├── akua.toml
+├── akua.lock
 ├── apps/
 │   ├── api/
 │   │   └── package.k
@@ -225,7 +263,7 @@ See [the broader architecture note](https://github.com/cnap-tech/cortex/blob/doc
     └── production/inputs.yaml
 ```
 
-`akua.mod`:
+`akua.toml`:
 
 ```toml
 [package]
@@ -237,21 +275,52 @@ edition = "akua.dev/v1alpha1"
 members = ["./apps/*"]
 
 [dependencies]
-k8s       = { oci = "oci://ghcr.io/kcl-lang/k8s",              version = "1.31.2" }
+k8s       = { oci = "oci://ghcr.io/kcl-lang/k8s",                  version = "1.31.2" }
 cnpg      = { oci = "oci://ghcr.io/cloudnative-pg/charts/cluster", version = "0.20.0" }
-webapp    = { oci = "oci://ghcr.io/acme/charts/webapp",        version = "2.1.0" }
-tier-prod = { oci = "oci://policies.akua.dev/tier/production", version = "1.2.0" }
-kyv-sec   = { oci = "oci://policies.akua.dev/kyverno/security", version = "2.0.0" }
+webapp    = { oci = "oci://ghcr.io/acme/charts/webapp",            version = "2.1.0" }
+tier-prod = { oci = "oci://policies.akua.dev/tier/production",   version = "1.2.0" }
+kyv-sec   = { oci = "oci://policies.akua.dev/kyverno/security",  version = "2.0.0" }
 ```
 
-`akua.sum` (after resolution):
+`akua.lock` (after resolution):
 
-```
-cnpg       0.20.0   oci://ghcr.io/cloudnative-pg/charts/cluster       sha256:d4e5f6…  cosign:sigstore:…
-k8s        1.31.2   oci://ghcr.io/kcl-lang/k8s                        sha256:a1b2c3…  cosign:sigstore:…
-kyv-sec    2.0.0    oci://policies.akua.dev/kyverno/security          sha256:j0k1l2…  cosign:sigstore:…
-tier-prod  1.2.0    oci://policies.akua.dev/tier/production           sha256:g7h8i9…  cosign:sigstore:…
-webapp     2.1.0    oci://ghcr.io/acme/charts/webapp                   sha256:m3n4o5…  cosign:sigstore:…
+```toml
+version = 1
+
+[[package]]
+name    = "cnpg"
+version = "0.20.0"
+source  = "oci://ghcr.io/cloudnative-pg/charts/cluster"
+digest  = "sha256:d4e5f6…"
+signature = "cosign:sigstore:cloudnative-pg"
+
+[[package]]
+name    = "k8s"
+version = "1.31.2"
+source  = "oci://ghcr.io/kcl-lang/k8s"
+digest  = "sha256:a1b2c3…"
+signature = "cosign:sigstore:kcl-lang"
+
+[[package]]
+name    = "kyv-sec"
+version = "2.0.0"
+source  = "oci://policies.akua.dev/kyverno/security"
+digest  = "sha256:j0k1l2…"
+signature = "cosign:sigstore:akua-release"
+
+[[package]]
+name    = "tier-prod"
+version = "1.2.0"
+source  = "oci://policies.akua.dev/tier/production"
+digest  = "sha256:g7h8i9…"
+signature = "cosign:sigstore:akua-release"
+
+[[package]]
+name    = "webapp"
+version = "2.1.0"
+source  = "oci://ghcr.io/acme/charts/webapp"
+digest  = "sha256:m3n4o5…"
+signature = "cosign:key:acme"
 ```
 
 CI runs `akua verify` on every PR; any digest mismatch or missing signature fails the build.

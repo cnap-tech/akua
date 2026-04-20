@@ -189,7 +189,7 @@ When an agent is asked to fix a failing policy or add tests:
 2. **Use `akua trace --json`** for any unexplained denial before proposing a fix; don't guess.
 3. **Add a regression test** before fixing — the test should fail in the current state and pass after the fix. This is verifiable by running `akua test` before and after.
 4. **Prefer `akua lint --fix`** for auto-fixable style issues rather than editing manually.
-5. **Update `akua.sum`** via `akua verify --update` if signatures or digests drifted after a dep bump.
+5. **Update `akua.lock`** via `akua verify --update` if signatures or digests drifted after a dep bump.
 
 ## Failure modes
 

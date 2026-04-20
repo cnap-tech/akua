@@ -58,7 +58,7 @@ If you need non-determinism for a reason, it's a design bug in the calling code.
 
 ### 2.3 External engines are compile-resolved, not runtime-looked-up
 
-Helm, kro RGDs, kustomize, jsonnet are **KCL callable functions** (`helm.template(...)`, `rgd.instantiate(...)`, `kustomize.build(...)`). Kyverno / CEL / foreign Rego modules are `import data.…` in Rego, resolved via `akua.mod`.
+Helm, kro RGDs, kustomize, jsonnet are **KCL callable functions** (`helm.template(...)`, `rgd.instantiate(...)`, `kustomize.build(...)`). Kyverno / CEL / foreign Rego modules are `import data.…` in Rego, resolved via `akua.toml`.
 
 Never runtime string lookups like `kyverno.check({bundle: "oci://..."})`. Runtime lookup means the evaluator has to trust an external network at render time. Compile-resolved imports keep determinism + signature verification + offline operation.
 
@@ -152,6 +152,6 @@ See the masterplan §18 for the authoritative open-questions list. The ones spec
 - **Source** — one component inside a Package (a chart, a KCL dir, a kustomize base).
 - **Engine** — the tool that turns a source into a chart fragment (helm, kcl, kustomize, rgd, kyverno→rego, ...).
 - **Umbrella** — a top-level Chart.yaml that aliases all sources in a multi-engine Package.
-- **`akua.mod`** — human-edited manifest of declared deps (go-mod shape).
-- **`akua.sum`** — machine-maintained ledger of resolved digests + cosign signatures.
+- **`akua.toml`** — human-edited manifest of declared deps (go-mod shape).
+- **`akua.lock`** — machine-maintained ledger of resolved digests + cosign signatures.
 - **Policy tier** — signed OCI-distributed Rego bundle (`tier/dev`, `tier/production`, `tier/audit-ready`).

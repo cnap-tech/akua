@@ -9,14 +9,14 @@ A workspace policy gate. Shows the policy stack end-to-end:
 
 This is the smallest example that exercises every part of the policy architecture described in [policy-format.md](../../docs/policy-format.md).
 
-akua does **not** ship a `PolicySet` kind. Composition happens as plain Rego file layout: local `.rego` files import tiers as compile-resolved `data.*` via `akua.mod`. The workspace's policy layout is the workspace's concern.
+akua does **not** ship a `PolicySet` kind. Composition happens as plain Rego file layout: local `.rego` files import tiers as compile-resolved `data.*` via `akua.toml`. The workspace's policy layout is the workspace's concern.
 
 ## Layout
 
 ```
 04-policy-tier/
-├── akua.mod                       declared policy deps (OCI-pinned)
-├── akua.sum                       digest + signature ledger (machine-maintained)
+├── akua.toml                       declared policy deps (OCI-pinned)
+├── akua.lock                       digest + signature ledger (machine-maintained)
 ├── policies/
 │   ├── production.rego            local tier extending imported tiers
 │   └── production_test.rego       unit tests for the local rules
@@ -28,7 +28,7 @@ akua does **not** ship a `PolicySet` kind. Composition happens as plain Rego fil
 
 ## The policy stack, layer by layer
 
-### 1. Declared deps — `akua.mod`
+### 1. Declared deps — `akua.toml`
 
 ```toml
 [dependencies]
@@ -36,7 +36,7 @@ tier-prod = { oci = "oci://policies.akua.dev/tier/production", version = "1.2.0"
 kyv-sec   = { oci = "oci://policies.akua.dev/kyverno/security", version = "2.0.0" }
 ```
 
-Both deps are signed OCI artifacts. The first is akua's reference `tier/production` Rego bundle; the second is a Kyverno bundle that akua converts to Rego at `akua add` time (stored under `.akua/policies/vendor/`). The `akua.sum` ledger records the resolved digest and cosign signature for each.
+Both deps are signed OCI artifacts. The first is akua's reference `tier/production` Rego bundle; the second is a Kyverno bundle that akua converts to Rego at `akua add` time (stored under `.akua/policies/vendor/`). The `akua.lock` ledger records the resolved digest and cosign signature for each.
 
 No runtime lookups. Every import resolves at build time.
 
@@ -46,12 +46,12 @@ Inherits rules from the two imports and adds a cross-resource aggregation rule s
 
 ### 3. Composition is just Rego
 
-There is no `PolicySet` resource to declare. `akua policy check --tier=./policies` evaluates the Rego package under `./policies/` with the imports resolved from `akua.mod`. If you want to compose multiple local policy packages, lay them out under `./policies/<name>/` — Rego's own `import` + rule-merging is the composition mechanism.
+There is no `PolicySet` resource to declare. `akua policy check --tier=./policies` evaluates the Rego package under `./policies/` with the imports resolved from `akua.toml`. If you want to compose multiple local policy packages, lay them out under `./policies/<name>/` — Rego's own `import` + rule-merging is the composition mechanism.
 
 ## Running it
 
 ```sh
-# 1. Resolve deps + write akua.sum
+# 1. Resolve deps + write akua.lock
 akua add
 
 # 2. Evaluate the tier against a passing fixture → verdict: allow
@@ -93,5 +93,5 @@ Line + field precision. Agent-parseable. No stderr surprises.
 ## See also
 
 - [policy-format.md](../../docs/policy-format.md) — canonical Rego spec
-- [lockfile-format.md](../../docs/lockfile-format.md) — how `akua.mod` + `akua.sum` work
+- [lockfile-format.md](../../docs/lockfile-format.md) — how `akua.toml` + `akua.lock` work
 - [cli.md `policy check`](../../docs/cli.md) — verb reference

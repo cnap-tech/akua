@@ -1344,4 +1344,4 @@ From [cli-contract.md](cli-contract.md):
 
 - **Package format** — [package-format.md](package-format.md) (KCL Package, four regions, engine callables)
 - **Policy format** — [policy-format.md](policy-format.md) (Rego as host, compile-resolved imports, custom builtins)
-- **Lockfile** — [lockfile-format.md](lockfile-format.md) (`akua.mod` + `akua.sum`)
+- **Lockfile** — [lockfile-format.md](lockfile-format.md) (`akua.toml` + `akua.lock`)

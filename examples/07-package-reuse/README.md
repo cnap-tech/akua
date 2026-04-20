@@ -1,6 +1,6 @@
 # Example 07 — package reuse (cross-package composition)
 
-One akua Package composing another. The reuser pins the base Package by OCI digest in `akua.mod`, imports its `Input` schema into its own schema (as a nested field), and renders the base's resources inline alongside its own additions.
+One akua Package composing another. The reuser pins the base Package by OCI digest in `akua.toml`, imports its `Input` schema into its own schema (as a nested field), and renders the base's resources inline alongside its own additions.
 
 This is **what cross-package composition looks like when the full spec lands** — the shape this axis is settling into. Masterplan §18 and [design-notes.md §6](../../docs/design-notes.md) still list this as an open question for the final API surface. Use this example as the north-star shape; expect minor signature tweaks as the spec locks in.
 
@@ -13,7 +13,7 @@ This is **what cross-package composition looks like when the full spec lands** �
 │  - Input schema:  hostname, tls, monitoring_enabled           │
 │  - Produces:      Deployment, Service, Ingress, ServiceMonitor│
 └────────────────────┬─────────────────────────────────────────┘
-                     │ akua.mod dependency
+                     │ akua.toml dependency
                      ▼
 ┌──────────────────────────────────────────────────────────────┐
 │ 07-package-reuse (this example)                               │
@@ -24,14 +24,14 @@ This is **what cross-package composition looks like when the full spec lands** �
 └──────────────────────────────────────────────────────────────┘
 ```
 
-The reuser doesn't fork the base. Every publish of the base lands as an OCI digest; the reuser bumps its `akua.mod` pin and re-renders.
+The reuser doesn't fork the base. Every publish of the base lands as an OCI digest; the reuser bumps its `akua.toml` pin and re-renders.
 
 ## Layout
 
 ```
 07-package-reuse/
-├── akua.mod              declares platform-base as an OCI dep
-├── akua.sum              digest + cosign signature of the pinned base
+├── akua.toml              declares platform-base as an OCI dep
+├── akua.lock              digest + cosign signature of the pinned base
 ├── package.k             the consumer — composes base + adds specifics
 ├── inputs.yaml           sample inputs for rendering
 └── README.md
@@ -81,13 +81,13 @@ outputs = [
 Three things fall out of this shape:
 
 1. **Type safety.** The base's `Input` is a nested schema; misspelling a field fails at compile time with a line + column pointer. No "I forgot the base needs `hostname`" at render time.
-2. **Pinned by digest.** `akua.mod` + `akua.sum` pin the base to a specific OCI digest. Base publishes v1.1 → you don't pick it up until you `akua add` explicitly. No silent drift.
+2. **Pinned by digest.** `akua.toml` + `akua.lock` pin the base to a specific OCI digest. Base publishes v1.1 → you don't pick it up until you `akua add` explicitly. No silent drift.
 3. **Signed provenance.** `akua verify` on the consumer walks the attestation chain: the consumer's SLSA predicate includes the base's digest, which carries its own SLSA predicate, which carries the base's sources. Auditable back to the original chart authors.
 
 ## Running it
 
 ```sh
-akua add                                 # resolves deps → writes akua.sum
+akua add                                 # resolves deps → writes akua.lock
 akua render --inputs inputs.yaml         # composes base + local additions
 akua inspect oci://pkg.acme.corp/platform-base:1.0   # peek at what we're pinning
 ```
@@ -107,6 +107,6 @@ This axis is specced to the shape shown above but the exact signature of `pkg.re
 ## See also
 
 - [package-format.md §2 Imports](../../docs/package-format.md) — where package-vs-chart imports are described
-- [lockfile-format.md](../../docs/lockfile-format.md) — how OCI-pinned Packages flow through `akua.mod`
+- [lockfile-format.md](../../docs/lockfile-format.md) — how OCI-pinned Packages flow through `akua.toml`
 - [06-multi-engine/](../06-multi-engine/) — Helm / Kustomize / kro — the other engine sources; `pkg` is the fourth
 - [02-webapp-postgres/](../02-webapp-postgres/) — the shape of the base Package before it was reused here

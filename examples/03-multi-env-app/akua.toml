@@ -1,5 +1,5 @@
-# akua.mod — workspace root. Declares this monorepo's members and shared deps.
-# Machine-maintained digest + signature ledger lives in akua.sum.
+# akua.toml — workspace root. Declares this monorepo's members and shared deps.
+# Machine-maintained digest + signature ledger lives in akua.lock.
 
 [package]
 name    = "03-multi-env-app"

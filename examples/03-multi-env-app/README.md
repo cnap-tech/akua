@@ -8,8 +8,8 @@ The workspace defines its own KCL schemas under `schemas/` (its `App`, its `Envi
 
 ```
 03-multi-env-app/
-├── akua.mod                       workspace root + shared deps
-├── akua.sum                       digest + signature ledger
+├── akua.toml                       workspace root + shared deps
+├── akua.lock                       digest + signature ledger
 ├── schemas/                       workspace-local schemas (NOT akua-specified)
 │   ├── app.k                      this team's App shape
 │   └── environment.k              this team's Environment shape
@@ -54,7 +54,7 @@ Same output. Pure KCL. No special akua flags, no akua-owned schema to obey.
 ## Render
 
 ```sh
-akua add                            # resolve deps → writes akua.sum
+akua add                            # resolve deps → writes akua.lock
 akua render                         # renders every App document it finds
 akua render --filter=env=production # narrow to one env using a general filter
 ```

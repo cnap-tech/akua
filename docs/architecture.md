@@ -11,7 +11,7 @@ This document describes the **target architecture**. Implementation is tracked i
     ──────                  ───────                   ───────
 
     KCL Package      ──▶   akua render    ──▶   reconcilers:
-    (*.k + akua.mod)        │                     ArgoCD / Flux / kro
+    (*.k + akua.toml)        │                     ArgoCD / Flux / kro
                             │                     Helm release lifecycle
     Rego Policy      ──▶    ├─ embedded           kubectl / Crossplane
     (*.rego)                │  engines:
@@ -19,7 +19,7 @@ This document describes the **target architecture**. Implementation is tracked i
     @ui decorators   ──▶    │   Helm v4
     (on KCL schemas)        │   OPA + Regal
                             │   Kyverno→Rego
-    akua.mod + akua.sum ──▶ │   CEL
+    akua.toml + akua.lock ──▶ │   CEL
     (human intent +         │   Kustomize
      digest-pinned ledger)  │   kro (offline)
                             │
@@ -50,12 +50,12 @@ See [`docs/embedded-engines.md`](./embedded-engines.md) for the embedding contra
 ## Canonical form is typed code
 
 - **Packages** — authored in **KCL** (`Package.k` with four regions: imports / schema / body / outputs). Published as signed OCI artifacts. See [`docs/package-format.md`](./package-format.md).
-- **Policies** — authored in **Rego**. Kyverno / CEL / foreign Rego modules are consumed as compile-resolved imports via `akua.mod`, not runtime string lookups.
+- **Policies** — authored in **Rego**. Kyverno / CEL / foreign Rego modules are consumed as compile-resolved imports via `akua.toml`, not runtime string lookups.
 - **Higher-level workspace concepts** (App, Environment, Cluster, Secret, Gateway, Workspace, PolicySet, …) — **user-defined KCL schemas** in the consumer's own workspace, shaped to their deployment reality. akua does not ship a KRM vocabulary. Reconcilers (ArgoCD / Flux / kro) consume the raw-Kubernetes output of `akua render`; they don't need akua-specific kinds.
 
 ## Determinism
 
-Same inputs + same `akua.sum` + same akua version → byte-identical output. No `now()`, no `random()`, no env reads, no filesystem reads, no cluster reads inside the render pipeline.
+Same inputs + same `akua.lock` + same akua version → byte-identical output. No `now()`, no `random()`, no env reads, no filesystem reads, no cluster reads inside the render pipeline.
 
 See [`design-notes.md §engine-determinism`](./design-notes.md#10-engine-determinism-reality-check) for the pragmatic trade-offs (why Helm stays non-pure even though pure-functional would be cleaner).
 
