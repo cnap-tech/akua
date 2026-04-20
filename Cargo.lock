@@ -37,6 +37,7 @@ dependencies = [
  "serde_json",
  "serde_yml",
  "tempfile",
+ "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",
 ]
