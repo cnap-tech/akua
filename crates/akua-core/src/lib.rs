@@ -36,6 +36,8 @@ pub mod lock_file;
 pub mod manifest;
 pub mod metadata;
 pub mod mod_file;
+#[cfg(feature = "engine-kcl")]
+pub mod package_k;
 #[cfg(feature = "publish")]
 pub mod publish;
 #[cfg(feature = "helm-cli")]
@@ -59,6 +61,8 @@ pub use mod_file::{
     AkuaManifest, Dependency as ManifestDependency, DependencySource, ManifestError,
     ManifestLoadError, PackageSection, Replace, WorkspaceSection,
 };
+#[cfg(feature = "engine-kcl")]
+pub use package_k::{OutputSpec, PackageK, PackageKError, RenderedPackage};
 pub use diff::{compare as compare_charts, ChartDiff, ChartSnapshot};
 pub use engine::{Engine, EngineError, HelmEngine, PrepareContext, PreparedSource};
 #[cfg(feature = "fetch")]
