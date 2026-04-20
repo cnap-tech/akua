@@ -166,6 +166,10 @@ Deep dives:
 [`docs/cli-contract.md`](docs/cli-contract.md) ·
 [`docs/sdk.md`](docs/sdk.md) ·
 [`docs/agent-usage.md`](docs/agent-usage.md) ·
+[`docs/package-format.md`](docs/package-format.md) ·
+[`docs/policy-format.md`](docs/policy-format.md) ·
+[`docs/krm-vocabulary.md`](docs/krm-vocabulary.md) ·
+[`docs/lockfile-format.md`](docs/lockfile-format.md) ·
 [`skills/`](skills/) ·
 [`docs/examples/`](docs/examples/) ·
 [`docs/vision.md`](docs/vision.md) ·

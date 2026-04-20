@@ -960,3 +960,10 @@ From [cli-contract.md](cli-contract.md):
 - The CLI contract (see [cli-contract.md](cli-contract.md)).
 - Examples of usage (see [examples/](examples/)).
 - Architecture (see [architecture.md](architecture.md)).
+
+## Spec cross-references
+
+- **Package format** — [package-format.md](package-format.md) (KCL Package, four regions, engine callables)
+- **Policy format** — [policy-format.md](policy-format.md) (Rego as host, compile-resolved imports, custom builtins)
+- **KRM vocabulary** — [krm-vocabulary.md](krm-vocabulary.md) (15 kinds, cluster-facing vs control-plane)
+- **Lockfile** — [lockfile-format.md](lockfile-format.md) (`akua.mod` + `akua.sum`)

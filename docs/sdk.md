@@ -664,3 +664,15 @@ You can always reach for the CLI if the SDK is missing something. You can always
 - UI components. The browser playground at `akua.dev` has its own UI layer; the SDK doesn't ship React components.
 - Reconciler-specific libraries. The SDK invokes `akua deploy`; it doesn't re-implement Argo's client or Flux's client.
 - Custom target drivers. Adding a new `--to=<driver>` target is a CLI plugin, not an SDK extension.
+
+## Spec cross-references
+
+The SDK's types mirror the underlying format specs. For the authoritative data shapes:
+
+- **Package** (KCL program) — [package-format.md](package-format.md)
+- **App / Environment / Cluster / Secret / Gateway** (cluster-facing) — [krm-vocabulary.md](krm-vocabulary.md)
+- **Rollout / Runbook / Budget / Incident / Experiment / Tenant** (control-plane, typed KCL) — [krm-vocabulary.md](krm-vocabulary.md)
+- **Policy** (Rego) — [policy-format.md](policy-format.md)
+- **Lockfile** (`akua.mod` + `akua.sum`) — [lockfile-format.md](lockfile-format.md)
+
+TypeScript types in `@akua/sdk` are generated from the same KRM schemas the CLI consumes, so a field shape in the SDK always matches the file-format spec.
