@@ -2,8 +2,7 @@
 //!
 //! Spec: [`docs/cli.md`](../../../../docs/cli.md) `akua fmt` section.
 //!
-//! KCL-only in this increment. Rego formatting arrives alongside the
-//! policy pipeline (Phase C).
+//! KCL-only. Rego formatting not yet implemented.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -52,6 +51,9 @@ pub enum FmtError {
 
     #[error(transparent)]
     Kcl(#[from] PackageKError),
+
+    #[error("write to stdout failed: {0}")]
+    StdoutWrite(#[source] std::io::Error),
 }
 
 impl FmtError {
@@ -73,6 +75,9 @@ impl FmtError {
             FmtError::Kcl(other) => {
                 StructuredError::new(codes::E_FMT_KCL, other.to_string()).with_default_docs()
             }
+            FmtError::StdoutWrite(e) => {
+                StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
+            }
         }
     }
 
@@ -81,6 +86,7 @@ impl FmtError {
             FmtError::Io { source, .. } if source.kind() != std::io::ErrorKind::NotFound => {
                 ExitCode::SystemError
             }
+            FmtError::StdoutWrite(_) => ExitCode::SystemError,
             _ => ExitCode::UserError,
         }
     }
@@ -102,10 +108,7 @@ pub fn run<W: Write>(
     if args.stdout_mode {
         stdout
             .write_all(formatted.as_bytes())
-            .map_err(|e| FmtError::Io {
-                path: PathBuf::from("<stdout>"),
-                source: e,
-            })?;
+            .map_err(FmtError::StdoutWrite)?;
         return Ok(ExitCode::Success);
     }
 
@@ -124,10 +127,7 @@ pub fn run<W: Write>(
     };
 
     emit_output(stdout, ctx, &output, |w| write_text(w, &output, args.check))
-        .map_err(|e| FmtError::Io {
-            path: PathBuf::from("<stdout>"),
-            source: e,
-        })?;
+        .map_err(FmtError::StdoutWrite)?;
 
     // Under --check, a change detected means the file is not
     // well-formatted — fail so CI gates on it.
@@ -234,13 +234,7 @@ mod tests {
     #[test]
     fn json_output_carries_changed_flag() {
         let (_tmp, path) = write_package(UNFORMATTED);
-        let ctx = Context::resolve(
-            &crate::contract::args::UniversalArgs {
-                json: true,
-                ..Default::default()
-            },
-            akua_core::cli_contract::AgentContext::none(),
-        );
+        let ctx = Context::json();
         let mut stdout = Vec::new();
         run(&ctx, &args(&path), &mut stdout).expect("run");
         let parsed: serde_json::Value =

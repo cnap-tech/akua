@@ -45,6 +45,9 @@ pub enum LintError {
 
     #[error(transparent)]
     Kcl(#[from] PackageKError),
+
+    #[error("write to stdout failed: {0}")]
+    StdoutWrite(#[source] std::io::Error),
 }
 
 impl LintError {
@@ -63,6 +66,9 @@ impl LintError {
             LintError::Kcl(e) => {
                 StructuredError::new(codes::E_LINT_FAIL, e.to_string()).with_default_docs()
             }
+            LintError::StdoutWrite(e) => {
+                StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
+            }
         }
     }
 
@@ -71,6 +77,7 @@ impl LintError {
             LintError::Io { source, .. } if source.kind() != std::io::ErrorKind::NotFound => {
                 ExitCode::SystemError
             }
+            LintError::StdoutWrite(_) => ExitCode::SystemError,
             _ => ExitCode::UserError,
         }
     }
@@ -100,10 +107,7 @@ pub fn run<W: Write>(
     };
 
     emit_output(stdout, ctx, &output, |w| write_text(w, &output))
-        .map_err(|e| LintError::Io {
-            path: PathBuf::from("<stdout>"),
-            source: e,
-        })?;
+        .map_err(LintError::StdoutWrite)?;
 
     Ok(if output.is_ok() {
         ExitCode::Success
@@ -189,13 +193,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
     #[test]
     fn json_output_lists_issues_with_position_info() {
         let (_tmp, path) = write(BROKEN);
-        let ctx = Context::resolve(
-            &crate::contract::args::UniversalArgs {
-                json: true,
-                ..Default::default()
-            },
-            akua_core::cli_contract::AgentContext::none(),
-        );
+        let ctx = Context::json();
         let mut stdout = Vec::new();
         run(&ctx, &args(&path), &mut stdout).expect("run");
         let parsed: serde_json::Value =

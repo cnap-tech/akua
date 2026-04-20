@@ -15,7 +15,7 @@
 //! itself; parse errors surface here as structured verify failures.
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
 use akua_core::{AkuaLock, AkuaManifest, LockLoadError, ManifestLoadError};
@@ -69,6 +69,9 @@ pub enum VerifyError {
 
     #[error(transparent)]
     Lock(#[from] LockLoadError),
+
+    #[error("write to stdout failed: {0}")]
+    StdoutWrite(#[source] std::io::Error),
 }
 
 impl VerifyError {
@@ -106,13 +109,17 @@ impl VerifyError {
                     .with_path(path.display().to_string())
                     .with_default_docs()
             }
+            VerifyError::StdoutWrite(e) => {
+                StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
+            }
         }
     }
 
     pub fn exit_code(&self) -> ExitCode {
         match self {
             VerifyError::Manifest(ManifestLoadError::Io { .. })
-            | VerifyError::Lock(LockLoadError::Io { .. }) => ExitCode::SystemError,
+            | VerifyError::Lock(LockLoadError::Io { .. })
+            | VerifyError::StdoutWrite(_) => ExitCode::SystemError,
             _ => ExitCode::UserError,
         }
     }
@@ -180,15 +187,8 @@ pub fn run<W: Write>(
     stdout: &mut W,
 ) -> Result<ExitCode, VerifyError> {
     let output = check(workspace)?;
-    // stdout write failure surfaces as a Lock I/O variant pointing at
-    // the pseudo-path "<stdout>" — the workspace files were fine;
-    // something downstream of them broke.
-    emit_output(stdout, ctx, &output, |w| write_text(w, &output)).map_err(|e| {
-        LockLoadError::Io {
-            path: PathBuf::from("<stdout>"),
-            source: e,
-        }
-    })?;
+    emit_output(stdout, ctx, &output, |w| write_text(w, &output))
+        .map_err(VerifyError::StdoutWrite)?;
     Ok(if output.is_ok() {
         ExitCode::Success
     } else {
@@ -468,13 +468,7 @@ digest  = "sha256:22222222222222222222222222222222222222222222222222222222222222
     #[test]
     fn run_emits_json_verdict_on_ok() {
         let ws = write_workspace(MANIFEST_TWO_OCI, LOCK_MATCHING);
-        let ctx = Context::resolve(
-            &crate::contract::args::UniversalArgs {
-                json: true,
-                ..Default::default()
-            },
-            akua_core::cli_contract::AgentContext::none(),
-        );
+        let ctx = Context::json();
         let mut stdout = Vec::new();
         let code = run(&ctx, ws.path(), &mut stdout).expect("run");
         assert_eq!(code, ExitCode::Success);

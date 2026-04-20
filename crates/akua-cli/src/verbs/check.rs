@@ -49,20 +49,16 @@ pub struct CheckResult {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CheckError {
-    #[error("i/o error at {path}: {source}")]
-    Io {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
+    #[error("write to stdout failed: {0}")]
+    StdoutWrite(#[source] std::io::Error),
 }
 
 impl CheckError {
     pub fn to_structured(&self) -> StructuredError {
         match self {
-            CheckError::Io { path, source } => StructuredError::new(codes::E_IO, source.to_string())
-                .with_path(path.display().to_string())
-                .with_default_docs(),
+            CheckError::StdoutWrite(e) => {
+                StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
+            }
         }
     }
 
@@ -94,10 +90,7 @@ pub fn run<W: Write>(
     let output = CheckOutput { status, checks };
 
     emit_output(stdout, ctx, &output, |w| write_text(w, &output))
-        .map_err(|e| CheckError::Io {
-            path: PathBuf::from("<stdout>"),
-            source: e,
-        })?;
+        .map_err(CheckError::StdoutWrite)?;
 
     Ok(if output.status == "ok" {
         ExitCode::Success
@@ -276,13 +269,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
     fn lockfile_skipped_when_absent() {
         // Default workspace has no lockfile — check still passes.
         let ws = workspace();
-        let ctx = Context::resolve(
-            &crate::contract::args::UniversalArgs {
-                json: true,
-                ..Default::default()
-            },
-            akua_core::cli_contract::AgentContext::none(),
-        );
+        let ctx = Context::json();
         let mut stdout = Vec::new();
         run(&ctx, &args(ws.path(), Path::new("package.k")), &mut stdout).expect("run");
         let parsed: serde_json::Value =
@@ -300,13 +287,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
     fn lockfile_included_when_present() {
         let ws = workspace();
         fs::write(ws.path().join("akua.lock"), "version = 1\n").unwrap();
-        let ctx = Context::resolve(
-            &crate::contract::args::UniversalArgs {
-                json: true,
-                ..Default::default()
-            },
-            akua_core::cli_contract::AgentContext::none(),
-        );
+        let ctx = Context::json();
         let mut stdout = Vec::new();
         run(&ctx, &args(ws.path(), Path::new("package.k")), &mut stdout).expect("run");
         let parsed: serde_json::Value =
@@ -324,13 +305,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
     fn malformed_package_surfaces_via_issues() {
         let ws = workspace();
         fs::write(ws.path().join("package.k"), "schema X:\n  !!!\n").unwrap();
-        let ctx = Context::resolve(
-            &crate::contract::args::UniversalArgs {
-                json: true,
-                ..Default::default()
-            },
-            akua_core::cli_contract::AgentContext::none(),
-        );
+        let ctx = Context::json();
         let mut stdout = Vec::new();
         let code = run(&ctx, &args(ws.path(), Path::new("package.k")), &mut stdout)
             .expect("run");

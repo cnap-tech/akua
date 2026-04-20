@@ -75,6 +75,9 @@ pub enum AddError {
         #[source]
         source: std::io::Error,
     },
+
+    #[error("write to stdout failed: {0}")]
+    StdoutWrite(#[source] std::io::Error),
 }
 
 impl AddError {
@@ -107,14 +110,17 @@ impl AddError {
             AddError::Io { path, source } => StructuredError::new(codes::E_IO, source.to_string())
                 .with_path(path.display().to_string())
                 .with_default_docs(),
+            AddError::StdoutWrite(e) => {
+                StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
+            }
         }
     }
 
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            AddError::Load(ManifestLoadError::Io { .. }) | AddError::Io { .. } => {
-                ExitCode::SystemError
-            }
+            AddError::Load(ManifestLoadError::Io { .. })
+            | AddError::Io { .. }
+            | AddError::StdoutWrite(_) => ExitCode::SystemError,
             _ => ExitCode::UserError,
         }
     }
@@ -157,10 +163,7 @@ pub fn run<W: Write>(
     };
 
     emit_output(stdout, ctx, &output, |w| write_text(w, &output))
-        .map_err(|e| AddError::Io {
-            path: PathBuf::from("<stdout>"),
-            source: e,
-        })?;
+        .map_err(AddError::StdoutWrite)?;
 
     Ok(ExitCode::Success)
 }
@@ -325,13 +328,7 @@ edition = "akua.dev/v1alpha1"
             force: true,
             ..args(ws.path(), "cnpg", AddSource::Oci("oci://b"))
         };
-        let ctx = Context::resolve(
-            &crate::contract::args::UniversalArgs {
-                json: true,
-                ..Default::default()
-            },
-            akua_core::cli_contract::AgentContext::none(),
-        );
+        let ctx = Context::json();
         let mut stdout = Vec::new();
         run(&ctx, &second, &mut stdout).expect("second");
 

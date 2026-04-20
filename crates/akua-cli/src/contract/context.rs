@@ -100,6 +100,20 @@ impl Context {
     pub fn human() -> Self {
         Self::resolve(&UniversalArgs::default(), AgentContext::none())
     }
+
+    /// Convenience for tests: build a JSON-mode context with no agent
+    /// and no other flags set. Equivalent to
+    /// `resolve(&UniversalArgs { json: true, ..Default::default() },
+    /// AgentContext::none())`.
+    pub fn json() -> Self {
+        Self::resolve(
+            &UniversalArgs {
+                json: true,
+                ..UniversalArgs::default()
+            },
+            AgentContext::none(),
+        )
+    }
 }
 
 #[cfg(test)]

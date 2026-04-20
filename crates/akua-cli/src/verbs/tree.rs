@@ -66,6 +66,9 @@ pub enum TreeError {
 
     #[error(transparent)]
     Lock(#[from] LockLoadError),
+
+    #[error("write to stdout failed: {0}")]
+    StdoutWrite(#[source] std::io::Error),
 }
 
 impl TreeError {
@@ -101,13 +104,17 @@ impl TreeError {
                     .with_path(path.display().to_string())
                     .with_default_docs()
             }
+            TreeError::StdoutWrite(e) => {
+                StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
+            }
         }
     }
 
     pub fn exit_code(&self) -> ExitCode {
         match self {
             TreeError::Manifest(ManifestLoadError::Io { .. })
-            | TreeError::Lock(LockLoadError::Io { .. }) => ExitCode::SystemError,
+            | TreeError::Lock(LockLoadError::Io { .. })
+            | TreeError::StdoutWrite(_) => ExitCode::SystemError,
             _ => ExitCode::UserError,
         }
     }
@@ -155,10 +162,7 @@ pub fn run<W: Write>(
     };
 
     emit_output(stdout, ctx, &output, |w| write_text(w, &output))
-        .map_err(|_| TreeError::Manifest(ManifestLoadError::Io {
-            path: std::path::PathBuf::from("<stdout>"),
-            source: std::io::Error::other("stdout write failed"),
-        }))?;
+        .map_err(TreeError::StdoutWrite)?;
     Ok(ExitCode::Success)
 }
 
@@ -255,13 +259,7 @@ signature = "cosign:sigstore:cnpg"
     }
 
     fn json_ctx() -> Context {
-        Context::resolve(
-            &crate::contract::args::UniversalArgs {
-                json: true,
-                ..Default::default()
-            },
-            akua_core::cli_contract::AgentContext::none(),
-        )
+        Context::json()
     }
 
     #[test]

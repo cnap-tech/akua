@@ -113,10 +113,7 @@ impl RenderError {
             RenderError::Render(PackageRenderError::UnsupportedKind { kind }) => {
                 StructuredError::new(
                     codes::E_RENDER_UNSUPPORTED_KIND,
-                    format!(
-                        "output kind `{kind}` is not implemented yet (Phase A renders \
-                         `RawManifests` only)"
-                    ),
+                    format!("output kind `{kind}` is not implemented"),
                 )
                 .with_default_docs()
             }
@@ -270,13 +267,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
     }
 
     fn ctx_json() -> Context {
-        Context::resolve(
-            &crate::contract::args::UniversalArgs {
-                json: true,
-                ..Default::default()
-            },
-            akua_core::cli_contract::AgentContext::none(),
-        )
+        Context::json()
     }
 
     fn args<'a>(pkg: &'a Path, out: &'a Path) -> RenderArgs<'a> {

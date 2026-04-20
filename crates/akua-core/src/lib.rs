@@ -30,8 +30,8 @@ pub use lock_file::{
     AkuaLock, LockError, LockLoadError, LockedPackage, Replaced, CURRENT_VERSION as LOCK_VERSION,
 };
 pub use mod_file::{
-    AkuaManifest, Dependency as ManifestDependency, DependencySource, ManifestError,
-    ManifestLoadError, PackageSection, Replace, WorkspaceSection,
+    AkuaManifest, DependencySource, ManifestError, ManifestLoadError, PackageSection, Replace,
+    WorkspaceSection,
 };
 #[cfg(feature = "engine-kcl")]
 pub use dir_diff::{diff as dir_diff, DirDiff, DirDiffError, FileChange};

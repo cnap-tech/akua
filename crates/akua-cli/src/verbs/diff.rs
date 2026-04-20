@@ -6,7 +6,7 @@
 //! diff is a follow-up.
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
 use akua_core::{dir_diff, DirDiff, DirDiffError};
@@ -23,6 +23,9 @@ pub struct DiffArgs<'a> {
 pub enum DiffError {
     #[error(transparent)]
     DirDiff(#[from] DirDiffError),
+
+    #[error("write to stdout failed: {0}")]
+    StdoutWrite(#[source] std::io::Error),
 }
 
 impl DiffError {
@@ -43,6 +46,9 @@ impl DiffError {
                     .with_path(path.display().to_string())
                     .with_default_docs()
             }
+            DiffError::StdoutWrite(e) => {
+                StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
+            }
         }
     }
 
@@ -53,6 +59,7 @@ impl DiffError {
             {
                 ExitCode::SystemError
             }
+            DiffError::StdoutWrite(_) => ExitCode::SystemError,
             _ => ExitCode::UserError,
         }
     }
@@ -66,10 +73,7 @@ pub fn run<W: Write>(
     let result = dir_diff(args.before, args.after)?;
 
     emit_output(stdout, ctx, &result, |w| write_text(w, &result))
-        .map_err(|e| DiffError::DirDiff(DirDiffError::Io {
-            path: PathBuf::from("<stdout>"),
-            source: e,
-        }))?;
+        .map_err(DiffError::StdoutWrite)?;
 
     // diff(1) convention: exit 1 when differences detected, 0 when
     // clean. CI gates can branch on the exit code without parsing.
@@ -187,13 +191,7 @@ mod tests {
         write(after.path(), "stay.yaml", "x");
         write(after.path(), "new.yaml", "z");
 
-        let ctx = Context::resolve(
-            &crate::contract::args::UniversalArgs {
-                json: true,
-                ..Default::default()
-            },
-            akua_core::cli_contract::AgentContext::none(),
-        );
+        let ctx = Context::json();
         let mut stdout = Vec::new();
         run(
             &ctx,
