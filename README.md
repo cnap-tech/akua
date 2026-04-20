@@ -25,32 +25,57 @@
 
 ## What is akua?
 
-akua is an all-in-one toolkit for cloud-native packaging. It ships as a single executable called `akua`, written in Rust.
+akua is a typed, signed, deterministic toolkit for cloud-native packaging. You author packages in **KCL** — a typed configuration language with real types, functions, and imports. Existing Helm charts, kro RGDs, and Kustomize bases are callable KCL functions, so you consume the whole ecosystem unchanged. Packages render offline in CI, produce committable raw YAML, and emit a SLSA v1 attestation by default.
 
-At its core is the _akua core_, an audited fetch layer plus a Helm v4 template engine compiled to WebAssembly. It's designed as **a drop-in replacement for `helm` + `crane` + a CORS-proxy backend**, so the same pull-inspect-render-diff pipeline works on your laptop, in Node via `@akua/sdk`, and in any browser tab.
+It ships as a single OSS binary — `akua` — with the full surface of verbs: author, render, sign, publish, diff, attest, deploy, dev-loop, policy-check, audit, query. One binary. One mental model. The bun/deno pattern applied to cloud-native.
 
-```bash
-akua init demo                                           # scaffold a new package
-akua inspect --oci oci://ghcr.io/.../podinfo:6.7.1       # pull + inspect any chart — no `helm` on PATH
-akua diff oci://.../podinfo:6.6.0 oci://.../podinfo:6.7.1  # structural version diff
+```python
+# package.k — a typed akua Package
+import akua.helm
+import charts.cnpg    as cnpg
+import charts.webapp  as webapp
+
+schema Input:
+    appName:  str
+    hostname: str
+    replicas: int = 3
+
+input: Input
+
+_pg = helm.template(cnpg.Chart {
+    values = cnpg.Values {
+        cluster.name      = "${input.appName}-pg"
+        cluster.instances = 3
+    }
+})
+
+_app = helm.template(webapp.Chart {
+    values = webapp.Values {
+        replicaCount     = input.replicas
+        ingress.hostname = input.hostname
+    }
+})
+
+resources = [*_pg, *_app]
+outputs   = [{ kind: "RawManifests", target: "./" }]
 ```
 
-The `akua` command-line tool also implements a builder, a publisher, a schema validator, and a [browser playground](https://akua.dev). Instead of juggling `helm` + `crane` + `cosign` + a CORS-proxy backend, you only need `akua`. Built-in tooling is significantly faster than shelling out to `helm`, and works without a cluster.
+Render with typed inputs, committed to git, applied by ArgoCD / Flux / kro / Helm / kubectl — whichever reconciler the customer uses:
 
 ```bash
-akua build --out dist/chart               # build an umbrella chart with metadata sidecar
-akua attest dist/chart                    # emit a SLSA v1 predicate for cosign
-akua render dist/chart --inputs '{...}'   # render Kubernetes manifests (no helm binary)
-akua publish oci://ghcr.io/you/pkg:v1     # publish with digest-pinning
+akua init my-pkg                      # scaffold a typed Package
+akua render --inputs inputs.yaml      # render to raw YAML, signed
+akua diff v1 v2                       # structural diff (schema, sources, manifests)
+akua deploy --to=argo                 # hydrate PR against the deploy repo
+akua dev                              # sub-second hot-reload against a local cluster
+akua inspect oci://pkg.akua.dev/...   # audit any published package, no install
 ```
 
 <p align="center">
-  <img alt="akua init → akua inspect --oci → akua diff"
+  <img alt="akua init → akua render → akua diff"
        src="docs/hero.gif"
        width="840">
 </p>
-
-akua is backed by [CNAP](https://cnap.tech).
 
 ## Install
 
@@ -77,101 +102,112 @@ Prebuilt binaries for every target live on [GitHub Releases][releases] — each 
 Scaffold a new package:
 
 ```sh
-akua init my-pkg && cd my-pkg
+akua init my-app && cd my-app
 ```
 
-Lint its schema and preview how customer inputs resolve:
+Add a chart — generates a typed KCL subpackage with autocomplete + validation:
 
 ```sh
-akua lint && akua preview --inputs '{"httpRoute.hostname":"acme"}'
+akua add chart oci://ghcr.io/cloudnative-pg/charts/cluster --version 0.20.0
 ```
 
-Build the umbrella chart (Chart.yaml + values.yaml + `.akua/metadata.yaml`):
+Edit `package.k` in your editor with full LSP support. Validate:
 
 ```sh
-akua build --out dist/chart
+akua lint
 ```
 
-Render Kubernetes manifests using the embedded Helm v4 engine — no
-`helm` binary involved:
+Render against inputs — produces committable raw YAML:
 
 ```sh
-akua render --out dist/manifests --inputs '{...}'
+akua render --inputs inputs.yaml --out ./deploy
 ```
 
-Diff your chart against the previously-published version, so you
-know what changed before users do:
+Structural diff against a published version:
 
 ```sh
-akua diff oci://ghcr.io/you/my-pkg:0.1.0 oci://ghcr.io/you/my-pkg:0.2.0
+akua diff oci://pkg.akua.dev/my-app:0.1.0 oci://pkg.akua.dev/my-app:0.2.0
 ```
 
-Publish to any OCI registry (native Rust, Helm v4-compatible
-media types):
+Publish, signed and attested:
 
 ```sh
-akua publish --chart dist/chart --to oci://ghcr.io/you/my-pkg
+akua publish --to oci://ghcr.io/you/my-app --tag v0.2.0
 ```
+
+Hot-reload development against a local cluster:
+
+```sh
+akua dev
+# watching ./ for changes · target: local (kind cluster) · ui: http://localhost:5173
+```
+
+Full CLI reference: [`docs/cli.md`](docs/cli.md). Universal contract (the invariants every verb honors): [`docs/cli-contract.md`](docs/cli-contract.md). Runnable examples: [`docs/examples/`](docs/examples/).
 
 ## TypeScript SDK
 
-`@akua/sdk` is the same Rust pipeline, compiled to WASM, published
-to [JSR]. Works in Node, Bun, Deno, and modern browsers.
+`@akua/sdk` mirrors the CLI programmatically. Same Rust pipeline, compiled to WASM, published to [JSR]. Works in Node, Bun, Deno, and modern browsers.
 
 ```ts
-import { init, pullChart, buildUmbrellaChart, packChart, buildMetadata } from '@akua/sdk';
-import { pullChartCached } from '@akua/sdk/cache';  // Node-only, shares $XDG_CACHE_HOME with the CLI
+import { Akua } from '@akua/sdk';
 
-await init();
+const akua = new Akua({ registry: 'oci://pkg.akua.dev' });
 
-// Pull an existing chart from any OCI or classic Helm HTTP repo.
-const bytes = await pullChart('oci://ghcr.io/stefanprodan/charts/podinfo:6.7.1');
+// Audit any published package
+const pkg = await akua.inspect('oci://pkg.akua.dev/webapp-postgres:1.0');
 
-// Or compose a new umbrella chart from multiple sources, in-browser.
-const umbrella = buildUmbrellaChart('my-pkg', '0.1.0', sources);
-const tgz = await packChart(umbrella, subcharts, { metadata: buildMetadata(sources) });
+// Render with inputs
+const result = await akua.render({
+  path: './my-pkg',
+  inputs: { appName: 'checkout', hostname: 'checkout.example.com', replicas: 5 }
+});
+
+// Structural diff
+const diff = await akua.diff('v1.0', 'v1.1');
+
+// Deploy + wait
+const handle = await akua.deploy({ app: 'checkout', to: 'argo' });
+await handle.waitReady({ timeout: '5m' });
 ```
 
-SSRF guard, size caps, symlink-reject, LRU cache, streaming pull —
-all the CLI's hardening ships under the same API. Full reference:
-[packages/sdk/README.md](packages/sdk/README.md).
+The browser entry point (`@akua/sdk/browser`) exposes the read-only subset — inspect, diff, render, verify. No backend. No cluster. Powers the playground at [akua.dev](https://akua.dev).
+
+Full SDK reference: [`docs/sdk.md`](docs/sdk.md).
 
 ## Architecture
 
 Three surfaces, one core:
 
-- **[`akua-core`](crates/akua-core)** — the Rust pipeline: source
-  resolution, CEL transforms, umbrella assembly, OCI + HTTP fetch,
-  render, publish, attest, diff.
-- **[`akua-cli`](crates/akua-cli)** — the `akua` binary. Feature-gated
-  fetch / publish / helm-cli / helm-wasm engines.
-- **[`@akua/sdk`](packages/sdk)** — TypeScript bindings over the same
-  core via `wasm-pack`. Node + browser entries.
+- **[`akua-core`](crates/akua-core)** — the Rust pipeline: KCL interpreter (via `kclvm-rs`), source resolution, OCI + HTTP fetch, render, policy, attest, diff. Deterministic; sandboxed; content-addressable cache.
+- **[`akua-cli`](crates/akua-cli)** — the `akua` binary. Twenty verbs, one mental model. Every verb JSON-first, idempotent, typed exit codes — see [`docs/cli-contract.md`](docs/cli-contract.md).
+- **[`@akua/sdk`](packages/sdk)** — TypeScript bindings over the same core. Node + browser entries. See [`docs/sdk.md`](docs/sdk.md).
+
+KCL is the authoring language; Helm, kro RGDs, kustomize are callable KCL functions (`helm.template(...)`, `rgd.instantiate(...)`, `kustomize.build(...)`). The whole ecosystem is consumable unchanged — no chart forks to rename values.
 
 Deep dives:
-[`docs/architecture.md`](docs/architecture.md) · 
-[`docs/design-notes.md`](docs/design-notes.md) ·
-[`docs/design-package-yaml-v1.md`](docs/design-package-yaml-v1.md) ·
-[`docs/vision.md`](docs/vision.md)
+[`docs/architecture.md`](docs/architecture.md) ·
+[`docs/cli.md`](docs/cli.md) ·
+[`docs/sdk.md`](docs/sdk.md) ·
+[`docs/cli-contract.md`](docs/cli-contract.md) ·
+[`docs/examples/`](docs/examples/) ·
+[`docs/vision.md`](docs/vision.md) ·
+[`docs/roadmap.md`](docs/roadmap.md)
 
 ## Scope
 
-|   | Akua |
+|   | akua |
 |---|---|
-| **Does** | Assemble multi-source packages · Validate `x-user-input` schemas · Apply CEL transforms · Pull + pack + publish OCI charts · Emit SLSA provenance · Structurally diff chart versions |
-| **Doesn't** | Apply manifests to a cluster · Watch for drift · Orchestrate rollbacks · Manage cluster-side RBAC · Sign images (that's `cosign`'s job; `akua attest` emits the predicate) |
+| **Does** | Type-safe KCL packaging · Consume existing Helm/kro/kustomize sources as callable functions · Render at CI to committable raw YAML · Structural diff · SLSA v1 attestation · Signed OCI publish · Sub-second dev hot-reload · Agent-friendly CLI contract |
+| **Doesn't** | Apply manifests to a cluster (that's ArgoCD/Flux/kro/kubectl) · Manage cluster-side RBAC · Replace Helm's template engine (we embed it) · Sign container images (that's `cosign`; `akua attest` emits the predicate) · Curate a package catalog (we provide the substrate; the ecosystem publishes) |
 
-Closest neighbours:
-[**Helm**](https://helm.sh/) (Akua produces vanilla Helm charts — we
-wrap Helm, don't replace it) ·
-[**Timoni**](https://timoni.sh/) (CUE-based alternative) ·
-[**helmfile**](https://github.com/helmfile/helmfile) (multi-release
-orchestration; Akua supports it as a source engine) ·
-[**ArgoCD**](https://argo-cd.readthedocs.io/) /
-[**Flux**](https://fluxcd.io/) (GitOps deploy; consume Akua's output).
+Interoperates with:
+[**ArgoCD**](https://argo-cd.readthedocs.io/) / [**Flux**](https://fluxcd.io/) — render-at-CI; reconcile the raw YAML ·
+[**kro**](https://github.com/kubernetes-sigs/kro) — emit an RGD for runtime late-binding when needed ·
+[**Helm**](https://helm.sh/) — `helm.template(chart)` consumes any existing chart unchanged ·
+[**Crossplane**](https://www.crossplane.io/) — emit XR Compositions for multi-cloud infra ·
+[**kubectl**](https://kubectl.docs.kubernetes.io/) — bare apply.
 
-Full comparison matrix in
-[`docs/comparisons.md`](docs/design-notes.md).
+Comparison matrix: [`docs/design-notes.md`](docs/design-notes.md).
 
 ## Status
 
@@ -200,13 +236,15 @@ fixed attack surfaces (tar symlinks, SSRF, source-path confinement,
 credential redaction, CEL timeouts, LRU cache), and vulnerability
 disclosure process.
 
-## Relationship to CNAP
+## OSS and commercial
 
-Akua is the open-source package-build layer of
-[CNAP](https://github.com/cnap-tech)'s managed platform. Built here,
-used there. Use it standalone against your own clusters for free, or
-consume CNAP's hosted build-and-deploy service. Both paths run the
-same `akua-core`.
+akua follows the bun/deno pattern — one brand, one binary, free OSS CLI, paid hosted platform for teams who want it.
+
+**Free forever:** the `akua` CLI, every verb. KCL plugin library, browser playground, signing + distribution substrate for anyone's packages, `tier/dev` policy, deploy to any reconciler (ArgoCD, Flux, kro, Helm, kubectl) or third-party substrate (Fly, Cloudflare).
+
+**Commercial (on [akua.dev](https://akua.dev)):** curated signed policy tiers (`tier/startup`, `tier/production`, `tier/soc2`, `tier/hipaa`, `tier/fedramp-moderate`), managed review surface, cross-repo rollout orchestration, hosted git + CI runners, merchant infrastructure for ISVs, learning loop across customers. `akua deploy --to=akua` is the funnel.
+
+OSS escape hatches are real. Every package you publish is git-committed + OCI-distributed; catalog is forkable; you can self-host; you can leave. You won't want to — but the ability to is a feature, not a threat.
 
 ## Contributing
 
