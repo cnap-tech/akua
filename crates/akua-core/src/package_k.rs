@@ -183,6 +183,64 @@ fn value_kind(v: &Value) -> &'static str {
     }
 }
 
+/// Structured issue reported by [`lint_kcl`]. Mirrors KCL's own
+/// `Error.messages[*]` shape, flattened one-row-per-message so
+/// consumers don't need to walk a two-level tree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LintIssue {
+    /// `"Error"` or `"Warning"` as reported by KCL.
+    pub level: String,
+
+    /// KCL error code (e.g. `"E1001"`). Empty string when KCL emits no
+    /// code — preserved verbatim.
+    pub code: String,
+
+    pub message: String,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<i64>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<i64>,
+}
+
+/// Parse a KCL file via kcl_lang and return any parse / load errors.
+/// Pure; no execution.
+pub fn lint_kcl(path: &Path) -> Result<Vec<LintIssue>, PackageKError> {
+    use kcl_lang::{ParseProgramArgs, API};
+
+    let api = API::default();
+    let args = ParseProgramArgs {
+        paths: vec![path.to_string_lossy().into_owned()],
+        ..Default::default()
+    };
+    match api.parse_program(&args) {
+        Ok(result) => Ok(result
+            .errors
+            .into_iter()
+            .flat_map(|e| {
+                let level = e.level;
+                let code = e.code;
+                e.messages.into_iter().map(move |m| {
+                    let pos = m.pos.unwrap_or_default();
+                    LintIssue {
+                        level: level.clone(),
+                        code: code.clone(),
+                        message: m.msg,
+                        file: (!pos.filename.is_empty()).then_some(pos.filename),
+                        line: (pos.line > 0).then_some(pos.line),
+                        column: (pos.column > 0).then_some(pos.column),
+                    }
+                })
+            })
+            .collect()),
+        Err(e) => Err(PackageKError::KclEval(e.to_string())),
+    }
+}
+
 /// Format a KCL source string via kcl_lang's formatter. Used by
 /// `akua fmt` — pure function, no filesystem access.
 pub fn format_kcl(source: &str) -> Result<String, PackageKError> {

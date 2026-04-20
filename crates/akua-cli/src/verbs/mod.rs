@@ -6,6 +6,7 @@
 
 pub mod fmt;
 pub mod init;
+pub mod lint;
 pub mod render;
 pub mod verify;
 pub mod version;

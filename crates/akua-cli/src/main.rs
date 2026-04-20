@@ -10,8 +10,8 @@ use clap::{Args, Parser, Subcommand};
 
 use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::{
-    fmt as fmt_verb, init as init_verb, render as render_verb, verify as verify_verb,
-    version as version_verb, whoami as whoami_verb,
+    fmt as fmt_verb, init as init_verb, lint as lint_verb, render as render_verb,
+    verify as verify_verb, version as version_verb, whoami as whoami_verb,
 };
 use akua_core::cli_contract::{AgentContext, ExitCode, StructuredError};
 
@@ -70,6 +70,16 @@ enum Commands {
 
         #[command(flatten)]
         render_args: RenderCliArgs,
+    },
+
+    /// Parse-only check of a `package.k` (KCL syntax + imports).
+    Lint {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Path to the `package.k` file.
+        #[arg(long, default_value = "./package.k")]
+        package: PathBuf,
     },
 
     /// Format a `package.k` via KCL's canonical formatter.
@@ -137,6 +147,19 @@ fn dispatch(command: Commands) -> ExitCode {
             check,
             stdout,
         } => run_fmt(&args, &package, check, stdout),
+        Commands::Lint { args, package } => run_lint(&args, &package),
+    }
+}
+
+fn run_lint(args: &UniversalArgs, package: &std::path::Path) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = lint_verb::LintArgs {
+        package_path: package,
+    };
+    let mut stdout = io::stdout().lock();
+    match lint_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
 }
 
@@ -320,6 +343,17 @@ mod tests {
                 assert!(!force);
             }
             _ => panic!("expected init"),
+        }
+    }
+
+    #[test]
+    fn parses_lint_with_package_override() {
+        let cli = Cli::parse_from(["akua", "lint", "--package", "foo.k"]);
+        match cli.command {
+            Commands::Lint { package, .. } => {
+                assert_eq!(package, PathBuf::from("foo.k"));
+            }
+            _ => panic!("expected lint"),
         }
     }
 

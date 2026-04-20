@@ -35,6 +35,10 @@ pub const E_INIT_EMPTY_NAME: &str = "E_INIT_EMPTY_NAME";
 pub const E_FMT_CHANGED: &str = "E_FMT_CHANGED";
 pub const E_FMT_KCL: &str = "E_FMT_KCL";
 
+// ----- Lint ----------------------------------------------------------------
+
+pub const E_LINT_FAIL: &str = "E_LINT_FAIL";
+
 // ----- General -------------------------------------------------------------
 
 pub const E_IO: &str = "E_IO";
