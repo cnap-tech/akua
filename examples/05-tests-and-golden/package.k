@@ -12,7 +12,7 @@ schema Input:
     check:
         replicas >= 1, "replicas must be at least 1"
 
-input: Input
+input: Input = option("input") or Input {}
 
 _app = helm.template(nginx.Chart {
     values = nginx.Values {

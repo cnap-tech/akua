@@ -31,7 +31,7 @@ schema Input:
     check:
         replicas >= 1, "replicas must be at least 1"
 
-input: Input
+input: Input = option("input") or Input {}
 
 # --- 1. Helm source ---
 _app = helm.template(

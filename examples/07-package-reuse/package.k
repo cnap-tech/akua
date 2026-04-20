@@ -34,7 +34,7 @@ schema Input:
     check:
         len(extra_hostnames) < 10, "at most 10 extra hostnames"
 
-input: Input
+input: Input = option("input") or Input {}
 
 # --- Base composition ---
 # `pkg.render(Package, inputs)` is the package-as-engine callable, parallel

@@ -3,31 +3,26 @@
 //!
 //! Spec: [`docs/package-format.md`](../../../docs/package-format.md).
 //!
-//! # Scope
+//! Inputs flow through KCL's built-in `option()` mechanism (the
+//! in-process equivalent of `kcl -D input=<json>`): the caller's
+//! inputs are JSON-encoded and passed as an `ExecProgramArgs.args`
+//! entry keyed by [`INPUT_OPTION_KEY`]. Packages bind it with
 //!
-//! This module handles **pure-KCL** Packages only: Packages whose body
-//! is ordinary KCL code (schemas, dict literals, comprehensions). It
-//! does **not** implement the engine callables (`helm.template`,
-//! `kustomize.build`, `rgd.instantiate`, `pkg.render`) — those are
-//! registered as KCL plugins in a later phase. Consequence for now:
-//! the seven example Package.k files on disk cannot be rendered
-//! through this path (they all import external engines); tests use
-//! inline minimal fixtures.
+//! ```kcl
+//! input: Input = option("input") or Input {}
+//! ```
 //!
-//! # Input injection
-//!
-//! `ExecProgramArgs` accepts multiple `(k_filename_list, k_code_list)`
-//! entries that KCL evaluates as one module. To satisfy the `input:
-//! Input` declaration in a Package, we synthesize a second KCL file
-//! whose body is `input: Input = { … }` with the caller's values
-//! rendered as KCL-literal syntax, and pass both files in the same
-//! `exec_program` call.
+//! so a Package is standalone-valid KCL (`kcl fmt` / `kcl lint` / IDE
+//! LSPs all work without akua-specific preprocessing).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_yaml::Value;
+
+/// The `option()` key every Package uses for its `input` binding.
+const INPUT_OPTION_KEY: &str = "input";
 
 /// A loaded `Package.k` file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -78,8 +73,8 @@ pub enum PackageKError {
         source: std::io::Error,
     },
 
-    #[error("failed to serialize inputs to KCL: {0}")]
-    InputSerialize(String),
+    #[error("failed to serialize inputs to JSON: {0}")]
+    InputJson(#[from] serde_json::Error),
 
     #[error("kcl eval failed: {0}")]
     KclEval(String),
@@ -92,6 +87,9 @@ pub enum PackageKError {
 
     #[error("rendered Package must set top-level `outputs`; got no such key")]
     MissingOutputs,
+
+    #[error("rendered Package must be a top-level mapping; got {got}")]
+    TopLevelWrongShape { got: &'static str },
 
     #[error("`resources` must be a sequence; got {got}")]
     ResourcesWrongShape { got: &'static str },
@@ -127,44 +125,17 @@ impl PackageK {
     /// Execute the Package against the given inputs, returning the
     /// typed resource + output lists.
     pub fn render(&self, inputs: &Value) -> Result<RenderedPackage, PackageKError> {
-        let kcl_inputs = yaml_to_kcl(inputs)
-            .map_err(|e| PackageKError::InputSerialize(e))?;
-        let combined = combine_source(&self.source, &kcl_inputs);
-        let yaml = eval_kcl(&self.path, &combined)?;
+        let json = serde_json::to_string(inputs)?;
+        let yaml = eval_kcl(&self.path, &self.source, &json)?;
         parse_rendered(&yaml)
     }
 }
 
-/// Rewrite the Package source for KCL evaluation:
-///
-/// 1. Strip the bare `input: Input` declaration — KCL rejects type-
-///    annotated module-level bindings without an assignment.
-/// 2. Prepend the binding we actually want: `input = Input { … }`
-///    with the caller's values rendered as a KCL literal.
-///
-/// KCL evaluates files as independent modules, so the injected binding
-/// has to share the same `k_code_list` entry as the body that
-/// references `input.*`.
-fn combine_source(source: &str, kcl_inputs: &str) -> String {
-    let stripped: String = source
-        .lines()
-        .filter(|line| line.trim() != "input: Input")
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    // Emit the binding *after* the schema definitions so `Input` is in
-    // scope. Anchoring to the end of the declarations is tricky without
-    // a parser, but placing the binding at the top relies on KCL's
-    // hoisting of schema types — which it supports. Prepending works.
-    format!("{stripped}\n\n_akua_input = Input {kcl_inputs}\ninput = _akua_input\n")
-}
-
 fn parse_rendered(yaml: &str) -> Result<RenderedPackage, PackageKError> {
     let top: Value = serde_yaml::from_str(yaml)?;
+    let got = value_kind(&top);
     let Value::Mapping(map) = top else {
-        return Err(PackageKError::ResourcesWrongShape {
-            got: value_kind(&Value::Null),
-        });
+        return Err(PackageKError::TopLevelWrongShape { got });
     };
 
     let resources_val = map
@@ -212,70 +183,17 @@ fn value_kind(v: &Value) -> &'static str {
     }
 }
 
-/// Serialize a YAML value into KCL-literal syntax. Primitives, lists,
-/// and maps are the only shapes we need; anchors/tags are rejected.
-fn yaml_to_kcl(v: &Value) -> Result<String, String> {
-    match v {
-        Value::Null => Ok("None".to_string()),
-        Value::Bool(true) => Ok("True".to_string()),
-        Value::Bool(false) => Ok("False".to_string()),
-        Value::Number(n) => Ok(n.to_string()),
-        Value::String(s) => Ok(kcl_string_literal(s)),
-        Value::Sequence(seq) => {
-            let items: Result<Vec<_>, _> = seq.iter().map(yaml_to_kcl).collect();
-            Ok(format!("[{}]", items?.join(", ")))
-        }
-        Value::Mapping(map) => {
-            let mut entries = Vec::with_capacity(map.len());
-            for (k, val) in map {
-                let key = match k {
-                    Value::String(s) => s.clone(),
-                    other => {
-                        return Err(format!(
-                            "non-string map key not supported: {:?}",
-                            other
-                        ));
-                    }
-                };
-                // KCL uses identifier-or-string keys; wrap in quotes
-                // unconditionally for safety.
-                entries.push(format!("{} = {}", kcl_string_literal(&key), yaml_to_kcl(val)?));
-            }
-            Ok(format!("{{{}}}", entries.join(", ")))
-        }
-        Value::Tagged(_) => Err("tagged YAML values not supported in inputs".to_string()),
-    }
-}
-
-fn kcl_string_literal(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for ch in s.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{{{:04x}}}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
-}
-
-/// Invoke `kcl-lang`'s `exec_program` with a single `(path, code)`
-/// pair, returning the rendered YAML string. Mirrors
-/// `engine::kcl::eval_kcl` but exposes the preprocessed code string
-/// rather than re-reading from disk.
-fn eval_kcl(path: &Path, code: &str) -> Result<String, PackageKError> {
-    use kcl_lang::{ExecProgramArgs, API};
+fn eval_kcl(path: &Path, code: &str, option_json: &str) -> Result<String, PackageKError> {
+    use kcl_lang::{Argument, ExecProgramArgs, API};
 
     let api = API::default();
     let args = ExecProgramArgs {
         k_filename_list: vec![path.to_string_lossy().into_owned()],
         k_code_list: vec![code.to_string()],
+        args: vec![Argument {
+            name: INPUT_OPTION_KEY.to_string(),
+            value: option_json.to_string(),
+        }],
         ..Default::default()
     };
     match api.exec_program(&args) {
@@ -298,14 +216,15 @@ mod tests {
     use super::*;
     use serde_yaml::Mapping;
 
-    /// Pure-KCL fixture: no engine imports, no external charts. Tests a
-    /// Package that emits a single ConfigMap whose `data.count` reflects
-    /// `input.replicas`.
+    /// Pure-KCL fixture: no engine imports, no external charts. Emits
+    /// one ConfigMap whose `data.count` reflects `input.replicas`. Uses
+    /// the spec's canonical `option("input")` binding so it runs under
+    /// vanilla `kcl` as well as through this loader.
     const MINIMAL_FIXTURE: &str = r#"
 schema Input:
     replicas: int = 2
 
-input: Input
+input: Input = option("input") or Input {}
 
 resources = [{
     apiVersion: "v1"
@@ -405,7 +324,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
 schema Input:
     x: int = 0
 
-input: Input
+input: Input = option("input") or Input {}
 
 outputs = [{ kind: "RawManifests", target: "./" }]
 "#;
@@ -424,7 +343,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
 schema Input:
     x: int = 0
 
-input: Input
+input: Input = option("input") or Input {}
 
 resources = []
 "#;
@@ -444,7 +363,7 @@ resources = []
 schema Input:
     x: int = 0
 
-input: Input
+input: Input = option("input") or Input {}
 
 resources = []
 
@@ -477,7 +396,7 @@ outputs = [{
 schema Input:
     x: int = 0
 
-input: Input
+input: Input = option("input") or Input {}
 
 resources = []
 
@@ -494,45 +413,47 @@ outputs = [
         assert_eq!(rendered.outputs[1].name.as_deref(), Some("runtime"));
     }
 
-    // ----- yaml_to_kcl unit tests --------------------------------------
-
     #[test]
-    fn yaml_to_kcl_primitives() {
-        assert_eq!(yaml_to_kcl(&Value::Null).unwrap(), "None");
-        assert_eq!(yaml_to_kcl(&Value::Bool(true)).unwrap(), "True");
-        assert_eq!(yaml_to_kcl(&Value::Bool(false)).unwrap(), "False");
-        assert_eq!(yaml_to_kcl(&Value::Number(42.into())).unwrap(), "42");
-        assert_eq!(yaml_to_kcl(&Value::String("hi".into())).unwrap(), "\"hi\"");
-    }
+    fn render_threads_nested_input_through_schema() {
+        let fixture = r#"
+schema Database:
+    user: str = "app"
+    port: int = 5432
 
-    #[test]
-    fn yaml_to_kcl_escapes_strings() {
-        assert_eq!(
-            yaml_to_kcl(&Value::String("a\"b\\c\nd".into())).unwrap(),
-            "\"a\\\"b\\\\c\\nd\"",
-        );
-    }
+schema Input:
+    appName: str = "demo"
+    database: Database = Database {}
 
-    #[test]
-    fn yaml_to_kcl_sequence_and_mapping() {
-        let seq = Value::Sequence(vec![
-            Value::Number(1.into()),
-            Value::Number(2.into()),
-            Value::String("three".into()),
-        ]);
-        assert_eq!(yaml_to_kcl(&seq).unwrap(), "[1, 2, \"three\"]");
+input: Input = option("input") or Input {}
 
-        let mut m = Mapping::new();
-        m.insert(Value::String("k".into()), Value::String("v".into()));
-        let map = Value::Mapping(m);
-        assert_eq!(yaml_to_kcl(&map).unwrap(), "{\"k\" = \"v\"}");
-    }
+resources = [{
+    apiVersion: "v1"
+    kind: "ConfigMap"
+    metadata.name: input.appName
+    data.user: input.database.user
+    data.port: str(input.database.port)
+}]
 
-    #[test]
-    fn yaml_to_kcl_rejects_non_string_keys() {
-        let mut m = Mapping::new();
-        m.insert(Value::Number(1.into()), Value::String("v".into()));
-        let err = yaml_to_kcl(&Value::Mapping(m)).unwrap_err();
-        assert!(err.contains("non-string"), "{err}");
+outputs = [{ kind: "RawManifests", target: "./" }]
+"#;
+        let (_tmp, path) = write_fixture(fixture);
+        let pkg = PackageK::load(&path).expect("load");
+
+        // Nested input value across two schema levels.
+        let mut db = Mapping::new();
+        db.insert(Value::String("user".into()), Value::String("checkout_app".into()));
+        db.insert(Value::String("port".into()), Value::Number(6543.into()));
+
+        let rendered = pkg
+            .render(&inputs(&[
+                ("appName", Value::String("checkout".into())),
+                ("database", Value::Mapping(db)),
+            ]))
+            .expect("render");
+
+        let cm = &rendered.resources[0];
+        assert_eq!(cm["metadata"]["name"], Value::String("checkout".into()));
+        assert_eq!(cm["data"]["user"], Value::String("checkout_app".into()));
+        assert_eq!(cm["data"]["port"], Value::String("6543".into()));
     }
 }

@@ -27,7 +27,7 @@ schema Input:
         user: str = "app"
     }
 
-input: Input
+input: Input = option("input") or Input {}
 
 # Postgres cluster. CloudNativePG's operator creates a Secret named
 # `${cluster.name}-app` with key `uri` — predictable by convention.

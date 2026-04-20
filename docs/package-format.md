@@ -71,7 +71,15 @@ The `Input` schema declares what customers (or App resources) must provide to re
 
 Rules:
 
-- Must be named `Input` (lowercase `input: Input` bound below).
+- Must be named `Input`. The binding line is canonically:
+
+  ```python
+  input: Input = option("input") or Input {}
+  ```
+
+  `option("input")` reads the value the runtime provides (via KCL's `-D` flag or the equivalent in `ExecProgramArgs.args`). `or Input {}` falls back to schema defaults when nothing is supplied. This is the only non-obvious line in a Package — every Package uses it verbatim.
+
+  The pattern is deliberate: with this binding the Package is **standalone-valid KCL** (runnable via `kcl package.k -D input='{"…"}'`), so `kcl fmt` / `kcl lint` / IDE LSPs all work on Packages without akua-specific preprocessing.
 - Fields use KCL's native type syntax: `str`, `int`, `float`, `bool`, `[T]`, `{str: T}`, unions (`"a" | "b" | "c"`), nested schemas.
 - Fields without defaults are required. Fields with defaults are optional.
 - Use KCL docstrings for field documentation — `akua` tooling surfaces them in autocomplete and generated docs.

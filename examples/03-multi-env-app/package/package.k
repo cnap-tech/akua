@@ -38,7 +38,7 @@ schema DatabaseInput:
     @ui(order=1)
     user: str = "app"
 
-input: Input
+input: Input = option("input") or Input {}
 
 _pg = helm.template(cnpg.Chart {
     values = cnpg.Values {

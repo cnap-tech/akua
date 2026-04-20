@@ -33,7 +33,7 @@ schema Input:
     check:
         replicas >= 1, "replicas must be at least 1"
 
-input: Input
+input: Input = option("input") or Input {}
 
 # Consume the upstream nginx chart unchanged. Public schema ↔ chart values
 # wiring happens inline; no chart fork needed.
