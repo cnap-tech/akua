@@ -29,6 +29,8 @@ akua is a typed, signed, deterministic toolkit for cloud-native packaging. You a
 
 It ships as a single OSS binary — `akua` — with the full surface of verbs: author, render, sign, publish, diff, attest, deploy, dev-loop, policy-check, audit, query. One binary. One mental model. The bun/deno pattern applied to cloud-native.
 
+**Agent-friendly by default.** `akua` detects when it's invoked from Claude Code, Cursor, Codex, Gemini CLI, Goose, Amp, OpenCode, Cline, and other AI agents — auto-enables JSON output, typed exit codes, structured errors, no interactive prompts. Ships an installable [skills library](skills/) conforming to the [Agent Skills Specification](https://agentskills.io) so agents gain akua competence out of the box. No MCP server — shell + skills costs orders of magnitude less context.
+
 ```python
 # package.k — a typed akua Package
 import akua.helm
@@ -93,6 +95,19 @@ cargo install --git https://github.com/cnap-tech/akua akua-cli
 ```
 
 Prebuilt binaries for every target live on [GitHub Releases][releases] — each artefact ships with a SHA-256 checksum file.
+
+**Install akua into your AI agent too:**
+
+```sh
+# Universal — works with any Agent-Skills-compatible agent
+npx skills install github:cnap-tech/akua/skills
+
+# Claude Code — skills mount automatically from ./skills/ in an opened project,
+# or globally:
+cp -r skills/* ~/.claude/skills/
+```
+
+See [`docs/agent-usage.md`](docs/agent-usage.md) for Cursor, Codex, Gemini CLI, Goose, Amp, OpenCode, Cline, and 25+ other agents.
 
 > [!WARNING]
 > **Pre-alpha.** APIs, CLI flags, and the `v1alpha1` schema shape are subject to change. Don't build production workloads on this yet. Do file issues if something surprises you.
@@ -187,8 +202,10 @@ KCL is the authoring language; Helm, kro RGDs, kustomize are callable KCL functi
 Deep dives:
 [`docs/architecture.md`](docs/architecture.md) ·
 [`docs/cli.md`](docs/cli.md) ·
-[`docs/sdk.md`](docs/sdk.md) ·
 [`docs/cli-contract.md`](docs/cli-contract.md) ·
+[`docs/sdk.md`](docs/sdk.md) ·
+[`docs/agent-usage.md`](docs/agent-usage.md) ·
+[`skills/`](skills/) ·
 [`docs/examples/`](docs/examples/) ·
 [`docs/vision.md`](docs/vision.md) ·
 [`docs/roadmap.md`](docs/roadmap.md)
