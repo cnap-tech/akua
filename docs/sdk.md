@@ -89,17 +89,29 @@ class Akua {
   readonly rollout: RolloutAPI;
   readonly registry: RegistryAPI;
 
-  // Direct verb equivalents (convenience)
+  // Authoring + build
   init(opts: InitOptions): Promise<InitResult>;
   add(opts: AddOptions): Promise<AddResult>;
-  lint(opts: LintOptions): Promise<LintResult>;
   render(opts: RenderOptions): Promise<RenderResult>;
   diff(a: string, b: string, opts?: DiffOptions): Promise<DiffResult>;
   attest(opts: AttestOptions): Promise<AttestResult>;
   publish(opts: PublishOptions): Promise<PublishResult>;
   pull(ref: string, opts?: PullOptions): Promise<PullResult>;
   inspect(ref: string, opts?: InspectOptions): Promise<InspectResult>;
+  export(opts: ExportOptions): Promise<ExportResult>;
+
+  // Develop (matches CLI verbs: test, fmt, check, lint, bench, cov, eval, repl)
+  test(opts?: TestOptions): Promise<TestResult>;
+  fmt(opts?: FmtOptions): Promise<FmtResult>;
+  check(opts?: CheckOptions): Promise<CheckResult>;
+  lint(opts?: LintOptions): Promise<LintResult>;
+  bench(opts?: BenchOptions): Promise<BenchResult>;
+  cov(opts?: CovOptions): Promise<CovResult>;
+  eval(query: string, opts?: EvalOptions): Promise<EvalResult>;
+
+  // Deploy loop
   dev(opts?: DevOptions): Promise<DevSession>;
+  verify(opts?: VerifyOptions): Promise<VerifyResult>;  // checks akua.mod ↔ akua.sum
 
   // Session
   login(opts: LoginOptions): Promise<void>;
@@ -120,9 +132,18 @@ interface AkuaOptions {
   cacheDir?: string;           // override cache location
   timeout?: string;            // default timeout for operations (e.g. '5m')
   logLevel?: 'debug'|'info'|'warn'|'error';
+  engine?: 'auto' | 'embedded' | 'shell';  // engine selection default
   signal?: AbortSignal;        // cancel long-running ops
 }
 ```
+
+### Universal option — `engine`
+
+Methods that invoke an engine (render, test, lint, bench, policy.check, etc.) accept an `engine?: 'auto' | 'embedded' | 'shell'` override. Default behavior: embedded engine bundled with akua. Shell-out is an escape hatch when a specific engine version on `$PATH` is required. See [embedded-engines.md](embedded-engines.md).
+
+### Universal option — `idempotencyKey`
+
+Write methods (`publish`, `deploy.apply`, `secret.rotate`, etc.) accept `idempotencyKey?: string`. If the same key is presented twice, the second call is a no-op that returns the original result. See [cli-contract.md §3](cli-contract.md#3-writes-are-idempotent).
 
 ---
 
@@ -130,6 +151,7 @@ interface AkuaOptions {
 
 ```ts
 interface PackageAPI {
+  // Authoring + build
   init(opts: InitOptions): Promise<InitResult>;
   inspect(ref: string, opts?: InspectOptions): Promise<PackageInfo>;
   diff(a: string, b: string, opts?: DiffOptions): Promise<DiffResult>;
@@ -137,7 +159,37 @@ interface PackageAPI {
   attest(opts: AttestOptions): Promise<AttestResult>;
   publish(opts: PublishOptions): Promise<PublishResult>;
   pull(ref: string, opts?: PullOptions): Promise<PullResult>;
-  lint(opts: LintOptions): Promise<LintResult>;
+  export(opts: PackageExportOptions): Promise<PackageExportResult>;
+
+  // Develop
+  test(opts?: PackageTestOptions): Promise<TestResult>;
+  check(opts?: CheckOptions): Promise<CheckResult>;       // syntax + type pass only
+  lint(opts?: LintOptions): Promise<LintResult>;          // kcl lint + cross-engine
+  fmt(opts?: FmtOptions): Promise<FmtResult>;
+}
+
+interface PackageExportOptions {
+  path?: string;
+  format: 'json-schema' | 'openapi' | 'yaml' | 'oci-bundle';
+  outFile?: string;
+  pretty?: boolean;
+  engine?: 'auto' | 'embedded' | 'shell';
+}
+
+interface PackageExportResult {
+  format: string;
+  bytes: number;
+  path?: string;
+  content?: string;   // when outFile is omitted
+}
+
+interface PackageTestOptions {
+  path?: string;
+  filter?: RegExp | string;
+  coverage?: boolean;
+  golden?: 'verify' | 'regenerate';
+  watch?: boolean;
+  engine?: 'auto' | 'embedded' | 'shell';
 }
 
 interface InitOptions {
@@ -226,7 +278,13 @@ interface AppAPI {
   get(name: string): Promise<App>;
   apply(app: AppSpec, opts?: ApplyOptions): Promise<DeployHandle>;
   delete(name: string, opts?: { force?: boolean }): Promise<void>;
+
+  // KRM resource export — generate a YAML view from the canonical KCL
+  export(name: string, opts: { format: 'yaml' | 'json' }): Promise<string>;
 }
+
+// Every cluster-facing KRM has the same shape (Environment, Cluster, Secret,
+// SecretStore, Gateway). They all expose list / get / apply / delete / export.
 
 interface AppSpec {
   name: string;
@@ -328,13 +386,58 @@ interface SecretTrace extends SecretRef {
 
 ```ts
 interface PolicyAPI {
+  // Evaluation
   check(opts: PolicyCheckOptions): Promise<PolicyVerdict>;
+
+  // Authoring
   tiers(): Promise<PolicyTierInfo[]>;
   show(tier: string): Promise<PolicyDefinition>;
   diff(a: string, b: string): Promise<PolicyDiff>;
   install(tier: string, opts?: { from?: string }): Promise<void>;
   fork(tier: string, opts: { as: string }): Promise<PolicyDefinition>;
-  publish(tier: string): Promise<PublishResult>;
+  publish(tier: string, opts?: { idempotencyKey?: string }): Promise<PublishResult>;
+  export(tier: string, opts: { format: 'rego-bundle' | 'yaml' }): Promise<string>;
+
+  // Develop
+  test(opts?: PolicyTestOptions): Promise<TestResult>;
+  explain(query: string, opts?: PolicyExplainOptions): Promise<PolicyTrace>;
+  bench(opts?: PolicyBenchOptions): Promise<BenchResult>;
+  coverage(opts?: { min?: number; format?: 'json' | 'lcov' }): Promise<CovResult>;
+  fmt(opts?: FmtOptions): Promise<FmtResult>;
+  lint(opts?: LintOptions): Promise<LintResult>;  // Regal + cross-engine
+  eval(query: string, opts?: { input?: unknown }): Promise<EvalResult>;
+}
+
+interface PolicyTestOptions {
+  path?: string;
+  filter?: RegExp | string;
+  coverage?: boolean;
+  watch?: boolean;
+  engine?: 'auto' | 'embedded' | 'shell';
+}
+
+interface PolicyExplainOptions {
+  input?: unknown;            // the document to evaluate against
+  depth?: 'notes' | 'fails' | 'full' | 'debug';   // OPA --explain mode
+  data?: string;              // policy bundle directory
+}
+
+interface PolicyTrace {
+  query: string;
+  verdict: 'allow' | 'deny' | 'needs-approval';
+  steps: Array<{
+    rule: string;
+    evaluated: boolean;
+    result?: unknown;
+    location?: { file: string; line: number };
+  }>;
+}
+
+interface PolicyBenchOptions {
+  tier?: string;
+  input?: unknown;
+  iterations?: number;
+  p99MaxMs?: number;          // fail if p99 exceeds (CI gate)
 }
 
 interface PolicyCheckOptions {
@@ -547,6 +650,117 @@ interface VerificationResult {
 
 ---
 
+## Shared result types
+
+Types used by the develop-verb methods (`test`, `fmt`, `lint`, `check`, `bench`, `cov`, `eval`, `export`) across Package and Policy APIs.
+
+```ts
+interface TestResult {
+  summary: { passed: number; failed: number; skipped: number; durationMs: number };
+  results: Array<{
+    file: string;
+    test: string;
+    status: 'pass' | 'fail' | 'skip';
+    durationMs: number;
+    message?: string;
+  }>;
+  coverage?: { overall: number; byRule: Record<string, number> };
+}
+
+interface FmtResult {
+  formatted: string[];        // files modified
+  unchanged: string[];        // files already correct
+}
+
+interface LintResult {
+  issues: Array<{
+    file: string;
+    line: number;
+    col?: number;
+    rule: string;
+    severity: 'warn' | 'error';
+    message: string;
+    fix?: string;
+  }>;
+  summary: { warn: number; error: number };
+}
+
+interface CheckResult {
+  valid: boolean;
+  summary: { files: number; errors: number; warnings: number; durationMs: number };
+  errors?: Array<{ file: string; line: number; code: string; message: string; suggestion?: string }>;
+}
+
+interface BenchResult {
+  benchmarks: Array<{
+    name: string;
+    iterations: number;
+    totalMs: number;
+    meanUs: number;
+    p99Us: number;
+    rulesEvaluated?: number;
+  }>;
+}
+
+interface CovResult {
+  overall: number;
+  byRule: Record<string, number>;
+  bySchema?: Record<string, number>;
+  uncovered: string[];
+}
+
+interface EvalResult {
+  lang: 'rego' | 'kcl';
+  query: string;
+  result: unknown;
+  durationMs: number;
+}
+
+interface ExportOptions {
+  // Top-level export — dispatches to PackageAPI.export / PolicyAPI.export /
+  // AppAPI.export / etc. based on the target.
+  target?: string;            // "app:checkout", "policy:tier/production", "package:."
+  format: 'json-schema' | 'openapi' | 'yaml' | 'json' | 'rego-bundle' | 'oci-bundle';
+  outFile?: string;
+  pretty?: boolean;
+}
+
+interface ExportResult {
+  format: string;
+  bytes: number;
+  path?: string;
+  content?: string;
+}
+
+interface VerifyResult {
+  valid: boolean;                    // akua.mod ↔ akua.sum consistency
+  issues: Array<{
+    dep: string;
+    issue: 'digest-mismatch' | 'signature-invalid' | 'unsigned' | 'missing';
+    details: string;
+  }>;
+}
+```
+
+## Identity — agent context
+
+`whoami()` returns the current identity including any detected agent context:
+
+```ts
+interface Identity {
+  identity: string;
+  registries: Array<{ url: string; user: string; expiresAt?: string }>;
+  scopes: string[];
+  agentContext?: {
+    detected: boolean;
+    agent?: string;             // 'claude-code' | 'cursor' | 'codex' | 'gemini-cli' | ...
+    sourceEnv?: string;         // the env var that triggered detection
+  };
+}
+```
+
+When an agent runs `akua whoami --json`, the `agentContext` field is populated from the env-var-based auto-detection (see [cli-contract.md §1.5](cli-contract.md#15-agent-context-auto-detection)). Useful for agents verifying they're operating inside the expected runtime.
+
 ## Error handling
 
 Every SDK method throws a typed `AkuaError` on failure:
@@ -670,9 +884,13 @@ You can always reach for the CLI if the SDK is missing something. You can always
 The SDK's types mirror the underlying format specs. For the authoritative data shapes:
 
 - **Package** (KCL program) — [package-format.md](package-format.md)
+- **Policy** (Rego host + pluggable engines) — [policy-format.md](policy-format.md)
 - **App / Environment / Cluster / Secret / Gateway** (cluster-facing) — [krm-vocabulary.md](krm-vocabulary.md)
 - **Rollout / Runbook / Budget / Incident / Experiment / Tenant** (control-plane, typed KCL) — [krm-vocabulary.md](krm-vocabulary.md)
-- **Policy** (Rego) — [policy-format.md](policy-format.md)
 - **Lockfile** (`akua.mod` + `akua.sum`) — [lockfile-format.md](lockfile-format.md)
+- **CLI contract** (invariants every method honors) — [cli-contract.md](cli-contract.md)
+- **CLI reference** (the verbs the SDK methods mirror) — [cli.md](cli.md)
+- **Embedded engines** (`engine?: 'auto' | 'embedded' | 'shell'`) — [embedded-engines.md](embedded-engines.md)
+- **Agent usage + auto-detection** — [agent-usage.md](agent-usage.md)
 
-TypeScript types in `@akua/sdk` are generated from the same KRM schemas the CLI consumes, so a field shape in the SDK always matches the file-format spec.
+TypeScript types in `@akua/sdk` are generated from the same KRM schemas the CLI consumes, so a field shape in the SDK always matches the file-format spec. When the spec evolves, the generated types follow on the next `@akua/sdk` release.
