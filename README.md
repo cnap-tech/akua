@@ -25,53 +25,26 @@
 
 ## What is akua?
 
-akua is a typed, signed, deterministic toolkit for cloud-native packaging. You author packages in **KCL** — a typed configuration language with real types, functions, and imports. Existing Helm charts, kro RGDs, and Kustomize bases are callable KCL functions, so you consume the whole ecosystem unchanged. Packages render offline in CI, produce committable raw YAML, and emit a SLSA v1 attestation by default.
+akua is an all-in-one toolkit for cloud-native packaging. It ships as a single executable called `akua`, written in Rust.
 
-It ships as a single OSS binary — `akua` — with the full surface of verbs: author, render, sign, publish, diff, attest, deploy, dev-loop, policy-check, audit, query. One binary. One mental model. The bun/deno pattern applied to cloud-native.
-
-**Agent-friendly by default.** `akua` detects when it's invoked from Claude Code, Cursor, Codex, Gemini CLI, Goose, Amp, OpenCode, Cline, and other AI agents — auto-enables JSON output, typed exit codes, structured errors, no interactive prompts. Ships an installable [skills library](skills/) conforming to the [Agent Skills Specification](https://agentskills.io) so agents gain akua competence out of the box. No MCP server — shell + skills costs orders of magnitude less context.
-
-```python
-# package.k — a typed akua Package
-import akua.helm
-import charts.cnpg    as cnpg
-import charts.webapp  as webapp
-
-schema Input:
-    appName:  str
-    hostname: str
-    replicas: int = 3
-
-input: Input
-
-_pg = helm.template(cnpg.Chart {
-    values = cnpg.Values {
-        cluster.name      = "${input.appName}-pg"
-        cluster.instances = 3
-    }
-})
-
-_app = helm.template(webapp.Chart {
-    values = webapp.Values {
-        replicaCount     = input.replicas
-        ingress.hostname = input.hostname
-    }
-})
-
-resources = [*_pg, *_app]
-outputs   = [{ kind: "RawManifests", target: "./" }]
-```
-
-Render with typed inputs, committed to git, applied by ArgoCD / Flux / kro / Helm / kubectl — whichever reconciler the customer uses:
+At its core, packages are authored in **KCL** — a typed configuration language with real types, functions, and imports. Existing Helm charts, kro RGDs, and Kustomize bases are callable KCL functions, so the whole ecosystem works unchanged.
 
 ```bash
-akua init my-pkg                      # scaffold a typed Package
+akua init my-app                      # scaffold a typed package
 akua render --inputs inputs.yaml      # render to raw YAML, signed
-akua diff v1 v2                       # structural diff (schema, sources, manifests)
-akua deploy --to=argo                 # hydrate PR against the deploy repo
-akua dev                              # sub-second hot-reload against a local cluster
-akua inspect oci://pkg.akua.dev/...   # audit any published package, no install
 ```
+
+The `akua` command-line tool is also a package manager, deploy driver, dev loop, policy engine, and audit spine. Instead of juggling `helm` + `crane` + `cosign` + `kubectl` + a CORS-proxy backend, you only need `akua`.
+
+```bash
+akua diff v1 v2                       # structural diff (schema, sources, manifests)
+akua publish oci://pkg.example.com/my-app:v1   # signed + SLSA L3 attested
+akua deploy --to=argo                 # hydrate a PR against the deploy repo
+akua dev                              # sub-second hot-reload against a local cluster
+akua inspect oci://...                # audit any published package, no install
+```
+
+Designed agent-first: auto-detects Claude Code, Cursor, Codex, Gemini CLI, Goose, Amp, OpenCode, and Cline, emitting structured JSON. Ships a [skills library](skills/) conforming to the [Agent Skills Specification](https://agentskills.io).
 
 <p align="center">
   <img alt="akua init → akua render → akua diff"
@@ -81,8 +54,6 @@ akua inspect oci://pkg.akua.dev/...   # audit any published package, no install
 
 ## Install
 
-akua supports Linux (x64 & arm64) and macOS (x64 & Apple Silicon). Windows binaries land with `v0.1.1`.
-
 ```sh
 # with install script (recommended)
 curl -fsSL https://akua.dev/install | sh
@@ -90,24 +61,14 @@ curl -fsSL https://akua.dev/install | sh
 # with Homebrew
 brew install cnap-tech/tap/akua
 
-# from source (any platform with a Rust toolchain)
+# from source
 cargo install --git https://github.com/cnap-tech/akua akua-cli
-```
 
-Prebuilt binaries for every target live on [GitHub Releases][releases] — each artefact ships with a SHA-256 checksum file.
-
-**Install akua into your AI agent too:**
-
-```sh
-# Universal — works with any Agent-Skills-compatible agent
+# into your AI agent (universal)
 npx skills install github:cnap-tech/akua/skills
-
-# Claude Code — skills mount automatically from ./skills/ in an opened project,
-# or globally:
-cp -r skills/* ~/.claude/skills/
 ```
 
-See [`docs/agent-usage.md`](docs/agent-usage.md) for Cursor, Codex, Gemini CLI, Goose, Amp, OpenCode, Cline, and 25+ other agents.
+Prebuilt binaries live on [GitHub Releases][releases], each with a SHA-256 checksum. Agent setup for Claude Code, Cursor, Codex, Gemini CLI, Goose, Amp, and 25+ others: [`docs/agent-usage.md`](docs/agent-usage.md).
 
 > [!WARNING]
 > **Pre-alpha.** APIs, CLI flags, and the `v1alpha1` schema shape are subject to change. Don't build production workloads on this yet. Do file issues if something surprises you.
