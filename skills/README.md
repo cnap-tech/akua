@@ -35,7 +35,8 @@ Validation: `npx skills-ref validate ./skills/<skill-name>`
 | [migrate-helmfile](migrate-helmfile/) | Convert helmfile.yaml to an akua Package |
 | [rotate-secret](rotate-secret/) | Rotate a shared secret across every install |
 | [publish-signed](publish-signed/) | Publish with cosign signature + SLSA attestation |
-| [apply-policy-tier](apply-policy-tier/) | Subscribe to and apply a policy tier (soc2, hipaa, …) |
+| [apply-policy-tier](apply-policy-tier/) | Subscribe to and apply a policy tier (audit-ready, etc.) |
+| [test-and-lint](test-and-lint/) | Set up tests, linting, formatting, coverage for Packages + Policies |
 
 ---
 

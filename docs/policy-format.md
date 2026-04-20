@@ -304,10 +304,145 @@ akua publish --policy my-org-production --to oci://policies.acme.com/my-org-prod
 
 ---
 
-## 11. Relationship to other docs
+## 11. Testing, linting, tracing
+
+Policies without tests are liabilities. akua embeds OPA's full testing and debugging surface so authors work with the same ergonomics as the OPA CLI, without requiring OPA on `$PATH`.
+
+### Writing tests
+
+Rego test files are `*_test.rego`. Each test is a rule beginning with `test_`:
+
+```rego
+# policies/production_test.rego
+package akua.policies.my_org_production
+
+import future.keywords
+
+test_deny_missing_team_label {
+    deny["production Deployments must have a team label"] with input as {
+        "resource": {
+            "kind": "Deployment",
+            "metadata": {"name": "api", "labels": {}}
+        }
+    }
+}
+
+test_allow_with_team_label {
+    count(deny) == 0 with input as {
+        "resource": {
+            "kind": "Deployment",
+            "metadata": {"name": "api", "labels": {"team": "payments"}}
+        }
+    }
+}
+```
+
+Run:
+
+```sh
+akua test                       # runs all Rego + KCL tests
+akua test --coverage            # includes per-rule coverage
+akua test --watch               # TDD mode
+```
+
+Every test runs via the embedded OPA (see [embedded-engines.md](embedded-engines.md)). Output matches `opa test` structure; coverage format is compatible with standard OPA coverage tooling.
+
+### Integration tests (render + policy)
+
+The `akua.render` custom builtin lets policy tests exercise the full pipeline:
+
+```rego
+test_production_package_passes_tier {
+    rendered := akua.render({
+        "package": "oci://pkg.example.com/webapp:3.2",
+        "inputs":  {"hostname": "example.com", "replicas": 3}
+    })
+    count(deny) == 0 with input as rendered
+}
+
+test_dev_inputs_still_fail_production_tier {
+    rendered := akua.render({
+        "package": "oci://pkg.example.com/webapp:3.2",
+        "inputs":  {"hostname": "example.com", "replicas": 0}  # zero replicas
+    })
+    deny["production deployments need at least 2 replicas"] with input as rendered
+}
+```
+
+No separate test framework. No mocking. The package gets rendered, the policy runs against it, assertions fire. End-to-end correctness verified in one place.
+
+### Linting
+
+```sh
+akua lint
+```
+
+Runs:
+
+- **Regal** (embedded) on `.rego` files — style rules, performance anti-patterns (top-level iteration, unused imports)
+- **KCL lint** on `.k` files — style rules, missing docstrings, unreachable code
+- **Cross-engine** checks unique to akua — e.g., a Package references a Policy that doesn't exist in the workspace
+
+Output is structured per [cli.md](cli.md#akua-lint). Severity levels: warn, error. CI gates can require `--severity=error` be clean.
+
+### Formatting
+
+```sh
+akua fmt                        # in-place
+akua fmt --check                # fail CI if formatting needed
+akua fmt --diff                 # preview changes without applying
+```
+
+Runs `opa fmt` (embedded) on `.rego` files and `kcl fmt` (embedded) on `.k` files. Both are idempotent.
+
+### Tracing
+
+When a policy denies and you need to understand why:
+
+```sh
+akua trace 'data.akua.policies.my_org_production.deny' --input=./deploy/api.yaml
+```
+
+Routes OPA's `--explain full` output. Shows rule-by-rule evaluation with booleans at each step. Invaluable for debugging complex compositions.
+
+For agents: `akua trace --depth=full --json` emits structured event trees; agents parse to reason about why a rule did or didn't fire.
+
+### Benchmarking
+
+```sh
+akua bench --policy=tier/production --input=./deploy/
+```
+
+Uses OPA partial evaluation to produce per-rule latency numbers. Critical for policies that run in admission webhooks (sub-millisecond budget) or at scale in CI.
+
+### Coverage reports
+
+```sh
+akua cov --min=80               # fail if policy coverage is below 80%
+akua cov --format=lcov          # produce lcov for code-review tooling
+```
+
+Embedded OPA's coverage report, rolled up across Rego files + imported tier bundles. Useful as a CI gate — policies that silently add rules without tests get caught.
+
+### REPL
+
+```sh
+akua repl
+> :mode rego
+rego> data.akua.policies.production.deny with input as { resource: { kind: "Deployment" } }
+[...]
+rego> :trace
+(switches to trace mode; next query shows full evaluation)
+```
+
+---
+
+## 12. Relationship to other docs
 
 - **[package-format.md](package-format.md)** — how `check:` blocks in KCL complement Rego
 - **[lockfile-format.md](lockfile-format.md)** — how Rego imports are pinned
-- **[cli.md — `akua policy`](cli.md#akua-policy)** — the verbs that operate on policy
+- **[cli.md — `akua policy` / `akua test` / `akua trace` / `akua bench`](cli.md)** — the verbs that operate on policy
 - **[krm-vocabulary.md — Policy / Environment](krm-vocabulary.md)** — how policy attaches to an Environment
+- **[embedded-engines.md](embedded-engines.md)** — OPA, Regal, Kyverno-to-Rego converter, CEL all embedded via wasmtime
 - **[skills/apply-policy-tier](../skills/apply-policy-tier/SKILL.md)** — agent workflow for subscribing to a tier
+- **[skills/test-and-lint](../skills/test-and-lint/SKILL.md)** — agent workflow for setting up tests + lint gates

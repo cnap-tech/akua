@@ -50,19 +50,24 @@ AUTHOR              PUBLISH             DEPLOY              OPERATE
 ------              -------             ------              -------
 akua init           akua attest         akua deploy         akua secret
 akua add            akua publish        akua rollout        akua policy
-akua lint           akua pull           akua dev            akua audit
-akua render         akua inspect                            akua query
-akua diff                                                   akua infra
+akua render         akua pull           akua dev            akua audit
+akua diff           akua inspect                            akua query
+                                                            akua infra
 
-SESSION             META
--------             ----
-akua login          akua help
-akua logout         akua version
-akua whoami         akua telemetry
-                    akua lint-cli
+DEVELOP             SESSION             META
+-------             -------             ----
+akua test           akua login          akua help
+akua fmt            akua logout         akua version
+akua lint           akua whoami         akua telemetry
+akua check                              akua lint-cli
+akua bench
+akua trace
+akua cov
+akua repl
+akua eval
 ```
 
-Twenty verbs. Grouped by purpose. Each covered below.
+Twenty-nine verbs. Grouped by purpose. Each covered below.
 
 ---
 
@@ -832,6 +837,312 @@ akua whoami [flags]
 ```
 
 `agent_context` is present when akua auto-detected an agent session (see [cli-contract.md §1.5](cli-contract.md#15-agent-context-auto-detection)). When no agent is detected, the field is `{"detected": false}`.
+
+---
+
+## `akua test`
+
+Run unit tests for packages, policies, or both. Unified test runner across engines — detects target types by file extension.
+
+```
+akua test [path] [flags]
+```
+
+Discovers and runs:
+
+- `**/*_test.rego` — Rego policy tests via embedded OPA
+- `**/*_test.k` / `test_*.k` — KCL test files via embedded KCL
+- Kyverno `test.yaml` bundle tests (when the bundle is imported)
+- Golden-output tests (`*.golden.yaml` compared against current render)
+
+### Flags
+
+| flag | description |
+|---|---|
+| `--coverage` | emit per-rule / per-schema coverage report |
+| `--watch` | re-run on file change |
+| `--golden` | enable / verify golden-output comparisons |
+| `--filter=<regex>` | run only matching tests |
+| `--timeout=<dur>` | per-test timeout (default 30s) |
+| `--engine=<auto\|embedded\|shell>` | engine selection (see [embedded-engines.md](embedded-engines.md)) |
+
+### Exit codes
+
+0 if all pass, 1 if any fail, 2 on infrastructure error.
+
+### JSON output
+
+```json
+{
+  "summary": { "passed": 24, "failed": 1, "skipped": 2, "duration_ms": 413 },
+  "results": [
+    {
+      "file":     "policies/production_test.rego",
+      "test":     "test_deny_missing_team_label",
+      "status":   "pass",
+      "duration_ms": 12
+    },
+    {
+      "file":     "packages/api/test_api.k",
+      "test":     "test_default_replicas",
+      "status":   "fail",
+      "message":  "expected replicas=3, got 1",
+      "duration_ms": 8
+    }
+  ],
+  "coverage": { "overall": 0.72, "by_rule": { "deny_budget_exceeded": 0.0 } }
+}
+```
+
+---
+
+## `akua fmt`
+
+Format KCL and Rego sources in place.
+
+```
+akua fmt [path] [flags]
+```
+
+Uses embedded `kcl fmt` for `.k` files and embedded `opa fmt` for `.rego` files. Idempotent; safe to run in CI.
+
+### Flags
+
+| flag | description |
+|---|---|
+| `--check` | exit 1 if anything would change (CI gate); do not modify files |
+| `--diff` | print unified diff of changes without applying |
+
+### Exit codes
+
+0 success, 1 formatting needed (with `--check`), 2 parse error.
+
+---
+
+## `akua lint`
+
+Style + correctness linting across the workspace.
+
+```
+akua lint [path] [flags]
+```
+
+Runs:
+
+- **Regal** on `.rego` files (Rego style + common-error rules)
+- **`kcl lint`** on `.k` files (KCL style + schema correctness)
+- Cross-engine checks unique to akua (e.g., `Package` references `Policy` that doesn't exist)
+
+### Flags
+
+| flag | description |
+|---|---|
+| `--fix` | apply auto-fixable lint rules |
+| `--severity=<warn\|error>` | minimum severity to report (default warn) |
+| `--engine=<auto\|embedded\|shell>` | engine selection |
+
+### JSON output
+
+```json
+{
+  "issues": [
+    {
+      "file":     "policies/production.rego",
+      "line":     14,
+      "col":      3,
+      "rule":     "regal:style/use-in-operator",
+      "severity": "warn",
+      "message":  "prefer 'in' over loop iteration",
+      "fix":      "replace ... with ..."
+    },
+    {
+      "file":     "package.k",
+      "line":     8,
+      "col":      1,
+      "rule":     "kcl:style/missing-docstring",
+      "severity": "warn",
+      "message":  "schema Input has no docstring"
+    }
+  ],
+  "summary": { "warn": 2, "error": 0 }
+}
+```
+
+---
+
+## `akua check`
+
+Syntax + type + dependency check. No execution, no rendering. Fast.
+
+```
+akua check [path] [flags]
+```
+
+Stricter than `akua lint` (actual compile errors, not style); cheaper than `akua render` (doesn't invoke engines). Good for IDE save hooks and pre-commit.
+
+### JSON output
+
+```json
+{
+  "valid": true,
+  "summary": { "files": 12, "errors": 0, "warnings": 0, "duration_ms": 89 }
+}
+```
+
+On error:
+
+```json
+{
+  "valid": false,
+  "errors": [
+    {
+      "file":  "package.k",
+      "line":  14,
+      "code":  "E_SCHEMA_INVALID",
+      "message": "expected int, got string",
+      "suggestion": "remove quotes around value"
+    }
+  ]
+}
+```
+
+---
+
+## `akua bench`
+
+Benchmark policy evaluation and package render latency.
+
+```
+akua bench [path] [flags]
+```
+
+Uses OPA partial evaluation for policy benchmarks; the KCL interpreter's own timing for package render. Intended for high-throughput evaluators (admission webhooks, CI gates at scale).
+
+### Flags
+
+| flag | description |
+|---|---|
+| `--iterations=<n>` | run each benchmark N times (default 1000) |
+| `--input=<file>` | use this input for the benchmark (default: workspace defaults) |
+| `--engine=<auto\|embedded\|shell>` | engine selection |
+
+### JSON output
+
+```json
+{
+  "benchmarks": [
+    {
+      "name":            "tier/production:deny",
+      "iterations":      1000,
+      "total_ms":        47,
+      "mean_us":         47,
+      "p99_us":          82,
+      "rules_evaluated": 47
+    }
+  ]
+}
+```
+
+---
+
+## `akua trace`
+
+Explain the evaluation path of a policy query. Useful for debugging "why did this rule deny?" or "why didn't this rule fire?"
+
+```
+akua trace <query> [flags]
+```
+
+Passes through OPA's `--explain` with structured output.
+
+### Flags
+
+| flag | description |
+|---|---|
+| `--input=<file>` | input document for the query |
+| `--depth=<notes\|fails\|full\|debug>` | trace verbosity (default fails) |
+| `--data=<dir>` | policy bundle directory (default: current workspace) |
+
+### Example
+
+```sh
+$ akua trace 'data.akua.policies.production.deny' --input=./deploy/api.yaml
+```
+
+```
+EVAL  data.akua.policies.production.deny
+  EVAL  input.resource.kind == "Deployment"            TRUE
+  EVAL  not input.resource.metadata.labels["team"]      TRUE
+  EVAL  msg := "production Deployments must have a team label"
+ALLOW deny[msg] evaluated to {"production Deployments must have a team label"}
+```
+
+---
+
+## `akua cov`
+
+Generate a test coverage report across rules (Rego) and schemas (KCL).
+
+```
+akua cov [path] [flags]
+```
+
+Equivalent to `akua test --coverage` but produces a standalone report. Useful for CI gates that enforce a minimum coverage percentage.
+
+### Flags
+
+| flag | description |
+|---|---|
+| `--min=<percentage>` | fail if coverage is below threshold (e.g. `--min=80`) |
+| `--format=<json\|html\|lcov>` | report format (default json) |
+
+---
+
+## `akua repl`
+
+Interactive REPL for exploring policies and packages.
+
+```
+akua repl [flags]
+```
+
+Supports two modes (tab-switched):
+
+- **Rego mode** — runs against the current policy set; evaluates expressions, shows trace, imports any `data.akua.policies.*`
+- **KCL mode** — runs against the current package; evaluates expressions, shows schema types, hot-imports modules
+
+Useful for experimenting before committing to a rule or package change.
+
+---
+
+## `akua eval`
+
+One-shot evaluator — cheap, scriptable. For Rego queries and KCL expressions without entering the REPL.
+
+```
+akua eval <query> [flags]
+akua eval --lang=rego 'data.akua.policies.production.deny'
+akua eval --lang=kcl  'schema Input; input = Input {...}; input.replicas * 2'
+```
+
+### Flags
+
+| flag | description |
+|---|---|
+| `--lang=<rego\|kcl>` | expression language (default: inferred from query syntax) |
+| `--input=<file>` | input document (Rego) or values file (KCL) |
+| `--data=<dir>` | policy / package bundle |
+
+### JSON output
+
+```json
+{
+  "lang": "rego",
+  "query": "data.akua.policies.production.deny",
+  "result": ["production Deployments must have a team label"],
+  "duration_ms": 5
+}
+```
 
 ---
 

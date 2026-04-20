@@ -170,6 +170,7 @@ Deep dives:
 [`docs/policy-format.md`](docs/policy-format.md) ·
 [`docs/krm-vocabulary.md`](docs/krm-vocabulary.md) ·
 [`docs/lockfile-format.md`](docs/lockfile-format.md) ·
+[`docs/embedded-engines.md`](docs/embedded-engines.md) ·
 [`skills/`](skills/) ·
 [`docs/examples/`](docs/examples/) ·
 [`docs/vision.md`](docs/vision.md) ·

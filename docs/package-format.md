@@ -339,10 +339,98 @@ See [examples/01-hello-webapp](examples/01-hello-webapp/) for the fully runnable
 
 ---
 
-## 11. Relationship to other docs
+## 11. Testing Packages
 
-- **[cli.md — `akua init` / `akua add` / `akua render` / `akua publish`](cli.md)** — the verbs that operate on packages
+Packages ship with tests. The test runner is built into `akua test`; no separate framework required.
+
+### Test file conventions
+
+- `test_*.k` or `*_test.k` files anywhere under the package directory are discovered automatically.
+- A test file is a KCL program that uses `assert` or `check:` blocks to express expectations against the package's render output or schema.
+
+### Example — schema defaults
+
+```python
+# test_schema.k
+import package as pkg
+
+# Required fields are satisfied by sample inputs
+_default_sample = pkg.Input {
+    appName:  "test"
+    hostname: "test.example.com"
+}
+
+# Assert default values
+assert _default_sample.replicas == 3, "default replicas should be 3"
+assert _default_sample.database.user == "app", "default db user should be 'app'"
+```
+
+### Example — render-output test
+
+```python
+# test_rendered.k
+import akua.test as test
+import package as pkg
+
+# Render the package with specific inputs
+_rendered = test.render(pkg, {
+    appName:  "checkout"
+    hostname: "checkout.example.com"
+    replicas: 5
+})
+
+# Find the Deployment and assert its shape
+_deployment = [r for r in _rendered if r.kind == "Deployment" and r.metadata.name == "checkout"][0]
+assert _deployment.spec.replicas == 5, "replicas should flow through"
+assert _deployment.spec.template.metadata.labels["team"] == "payments"
+```
+
+### Golden-output tests
+
+When you want to pin the exact rendered YAML (catching unintended changes from dep bumps), add a `test.golden.yaml` alongside inputs:
+
+```
+tests/
+├── basic/
+│   ├── inputs.yaml
+│   └── expected.golden.yaml
+└── production/
+    ├── inputs.yaml
+    └── expected.golden.yaml
+```
+
+```sh
+akua test --golden              # regenerate goldens if they drifted intentionally
+akua test --golden=verify       # fail CI if goldens don't match (default in CI)
+```
+
+### Running
+
+```sh
+akua test                       # runs everything, including Rego tests
+akua test --watch               # re-runs on file change (ideal for TDD)
+akua test --coverage            # report per-schema / per-source coverage
+akua test --filter=default      # only tests matching 'default'
+```
+
+Tests run via the embedded KCL engine (see [embedded-engines.md](embedded-engines.md)) — fast, sandboxed, deterministic.
+
+### What to test
+
+- Schema defaults and constraints — does `input.replicas = 0` correctly fail the `check:` block?
+- Rendered-output shape — does the Deployment have the right labels, the right replicaCount?
+- Policy compat — does rendering with a specific tier succeed? (Integration test; see [policy-format.md §9](policy-format.md#9-authoring-workflow))
+- Upgrade compatibility — golden tests catch "dep bump accidentally changed the rendered manifest."
+
+Packages without tests ship with a lint warning; platform teams can enforce a policy rule requiring tests for production-tier packages.
+
+---
+
+## 12. Relationship to other docs
+
+- **[cli.md — `akua init` / `akua add` / `akua render` / `akua test` / `akua publish`](cli.md)** — the verbs that operate on packages
 - **[lockfile-format.md](lockfile-format.md)** — how `akua.mod` + `akua.sum` pin imports
 - **[policy-format.md](policy-format.md)** — how Rego policies evaluate against rendered resources (separate concern from `check:` blocks)
 - **[krm-vocabulary.md](krm-vocabulary.md)** — how App, Environment, Policy KRMs interact with Packages
+- **[embedded-engines.md](embedded-engines.md)** — which engines run your tests
 - **[examples/](examples/)** — runnable Packages at increasing complexity
