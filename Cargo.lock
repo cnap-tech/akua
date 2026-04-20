@@ -33,6 +33,7 @@ dependencies = [
  "akua-core",
  "anyhow",
  "clap",
+ "serde",
  "serde_json",
  "serde_yml",
  "tempfile",
