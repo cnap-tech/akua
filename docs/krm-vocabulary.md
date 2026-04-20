@@ -413,6 +413,8 @@ For any cluster-facing resource (`App`, `Environment`, `Cluster`, `Secret`, `Sec
 
 Control-plane resources may have YAML views for interchange (e.g., pasting a Runbook spec in a Slack thread), but the canonical form is always the typed language.
 
+> **`akua export` is not `akua render`.** Export converts a KRM resource into a YAML view of the resource itself — one file, the App definition. Render evaluates a Package (the program) against inputs and produces deploy-ready Kubernetes manifests — many files, the actual workload resources. Different verbs, different outputs. See [cli.md — disambiguation table](cli.md#verb-index).
+
 ---
 
 ## Group and version stability

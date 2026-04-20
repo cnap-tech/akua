@@ -157,16 +157,25 @@ schema Input:
 
 Decorators are a future-compatible layer — they're ignored by the KCL compiler proper and consumed by `akua export` when generating UI-renderable views.
 
-### Exporting a view
+### Exporting a view vs rendering
 
-The canonical Package is KCL. For consumers that expect JSON Schema / OpenAPI (install UIs, API docs, rjsf / JSONForms, admission webhooks, client SDK generators), use `akua export`:
+The canonical Package is KCL. Two different verbs produce different outputs from it:
+
+| verb | purpose | needs inputs? | output |
+|---|---|---|---|
+| `akua export` | convert the Package's schema / metadata to a standard format for external tools | no | JSON Schema / OpenAPI / YAML / Rego bundle |
+| `akua render` | execute the Package's full pipeline and produce deploy-ready Kubernetes manifests | yes | rendered YAML the reconciler applies |
+
+For install UIs, API docs, rjsf / JSONForms, admission webhook schemas, and client SDK generators — use `akua export`. No engine invocation, no customer inputs needed.
 
 ```sh
-akua export --format=json-schema > inputs.schema.json
-akua export --format=openapi > inputs.openapi.json
+akua export --format=json-schema > inputs.schema.json     # for UI form rendering
+akua export --format=openapi > inputs.openapi.json        # for API docs / codegen
 ```
 
-The output is pure, spec-compliant JSON Schema / OpenAPI 3.1 — no akua-specific extensions. Docstrings become `description`; decorators become `x-ui` metadata (which conforming renderers may use; others ignore). Consumers that speak these standards — including every JSON Schema tool in the ecosystem — work unchanged.
+For actual deployment rendering — use `akua render` with customer inputs (covered in §9).
+
+The `export` output is pure, spec-compliant JSON Schema / OpenAPI 3.1 — no akua-specific extensions. Docstrings become `description`; decorators become `x-ui` metadata (which conforming renderers may use; others ignore). Consumers that speak these standards — including every JSON Schema tool in the ecosystem — work unchanged.
 
 **No `x-user-input` or `x-input` markers.** Previous versions of akua layered custom extensions on JSON Schema to mark user-configurable fields and embed transforms. With KCL as the authoring substrate, both are redundant: the `Input` schema IS the customer-configurable contract by definition, and transforms live as KCL code in the package body. The exported JSON Schema is standards-pure; UI renderers in the broader ecosystem don't need to learn akua-specific vocabulary.
 
@@ -481,7 +490,7 @@ Packages without tests ship with a lint warning; platform teams can enforce a po
 
 ## 12. Relationship to other docs
 
-- **[cli.md — `akua init` / `akua add` / `akua render` / `akua test` / `akua publish`](cli.md)** — the verbs that operate on packages
+- **[cli.md — `akua init` / `akua add` / `akua render` / `akua export` / `akua test` / `akua publish`](cli.md)** — the verbs that operate on packages. `render` runs the program; `export` converts the canonical form to a view.
 - **[lockfile-format.md](lockfile-format.md)** — how `akua.mod` + `akua.sum` pin imports
 - **[policy-format.md](policy-format.md)** — how Rego policies evaluate against rendered resources (separate concern from `check:` blocks)
 - **[krm-vocabulary.md](krm-vocabulary.md)** — how App, Environment, Policy KRMs interact with Packages

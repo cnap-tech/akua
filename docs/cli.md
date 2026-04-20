@@ -69,6 +69,17 @@ akua eval
 
 Thirty verbs. Grouped by purpose. Each covered below.
 
+> **Quick disambiguation — `render` vs `export` vs `inspect` vs `diff`:**
+>
+> | verb | takes | produces | invokes engines? |
+> |---|---|---|---|
+> | `render` | Package + inputs | deploy-ready manifests | yes |
+> | `export` | any canonical artifact | format view (JSON Schema, YAML, OpenAPI, Rego bundle) | no |
+> | `inspect` | a published package ref | audit report (schema, sources, signatures, attestation) | no |
+> | `diff` | two package refs | structural diff between them | no |
+>
+> When in doubt: `render` = "run the program"; `export` = "convert the format"; `inspect` = "audit what's there"; `diff` = "compare two versions."
+
 ---
 
 ## `akua init`
@@ -234,11 +245,13 @@ Or on error:
 
 ## `akua render`
 
-Render the current package to its declared outputs.
+**Run the Package's program.** Evaluate the KCL, invoke every source engine (Helm, kro, Kustomize), compose results, produce deploy-ready manifests.
 
 ```
 akua render [path] [flags]
 ```
+
+> **Not the same as `akua export`.** `render` executes the full pipeline against customer inputs and writes manifests a reconciler applies to a cluster. `export` converts a canonical artifact (schema, KRM resource, policy set) into a format view (JSON Schema, YAML, OpenAPI, Rego bundle). Render needs inputs; export usually doesn't. Render invokes engines; export is format translation. See [`akua export`](#akua-export) below.
 
 ### Flags
 
@@ -457,11 +470,13 @@ akua inspect <ref> [flags]
 
 ## `akua export`
 
-Generate a derived view of a canonical artifact. The canonical form stays KCL (or Rego, for policies); `akua export` emits JSON Schema, OpenAPI, YAML, or other standard formats for consumers that expect them.
+**Convert a canonical artifact to a format view.** The canonical form stays KCL (or Rego, for policies); `akua export` emits JSON Schema, OpenAPI, YAML, or other standard formats for consumers that expect them.
 
 ```
 akua export [target] --format=<format> [flags]
 ```
+
+> **Not the same as `akua render`.** `export` is format translation — it doesn't invoke Helm / kro / Kustomize and doesn't need customer inputs. It answers *"how do I describe this artifact in a format other tools understand?"* Use `render` when you want deploy-ready manifests; use `export` when you want a schema, a YAML view of a KRM, a Rego bundle, or API docs. See [`akua render`](#akua-render) above.
 
 ### Supported formats
 
