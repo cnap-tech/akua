@@ -29,6 +29,7 @@ Errors always go to stderr. With `--json`, errors are JSON-lines (one error per 
 ```
 
 Every error has:
+
 - `code` — stable, machine-readable identifier (SHOUTY_SNAKE_CASE)
 - `message` — human-readable summary
 - `path` — file, resource, or field that caused the error (if applicable)
@@ -38,6 +39,7 @@ Every error has:
 ### 1.3 Determinism
 
 Same inputs produce byte-identical output. Includes:
+
 - JSON output key ordering (alphabetical by default; override with `--preserve-order` where meaningful)
 - YAML output: fields sorted per the YAML style guide
 - Rendered manifests: stable ordering by `kind/name`
@@ -54,13 +56,15 @@ When `akua` is invoked inside an AI-agent session, it detects this from the envi
 
 **Detection sources**, checked at process start in this order:
 
-| env var set | agent |
-|---|---|
-| `AGENT=<name>` | emerging standard — Goose, Amp, Codex, Cline, OpenCode |
-| `CLAUDECODE=1` | Claude Code |
-| `GEMINI_CLI=1` | Gemini CLI |
-| `CURSOR_CLI=1` | Cursor CLI |
+
+| env var set         | agent                                                    |
+| ------------------- | -------------------------------------------------------- |
+| `AGENT=<name>`      | emerging standard — Goose, Amp, Codex, Cline, OpenCode   |
+| `CLAUDECODE=1`      | Claude Code                                              |
+| `GEMINI_CLI=1`      | Gemini CLI                                               |
+| `CURSOR_CLI=1`      | Cursor CLI                                               |
 | `AKUA_AGENT=<name>` | akua-specific fallback for agents we haven't yet matched |
+
 
 If any of these are set, the invocation is considered to be running in an **agent context**. Individual agents may set additional identifier variables (`GOOSE_TERMINAL`, `AMP_THREAD_ID`, `CODEX_SANDBOX`, `CLINE_ACTIVE`); we key off the primary marker above and record the secondary ones as context.
 
@@ -74,13 +78,15 @@ If any of these are set, the invocation is considered to be running in an **agen
 
 **Override semantics** (explicit always wins):
 
-| invocation | result |
-|---|---|
-| `akua render --json` in a human shell | JSON — flag wins |
-| `akua render --no-json` in an agent context | text — explicit opt-out wins |
+
+| invocation                                      | result                        |
+| ----------------------------------------------- | ----------------------------- |
+| `akua render --json` in a human shell           | JSON — flag wins              |
+| `akua render --no-json` in an agent context     | text — explicit opt-out wins  |
 | `akua render --format=text` in an agent context | text — explicit override wins |
-| `akua render` in a human shell | text — default |
-| `akua render` in an agent context | JSON — auto-detected |
+| `akua render` in a human shell                  | text — default                |
+| `akua render` in an agent context               | JSON — auto-detected          |
+
 
 **No signal, by design.**
 
@@ -114,15 +120,17 @@ Humans running akua in a terminal never notice the detection; their env vars don
 
 Typed. Seven stable codes. Verbs do not invent their own.
 
-| code | name | meaning |
-|---|---|---|
-| 0 | success | operation completed as requested |
-| 1 | user error | invalid inputs, bad flags, missing required arguments |
-| 2 | system error | unexpected failure (disk, network, bug) |
-| 3 | policy deny | policy engine rejected the operation |
-| 4 | rate limited | registry / API rate limits |
-| 5 | needs approval | operation is allowed but requires human approval |
-| 6 | timeout | operation did not complete within --timeout |
+
+| code | name           | meaning                                               |
+| ---- | -------------- | ----------------------------------------------------- |
+| 0    | success        | operation completed as requested                      |
+| 1    | user error     | invalid inputs, bad flags, missing required arguments |
+| 2    | system error   | unexpected failure (disk, network, bug)               |
+| 3    | policy deny    | policy engine rejected the operation                  |
+| 4    | rate limited   | registry / API rate limits                            |
+| 5    | needs approval | operation is allowed but requires human approval      |
+| 6    | timeout        | operation did not complete within --timeout           |
+
 
 Any other exit code is a bug. Agents branch on these codes.
 

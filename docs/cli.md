@@ -52,7 +52,7 @@ akua init           akua attest         akua deploy         akua secret
 akua add            akua publish        akua rollout        akua policy
 akua render         akua pull           akua dev            akua audit
 akua diff           akua inspect                            akua query
-                                                            akua infra
+akua export                                                 akua infra
 
 DEVELOP             SESSION             META
 -------             -------             ----
@@ -67,7 +67,7 @@ akua repl
 akua eval
 ```
 
-Twenty-nine verbs. Grouped by purpose. Each covered below.
+Thirty verbs. Grouped by purpose. Each covered below.
 
 ---
 
@@ -452,6 +452,57 @@ akua inspect <ref> [flags]
   }
 }
 ```
+
+---
+
+## `akua export`
+
+Generate a derived view of a canonical artifact. The canonical form stays KCL (or Rego, for policies); `akua export` emits JSON Schema, OpenAPI, YAML, or other standard formats for consumers that expect them.
+
+```
+akua export [target] --format=<format> [flags]
+```
+
+### Supported formats
+
+| format | input | output | for |
+|---|---|---|---|
+| `json-schema` | Package `Input` schema | JSON Schema Draft 2020-12 | install UIs, form renderers (rjsf, JSONForms) |
+| `openapi` | Package `Input` schema | OpenAPI 3.1 | API docs, client SDK generation, admission webhook schemas |
+| `yaml` | KRM resource (App, Environment, etc.) | Kubernetes YAML | interchange with non-KCL tooling |
+| `json` | KRM resource | JSON | scripting, jq pipelines |
+| `rego-bundle` | Policy set | OPA bundle tarball | uploading to Gatekeeper, Styra DAS, other OPA runtimes |
+
+### Flags
+
+| flag | description |
+|---|---|
+| `--format=<fmt>` | output format (required) |
+| `--out=<file>` | write to file (default: stdout) |
+| `--pretty` | human-readable formatting (JSON: indented; YAML: commented) |
+| `--include=<path>` | glob of paths to include (for workspace exports) |
+
+### Examples
+
+```sh
+# Export a Package's input schema as JSON Schema for a web form
+akua export --format=json-schema > inputs.schema.json
+
+# Export as OpenAPI 3.1 for API docs
+akua export --format=openapi > package.openapi.json
+
+# Export an App KRM as YAML view (useful for pasting to docs or non-KCL pipelines)
+akua export app checkout --format=yaml > app.yaml
+
+# Export a policy set as OPA bundle
+akua export --policy tier/production --format=rego-bundle --out=production.tar.gz
+```
+
+The export is a one-way projection; re-importing a YAML view back into the KCL workspace is done via `akua apply -f <file>.yaml`, which round-trips losslessly for KRM resources.
+
+### Exit codes
+
+0 success, 1 on invalid format or canonical source.
 
 ---
 

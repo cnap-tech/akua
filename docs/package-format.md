@@ -117,6 +117,59 @@ schema HostInput:
     priority: int = 0
 ```
 
+### UI hints (optional)
+
+When a Package is consumed through a UI (merchant install form, Package Studio, generated Swagger form), renderers benefit from hints about field ordering, labels, placeholders, grouping. Without these, renderers fall back to heuristics (field-name casing, schema-declaration order).
+
+akua reads UI hints from two sources:
+
+**KCL docstrings** — the field's `"""…"""` docstring becomes the UI label and description:
+
+```python
+schema Input:
+    """Public inputs for this package."""
+
+    appName: str
+    """Application name. Lowercase, hyphen-separated."""
+
+    hostname: str
+    """Public hostname. Must be a valid RFC 1123 DNS name."""
+
+    replicas: int = 3
+    """Number of replicas. Minimum 1 in production."""
+```
+
+Zero-effort for authors; zero new vocabulary. Docstrings serve double duty (human-readable + UI metadata).
+
+**KCL schema decorators** — optional, for ordering / grouping / widget hints that docstrings can't carry:
+
+```python
+schema Input:
+    @ui(order=10, group="Identity")
+    appName: str
+
+    @ui(order=20, group="Identity", placeholder="app.example.com")
+    hostname: str
+
+    @ui(order=30, group="Capacity", widget="slider", min=1, max=20)
+    replicas: int = 3
+```
+
+Decorators are a future-compatible layer — they're ignored by the KCL compiler proper and consumed by `akua export` when generating UI-renderable views.
+
+### Exporting a view
+
+The canonical Package is KCL. For consumers that expect JSON Schema / OpenAPI (install UIs, API docs, rjsf / JSONForms, admission webhooks, client SDK generators), use `akua export`:
+
+```sh
+akua export --format=json-schema > inputs.schema.json
+akua export --format=openapi > inputs.openapi.json
+```
+
+The output is pure, spec-compliant JSON Schema / OpenAPI 3.1 — no akua-specific extensions. Docstrings become `description`; decorators become `x-ui` metadata (which conforming renderers may use; others ignore). Consumers that speak these standards — including every JSON Schema tool in the ecosystem — work unchanged.
+
+**No `x-user-input` or `x-input` markers.** Previous versions of akua layered custom extensions on JSON Schema to mark user-configurable fields and embed transforms. With KCL as the authoring substrate, both are redundant: the `Input` schema IS the customer-configurable contract by definition, and transforms live as KCL code in the package body. The exported JSON Schema is standards-pure; UI renderers in the broader ecosystem don't need to learn akua-specific vocabulary.
+
 ---
 
 ## 4. Body — engine calls + transforms
