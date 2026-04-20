@@ -53,6 +53,10 @@ pub const E_DIFF_NOT_DIR: &str = "E_DIFF_NOT_DIR";
 pub const E_ADD_DEP_EXISTS: &str = "E_ADD_DEP_EXISTS";
 pub const E_ADD_INVALID_DEP: &str = "E_ADD_INVALID_DEP";
 
+// ----- Remove --------------------------------------------------------------
+
+pub const E_REMOVE_NOT_FOUND: &str = "E_REMOVE_NOT_FOUND";
+
 // ----- General -------------------------------------------------------------
 
 pub const E_IO: &str = "E_IO";

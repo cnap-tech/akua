@@ -11,8 +11,8 @@ use clap::{ArgGroup, Args, Parser, Subcommand};
 use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::{
     add as add_verb, check as check_verb, diff as diff_verb, fmt as fmt_verb, init as init_verb,
-    lint as lint_verb, render as render_verb, verify as verify_verb, version as version_verb,
-    whoami as whoami_verb,
+    lint as lint_verb, remove as remove_verb, render as render_verb, tree as tree_verb,
+    verify as verify_verb, version as version_verb, whoami as whoami_verb,
 };
 use akua_core::cli_contract::{AgentContext, ExitCode, StructuredError};
 
@@ -114,6 +114,31 @@ enum Commands {
         force: bool,
 
         /// Workspace root containing akua.toml.
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
+    },
+
+    /// Print the workspace's declared deps + lockfile entries.
+    Tree {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
+    },
+
+    /// Remove a dependency from akua.toml.
+    Remove {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Local alias of the dep to remove.
+        name: String,
+
+        /// No-op when the dep is already absent.
+        #[arg(long)]
+        ignore_missing: bool,
+
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
     },
@@ -224,6 +249,13 @@ fn dispatch(command: Commands) -> ExitCode {
             package,
         } => run_check(&args, &workspace, &package),
         Commands::Diff { args, before, after } => run_diff(&args, &before, &after),
+        Commands::Remove {
+            args,
+            name,
+            ignore_missing,
+            workspace,
+        } => run_remove(&args, &name, ignore_missing, &workspace),
+        Commands::Tree { args, workspace } => run_tree(&args, &workspace),
         Commands::Add {
             args,
             name,
@@ -239,6 +271,35 @@ fn dispatch(command: Commands) -> ExitCode {
             &args, &name, oci.as_deref(), git.as_deref(), path.as_deref(),
             version.as_deref(), tag.as_deref(), rev.as_deref(), force, &workspace,
         ),
+    }
+}
+
+fn run_tree(args: &UniversalArgs, workspace: &std::path::Path) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = tree_verb::TreeArgs { workspace };
+    let mut stdout = io::stdout().lock();
+    match tree_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
+    }
+}
+
+fn run_remove(
+    args: &UniversalArgs,
+    name: &str,
+    ignore_missing: bool,
+    workspace: &std::path::Path,
+) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = remove_verb::RemoveArgs {
+        workspace,
+        name,
+        ignore_missing,
+    };
+    let mut stdout = io::stdout().lock();
+    match remove_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
 }
 
