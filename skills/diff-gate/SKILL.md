@@ -103,7 +103,7 @@ Enable policy-tier checking in the same workflow:
 ```yaml
       - name: Policy check
         run: |
-          akua render --env production --out ./rendered
+          akua render --filter=spec.env=production --out ./rendered
           akua policy check --tier tier/production --target ./rendered --json > verdict.json
 
           verdict=$(jq -r '.verdict' verdict.json)

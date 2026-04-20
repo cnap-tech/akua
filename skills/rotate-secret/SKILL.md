@@ -81,7 +81,7 @@ Staged rollout:
 - Checks health gate (configured in the workspace's environment schema) after each batch
 - Aborts + auto-rollback on health regression
 
-For services that hot-reload secrets (via External Secrets Operator + SIGHUP, or Vault Agent), no pod restart is needed — the operator handles it. akua detects this via the consumer's `kind: App` annotation.
+For services that hot-reload secrets (via External Secrets Operator + SIGHUP, or Vault Agent), no pod restart is needed — the operator handles it. akua detects this via an annotation on the workspace's App-shaped document (user-defined schema; the annotation key is a workspace convention).
 
 ### 5. Verify
 

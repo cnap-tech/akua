@@ -136,7 +136,7 @@ jobs:
         run: akua verify
       - name: Integration test — render + policy
         run: |
-          akua render --env production --out ./rendered
+          akua render --filter=spec.env=production --out ./rendered
           akua policy check --tier tier/production --target ./rendered
 ```
 
