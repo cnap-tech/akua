@@ -1,0 +1,12 @@
+base:
+  appName:  checkout
+  hostname: checkout.example.com
+  replicas: 5
+  team:     payments
+
+dashboard_enabled: true
+experiment_X:      false
+
+extra_hostnames:
+  - checkout-canary.example.com
+  - checkout.staging.example.com

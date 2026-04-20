@@ -16,6 +16,7 @@ Every example renders without a cluster. Run `akua render` (or `akua policy chec
 | 04 | [04-policy-tier/](04-policy-tier/) | Rego tier + Kyverno compile-resolved import + `PolicySet` (typed KCL), with passing + failing fixtures |
 | 05 | [05-tests-and-golden/](05-tests-and-golden/) | `test_*.k` + `*_test.rego` + golden-fixture render snapshots — the three kinds of tests side by side |
 | 06 | [06-multi-engine/](06-multi-engine/) | Helm + Kustomize + kro RGD + inline KCL resources in one Package, with per-source output routing |
+| 07 | [07-package-reuse/](07-package-reuse/) | one akua Package composing another via `pkg.render()` — nested `Input` schemas, OCI-pinned base, attestation-chain provenance |
 
 ---
 
@@ -57,8 +58,9 @@ Each example adds exactly one concept over the prior one:
 - **03 → 04:** adds the policy stack — Rego tier, compile-resolved Kyverno import, typed `PolicySet`, tests, and fixture-driven verdicts.
 - **04 → 05:** formalizes testing — KCL unit tests, Rego policy tests, and golden render fixtures side by side.
 - **05 → 06:** demonstrates multi-engine composition — Helm + Kustomize + kro RGD + inline KCL in one Package with named output routing.
+- **06 → 07:** introduces package-of-packages composition — `pkg.render()` consumes a pinned base Package the same way `helm.template()` consumes a chart. The shape cross-package reuse takes.
 
-Beyond 06, realistic workspaces combine these patterns at scale. See the [use cases](../docs/use-cases.md) for archetypes (solo dev, small SaaS, platform team, ISV).
+Beyond 07, realistic workspaces combine these patterns at scale. See the [use cases](../docs/use-cases.md) for archetypes (solo dev, small SaaS, platform team, ISV).
 
 ---
 
