@@ -251,18 +251,23 @@ Or on error:
 akua render [path] [flags]
 ```
 
+**Discovery.** With no `path`, renders every user-authored document in the workspace whose schema declares render semantics — typically the workspace's App-shaped documents that reference a Package and carry inputs. With a `path`, renders only that file. Users author their own App / Environment / etc. schemas (akua does not specify them; see [package-format.md](package-format.md)); `render` processes whichever documents the workspace declares as renderable.
+
 > **Not the same as `akua export`.** `render` executes the full pipeline against customer inputs and writes manifests a reconciler applies to a cluster. `export` converts a canonical artifact (schema, user-authored KCL document, policy bundle) into a format view (JSON Schema, YAML, OpenAPI, Rego bundle). Render needs inputs; export usually doesn't. Render invokes engines; export is format translation. See [`akua export`](#akua-export) below.
 
 ### Flags
 
 | flag | description |
 |---|---|
-| `--inputs=<file>` | inputs (JSON/YAML) |
-| `--output=<name>` | render only this named output |
+| `--inputs=<file>` | inputs (JSON/YAML); applies when rendering a single Package directly |
+| `--output=<name>` | render only this named output (from the Package's `outputs` list) |
+| `--filter=<expr>` | narrow multi-document discovery (e.g. `--filter=spec.env=production`, `--filter=metadata.labels.team=payments`) |
 | `--out=<dir>` | write to directory (default: `./deploy/`) |
-| `--stdout` | print rendered YAML to stdout (single output only) |
+| `--stdout` | print rendered YAML to stdout (single document, single output) |
 | `--dry-run` | render but don't write files |
 | `--format=<raw\|helm\|rgd\|xr\|oci>` | override output format for single output |
+
+> **No `--env` or `--all-envs` flag.** Environments are a workspace concept, not an akua primitive. Compose envs in KCL (see [examples/03-multi-env-app](../examples/03-multi-env-app/)); narrow with `--filter` over any field you care about.
 
 ### Exit codes
 

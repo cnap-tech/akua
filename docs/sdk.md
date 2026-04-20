@@ -270,43 +270,54 @@ interface DiffResult {
 
 ---
 
-## App API
+## Document API
+
+akua does not specify an App / Environment / Cluster / Secret vocabulary. The SDK therefore exposes **generic document operations** that work against whatever KCL schemas the workspace declares. If your workspace authors an `App` schema, `akua.doc.list({ kind: 'App' })` finds them; the SDK doesn't know what fields are inside.
 
 ```ts
-interface AppAPI {
-  list(opts?: { env?: string; namespace?: string }): Promise<App[]>;
-  get(name: string): Promise<App>;
-  apply(app: AppSpec, opts?: ApplyOptions): Promise<DeployHandle>;
-  delete(name: string, opts?: { force?: boolean }): Promise<void>;
+interface DocumentAPI {
+  // Discover user-authored KCL documents in the current workspace
+  list(opts?: ListOptions): Promise<DocumentRef[]>;
 
-  // KCL-document export — generate a YAML view from the canonical KCL
-  export(name: string, opts: { format: 'yaml' | 'json' }): Promise<string>;
+  // Read a specific document by path, producing the typed KCL value
+  // the workspace's schema declares
+  get<T = unknown>(path: string): Promise<T>;
+
+  // Apply a document (kick off render + deploy according to its kind's
+  // handler, which the workspace configures)
+  apply(path: string, opts?: ApplyOptions): Promise<DeployHandle>;
+
+  // Export a KCL document as YAML/JSON (derived view)
+  export(path: string, opts: { format: 'yaml' | 'json' }): Promise<string>;
 }
 
-// User-authored KCL documents (e.g. Environment, Cluster, Secret — all user-defined) have the same shape (
-// SecretStore, Gateway). They all expose list / get / apply / delete / export.
-
-interface AppSpec {
-  name: string;
-  namespace?: string;
-  labels?: Record<string, string>;
-  spec: {
-    package: string;           // OCI ref
-    inputs: Record<string, unknown>;
-    policy?: string;
-    env?: string;
-  };
+interface ListOptions {
+  kind?: string;                              // filter by declared KCL schema name
+  filter?: Record<string, unknown>;           // field predicates (e.g. { 'spec.env': 'production' })
+  under?: string;                             // directory scope
 }
 
-interface App extends AppSpec {
-  status: {
-    phase: 'pending' | 'reconciling' | 'healthy' | 'degraded' | 'failed';
-    lastDeploy?: { changeId: string; at: string };
-    ready: number;
-    total: number;
-  };
+interface DocumentRef {
+  path: string;                               // workspace-relative path to the .k file
+  kind: string;                               // schema name declared in the KCL program
+  name: string;                               // the document's top-level name field (convention)
 }
 ```
+
+Typed access requires the workspace to generate TypeScript types from its own schemas:
+
+```ts
+// Generated from the workspace's own schemas/app.k
+import type { App } from './generated/schemas';
+
+const apps = await akua.doc.list({ kind: 'App', filter: { 'spec.env': 'production' } });
+for (const ref of apps) {
+  const app = await akua.doc.get<App>(ref.path);
+  // app is fully typed against the workspace's App schema
+}
+```
+
+Type generation is a workspace-local concern: `akua export schemas/app.k --format=typescript > generated/app.ts`. akua does not ship an `App` TypeScript type because it does not specify an `App` schema.
 
 ---
 
@@ -324,7 +335,7 @@ interface DeployAPI {
 interface DeployOptions {
   app?: string;
   path?: string;
-  to: 'argo' | 'flux' | 'kro' | 'helm' | 'kubectl' | 'fly' | 'cf-workers' | 'akua' | string;
+  to: 'argo' | 'flux' | 'kro' | 'helm' | 'kubectl' | string;
   inputs?: Record<string, unknown>;
   idempotencyKey?: string;
 }
