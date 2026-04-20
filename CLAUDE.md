@@ -44,6 +44,8 @@ Plus: deploy driver (`akua deploy`), observability query (`akua query`), policy 
 | Embedded engines (KCL / Helm / OPA / Regal / Kyverno / CEL / Kustomize) | [docs/embedded-engines.md](docs/embedded-engines.md) |
 | Agent install + skill format | [docs/agent-usage.md](docs/agent-usage.md) |
 | TypeScript SDK | [docs/sdk.md](docs/sdk.md) |
+| Roadmap + phasing | [docs/roadmap.md](docs/roadmap.md) |
+| Implementation plan (agent-driven) | [docs/impl-plan.md](docs/impl-plan.md) |
 | Runnable examples | [docs/examples/](docs/examples/) |
 | Agent-executable workflows | [skills/](skills/) |
 | Strategic spine (internal, maintainers) | `../cortex/workspaces/robin/akua-masterplan.md` |
