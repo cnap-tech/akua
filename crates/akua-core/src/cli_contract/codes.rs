@@ -43,6 +43,11 @@ pub const E_LINT_FAIL: &str = "E_LINT_FAIL";
 
 pub const E_CHECK_FAIL: &str = "E_CHECK_FAIL";
 
+// ----- Diff ----------------------------------------------------------------
+
+pub const E_DIFF_FOUND: &str = "E_DIFF_FOUND";
+pub const E_DIFF_NOT_DIR: &str = "E_DIFF_NOT_DIR";
+
 // ----- General -------------------------------------------------------------
 
 pub const E_IO: &str = "E_IO";

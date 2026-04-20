@@ -10,8 +10,9 @@ use clap::{Args, Parser, Subcommand};
 
 use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::{
-    check as check_verb, fmt as fmt_verb, init as init_verb, lint as lint_verb,
-    render as render_verb, verify as verify_verb, version as version_verb, whoami as whoami_verb,
+    check as check_verb, diff as diff_verb, fmt as fmt_verb, init as init_verb,
+    lint as lint_verb, render as render_verb, verify as verify_verb, version as version_verb,
+    whoami as whoami_verb,
 };
 use akua_core::cli_contract::{AgentContext, ExitCode, StructuredError};
 
@@ -70,6 +71,18 @@ enum Commands {
 
         #[command(flatten)]
         render_args: RenderCliArgs,
+    },
+
+    /// Structural diff between two rendered-output directories.
+    Diff {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Baseline directory.
+        before: PathBuf,
+
+        /// Candidate directory.
+        after: PathBuf,
     },
 
     /// Fast workspace check — parses akua.toml + akua.lock + lints package.k.
@@ -165,6 +178,17 @@ fn dispatch(command: Commands) -> ExitCode {
             workspace,
             package,
         } => run_check(&args, &workspace, &package),
+        Commands::Diff { args, before, after } => run_diff(&args, &before, &after),
+    }
+}
+
+fn run_diff(args: &UniversalArgs, before: &std::path::Path, after: &std::path::Path) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = diff_verb::DiffArgs { before, after };
+    let mut stdout = io::stdout().lock();
+    match diff_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
 }
 
@@ -373,6 +397,18 @@ mod tests {
                 assert!(!force);
             }
             _ => panic!("expected init"),
+        }
+    }
+
+    #[test]
+    fn parses_diff_with_two_positional_dirs() {
+        let cli = Cli::parse_from(["akua", "diff", "./before", "./after"]);
+        match cli.command {
+            Commands::Diff { before, after, .. } => {
+                assert_eq!(before, PathBuf::from("./before"));
+                assert_eq!(after, PathBuf::from("./after"));
+            }
+            _ => panic!("expected diff"),
         }
     }
 

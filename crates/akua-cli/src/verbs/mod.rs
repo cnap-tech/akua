@@ -5,6 +5,7 @@
 //! are written via [`crate::contract::emit_error`].
 
 pub mod check;
+pub mod diff;
 pub mod fmt;
 pub mod init;
 pub mod lint;

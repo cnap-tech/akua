@@ -15,6 +15,8 @@
 #![allow(dead_code)]
 
 pub mod cli_contract;
+#[cfg(feature = "engine-kcl")]
+pub mod dir_diff;
 pub(crate) mod hex;
 pub mod lock_file;
 pub mod mod_file;
@@ -31,6 +33,8 @@ pub use mod_file::{
     AkuaManifest, Dependency as ManifestDependency, DependencySource, ManifestError,
     ManifestLoadError, PackageSection, Replace, WorkspaceSection,
 };
+#[cfg(feature = "engine-kcl")]
+pub use dir_diff::{diff as dir_diff, DirDiff, DirDiffError, FileChange};
 #[cfg(feature = "engine-kcl")]
 pub use package_k::{
     format_kcl, lint_kcl, LintIssue, OutputSpec, PackageK, PackageKError, RenderedPackage,
