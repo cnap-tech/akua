@@ -10,8 +10,8 @@ use clap::{Args, Parser, Subcommand};
 
 use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::{
-    init as init_verb, render as render_verb, verify as verify_verb, version as version_verb,
-    whoami as whoami_verb,
+    fmt as fmt_verb, init as init_verb, render as render_verb, verify as verify_verb,
+    version as version_verb, whoami as whoami_verb,
 };
 use akua_core::cli_contract::{AgentContext, ExitCode, StructuredError};
 
@@ -71,6 +71,24 @@ enum Commands {
         #[command(flatten)]
         render_args: RenderCliArgs,
     },
+
+    /// Format a `package.k` via KCL's canonical formatter.
+    Fmt {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Path to the `package.k` file.
+        #[arg(long, default_value = "./package.k")]
+        package: PathBuf,
+
+        /// Exit 1 if the file would change; don't write.
+        #[arg(long)]
+        check: bool,
+
+        /// Print formatted source to stdout; don't write.
+        #[arg(long)]
+        stdout: bool,
+    },
 }
 
 #[derive(Args, Clone, Debug)]
@@ -113,6 +131,12 @@ fn dispatch(command: Commands) -> ExitCode {
         Commands::Version { args } => run_version(&args),
         Commands::Verify { args, workspace } => run_verify(&args, &workspace),
         Commands::Render { args, render_args } => run_render(&args, &render_args),
+        Commands::Fmt {
+            args,
+            package,
+            check,
+            stdout,
+        } => run_fmt(&args, &package, check, stdout),
     }
 }
 
@@ -171,6 +195,20 @@ fn run_verify(args: &UniversalArgs, workspace: &std::path::Path) -> ExitCode {
     let ctx = resolve_ctx(args);
     let mut stdout = io::stdout().lock();
     match verify_verb::run(&ctx, workspace, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
+    }
+}
+
+fn run_fmt(args: &UniversalArgs, package: &std::path::Path, check: bool, stdout_mode: bool) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = fmt_verb::FmtArgs {
+        package_path: package,
+        check,
+        stdout_mode,
+    };
+    let mut stdout = io::stdout().lock();
+    match fmt_verb::run(&ctx, &verb_args, &mut stdout) {
         Ok(code) => code,
         Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
@@ -282,6 +320,24 @@ mod tests {
                 assert!(!force);
             }
             _ => panic!("expected init"),
+        }
+    }
+
+    #[test]
+    fn parses_fmt_with_check_flag() {
+        let cli = Cli::parse_from(["akua", "fmt", "--check", "--package", "foo.k"]);
+        match cli.command {
+            Commands::Fmt {
+                package,
+                check,
+                stdout,
+                ..
+            } => {
+                assert_eq!(package, PathBuf::from("foo.k"));
+                assert!(check);
+                assert!(!stdout);
+            }
+            _ => panic!("expected fmt"),
         }
     }
 }

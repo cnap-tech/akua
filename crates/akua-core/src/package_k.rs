@@ -183,6 +183,21 @@ fn value_kind(v: &Value) -> &'static str {
     }
 }
 
+/// Format a KCL source string via kcl_lang's formatter. Used by
+/// `akua fmt` — pure function, no filesystem access.
+pub fn format_kcl(source: &str) -> Result<String, PackageKError> {
+    use kcl_lang::{FormatCodeArgs, API};
+
+    let api = API::default();
+    match api.format_code(&FormatCodeArgs {
+        source: source.to_string(),
+    }) {
+        Ok(result) => String::from_utf8(result.formatted)
+            .map_err(|e| PackageKError::KclEval(format!("format output not utf-8: {e}"))),
+        Err(e) => Err(PackageKError::KclEval(e.to_string())),
+    }
+}
+
 fn eval_kcl(path: &Path, code: &str, option_json: &str) -> Result<String, PackageKError> {
     use kcl_lang::{Argument, ExecProgramArgs, API};
 

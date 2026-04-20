@@ -30,6 +30,11 @@ pub const E_RENDER_YAML: &str = "E_RENDER_YAML";
 pub const E_INIT_EXISTS: &str = "E_INIT_EXISTS";
 pub const E_INIT_EMPTY_NAME: &str = "E_INIT_EMPTY_NAME";
 
+// ----- Fmt -----------------------------------------------------------------
+
+pub const E_FMT_CHANGED: &str = "E_FMT_CHANGED";
+pub const E_FMT_KCL: &str = "E_FMT_KCL";
+
 // ----- General -------------------------------------------------------------
 
 pub const E_IO: &str = "E_IO";

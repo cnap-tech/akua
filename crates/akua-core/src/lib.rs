@@ -32,7 +32,7 @@ pub use mod_file::{
     ManifestLoadError, PackageSection, Replace, WorkspaceSection,
 };
 #[cfg(feature = "engine-kcl")]
-pub use package_k::{OutputSpec, PackageK, PackageKError, RenderedPackage};
+pub use package_k::{format_kcl, OutputSpec, PackageK, PackageKError, RenderedPackage};
 #[cfg(feature = "engine-kcl")]
 pub use package_render::{
     render_outputs, OutputSummary, RenderError as PackageRenderError, RenderSummary,
