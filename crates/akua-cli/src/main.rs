@@ -6,11 +6,11 @@
 use std::io::{self, Write};
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{ArgGroup, Args, Parser, Subcommand};
 
 use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::{
-    check as check_verb, diff as diff_verb, fmt as fmt_verb, init as init_verb,
+    add as add_verb, check as check_verb, diff as diff_verb, fmt as fmt_verb, init as init_verb,
     lint as lint_verb, render as render_verb, verify as verify_verb, version as version_verb,
     whoami as whoami_verb,
 };
@@ -71,6 +71,51 @@ enum Commands {
 
         #[command(flatten)]
         render_args: RenderCliArgs,
+    },
+
+    /// Insert a dependency into akua.toml. Pure manifest edit — no
+    /// OCI fetch, no lockfile mutation.
+    #[command(group(ArgGroup::new("source")
+        .required(true)
+        .args(["oci", "git", "path"])))]
+    Add {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Local alias the dep is keyed under in `[dependencies]`.
+        name: String,
+
+        /// OCI source URL (e.g. `oci://ghcr.io/foo/charts/bar`).
+        #[arg(long)]
+        oci: Option<String>,
+
+        /// Git source URL.
+        #[arg(long)]
+        git: Option<String>,
+
+        /// Local filesystem path.
+        #[arg(long)]
+        path: Option<String>,
+
+        /// Version constraint. Required for OCI deps.
+        #[arg(long)]
+        version: Option<String>,
+
+        /// Git tag (alternative to `--rev`).
+        #[arg(long)]
+        tag: Option<String>,
+
+        /// Git commit SHA (alternative to `--tag`).
+        #[arg(long)]
+        rev: Option<String>,
+
+        /// Replace an existing entry under `name`.
+        #[arg(long)]
+        force: bool,
+
+        /// Workspace root containing akua.toml.
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
     },
 
     /// Structural diff between two rendered-output directories.
@@ -179,6 +224,60 @@ fn dispatch(command: Commands) -> ExitCode {
             package,
         } => run_check(&args, &workspace, &package),
         Commands::Diff { args, before, after } => run_diff(&args, &before, &after),
+        Commands::Add {
+            args,
+            name,
+            oci,
+            git,
+            path,
+            version,
+            tag,
+            rev,
+            force,
+            workspace,
+        } => run_add(
+            &args, &name, oci.as_deref(), git.as_deref(), path.as_deref(),
+            version.as_deref(), tag.as_deref(), rev.as_deref(), force, &workspace,
+        ),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_add(
+    args: &UniversalArgs,
+    name: &str,
+    oci: Option<&str>,
+    git: Option<&str>,
+    path: Option<&str>,
+    version: Option<&str>,
+    tag: Option<&str>,
+    rev: Option<&str>,
+    force: bool,
+    workspace: &std::path::Path,
+) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let source = match (oci, git, path) {
+        (Some(s), None, None) => add_verb::AddSource::Oci(s),
+        (None, Some(s), None) => add_verb::AddSource::Git(s),
+        (None, None, Some(s)) => add_verb::AddSource::Path(s),
+        // The clap ArgGroup makes any other combination unreachable;
+        // `unreachable!` here would surface a meaningful panic if
+        // someone changes the group config without realising.
+        _ => unreachable!("clap ArgGroup `source` is required + mutually-exclusive"),
+    };
+    let verb_args = add_verb::AddArgs {
+        workspace,
+        name,
+        source,
+        version,
+        tag,
+        rev,
+        force,
+    };
+    let mut stdout = io::stdout().lock();
+    match add_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
 }
 
@@ -398,6 +497,46 @@ mod tests {
             }
             _ => panic!("expected init"),
         }
+    }
+
+    #[test]
+    fn parses_add_with_oci_and_version() {
+        let cli = Cli::parse_from([
+            "akua",
+            "add",
+            "cnpg",
+            "--oci",
+            "oci://ghcr.io/x/y",
+            "--version",
+            "1.2.3",
+        ]);
+        match cli.command {
+            Commands::Add {
+                name, oci, version, force, ..
+            } => {
+                assert_eq!(name, "cnpg");
+                assert_eq!(oci.as_deref(), Some("oci://ghcr.io/x/y"));
+                assert_eq!(version.as_deref(), Some("1.2.3"));
+                assert!(!force);
+            }
+            _ => panic!("expected add"),
+        }
+    }
+
+    #[test]
+    fn add_requires_a_source_flag() {
+        let err = Cli::try_parse_from(["akua", "add", "x"]).err().expect("should fail");
+        assert!(err.to_string().contains("required"));
+    }
+
+    #[test]
+    fn add_rejects_two_sources_at_once() {
+        let err = Cli::try_parse_from([
+            "akua", "add", "x", "--oci", "oci://a", "--git", "https://b",
+        ])
+        .err()
+        .expect("should fail");
+        assert!(err.to_string().contains("cannot be used"));
     }
 
     #[test]

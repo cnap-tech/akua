@@ -48,6 +48,11 @@ pub const E_CHECK_FAIL: &str = "E_CHECK_FAIL";
 pub const E_DIFF_FOUND: &str = "E_DIFF_FOUND";
 pub const E_DIFF_NOT_DIR: &str = "E_DIFF_NOT_DIR";
 
+// ----- Add -----------------------------------------------------------------
+
+pub const E_ADD_DEP_EXISTS: &str = "E_ADD_DEP_EXISTS";
+pub const E_ADD_INVALID_DEP: &str = "E_ADD_INVALID_DEP";
+
 // ----- General -------------------------------------------------------------
 
 pub const E_IO: &str = "E_IO";
