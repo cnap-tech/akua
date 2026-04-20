@@ -2,26 +2,19 @@
 //!
 //! Spec: [`docs/cli.md`](../../../../docs/cli.md) `akua whoami` section;
 //! [`cli-contract.md §1.5`](../../../../docs/cli-contract.md#15-agent-context-auto-detection).
-//!
-//! Phase A surface: no real registry credentials yet. Returns the
-//! agent context and a placeholder identity. Future phases extend the
-//! response shape with registry logins + scoped tokens.
 
 use std::io::Write;
 
 use akua_core::cli_contract::{AgentContext, ExitCode};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
-use crate::contract::{Context, OutputMode};
+use crate::contract::{emit_output, Context};
 
 /// Whoami response shape. Part of the stability contract — new fields
 /// may be added (backward-compatible); existing field semantics never
 /// change.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct WhoamiOutput {
-    /// The current identity. `None` when not logged in to any registry.
-    pub identity: Option<String>,
-
     /// Agent-context detection result per cli-contract §1.5.
     pub agent_context: AgentContext,
 
@@ -32,46 +25,32 @@ pub struct WhoamiOutput {
 impl WhoamiOutput {
     pub fn collect(agent: AgentContext) -> Self {
         WhoamiOutput {
-            identity: None,
             agent_context: agent,
             version: env!("CARGO_PKG_VERSION").to_string(),
         }
     }
 }
 
-/// Run the verb against the given context, writing output to `stdout`.
 pub fn run<W: Write>(ctx: &Context, stdout: &mut W) -> std::io::Result<ExitCode> {
     let output = WhoamiOutput::collect(ctx.agent.clone());
 
-    match ctx.output {
-        OutputMode::Json => {
-            let json = serde_json::to_string(&output)
-                .expect("WhoamiOutput serialization is infallible");
-            writeln!(stdout, "{json}")?;
-        }
-        OutputMode::Text => {
-            match &output.identity {
-                Some(id) => writeln!(stdout, "logged in as: {id}")?,
-                None => writeln!(stdout, "not logged in")?,
-            }
-            writeln!(stdout, "akua version: {}", output.version)?;
-            if output.agent_context.detected {
-                if let (Some(src), Some(name)) =
-                    (output.agent_context.source, &output.agent_context.name)
-                {
-                    writeln!(
-                        stdout,
-                        "agent context: {name} (detected via {})",
-                        src.env_var()
-                    )?;
-                }
-            } else if output.agent_context.disabled_via_env {
-                writeln!(stdout, "agent context: detection disabled (AKUA_NO_AGENT_DETECT)")?;
-            }
-        }
-    }
-
+    emit_output(stdout, ctx, &output, |w| write_text(w, &output))?;
     Ok(ExitCode::Success)
+}
+
+fn write_text<W: Write>(stdout: &mut W, output: &WhoamiOutput) -> std::io::Result<()> {
+    writeln!(stdout, "not logged in")?;
+    writeln!(stdout, "akua version: {}", output.version)?;
+    if output.agent_context.detected {
+        if let (Some(src), Some(name)) =
+            (output.agent_context.source, &output.agent_context.name)
+        {
+            writeln!(stdout, "agent context: {name} (detected via {})", src.env_var())?;
+        }
+    } else if output.agent_context.disabled_via_env {
+        writeln!(stdout, "agent context: detection disabled (AKUA_NO_AGENT_DETECT)")?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -92,10 +71,7 @@ mod tests {
 
     #[test]
     fn json_output_includes_agent_context() {
-        let ctx = Context::resolve(
-            &UniversalArgs::default(),
-            agent_claude(),
-        );
+        let ctx = Context::resolve(&UniversalArgs::default(), agent_claude());
         let mut buf = Vec::new();
         let code = run(&ctx, &mut buf).expect("run");
         assert_eq!(code, ExitCode::Success);
@@ -104,7 +80,6 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(out.trim()).expect("json");
         assert_eq!(parsed["agent_context"]["detected"], true);
         assert_eq!(parsed["agent_context"]["source"], "claude_code");
-        assert_eq!(parsed["identity"], serde_json::Value::Null);
         assert!(parsed["version"].is_string());
     }
 
@@ -116,14 +91,13 @@ mod tests {
         let out = String::from_utf8(buf).expect("utf-8");
         assert!(out.contains("not logged in"));
         assert!(out.contains("akua version:"));
-        // No agent-context line when no agent.
         assert!(!out.contains("agent context:"));
     }
 
     #[test]
     fn text_output_in_agent_context_names_the_detection_source() {
         let args = UniversalArgs {
-            no_json: true, // explicit opt-out → text mode in agent context
+            no_json: true,
             ..UniversalArgs::default()
         };
         let ctx = Context::resolve(&args, agent_claude());

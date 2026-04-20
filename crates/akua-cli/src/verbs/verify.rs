@@ -1,53 +1,39 @@
 //! `akua verify` — lockfile consistency check.
 //!
-//! Spec: [`docs/cli.md`](../../../../docs/cli.md) `akua verify` section;
-//! [`docs/lockfile-format.md §akua verify`](../../../../docs/lockfile-format.md).
+//! Spec: [`docs/cli.md`](../../../../docs/cli.md) `akua verify` section.
 //!
-//! Phase A.6 subset: cross-checks `akua.toml` against `akua.lock`. The
-//! full `akua publish` round-trip + cosign signature verification lands
-//! once A.2 (Package.k loader) is in place to drive the render pipeline.
+//! Enforces, against `akua.toml` + `akua.lock`:
 //!
-//! What verify currently enforces:
-//!
-//! - Every dep declared in `akua.toml`'s `[dependencies]` appears in
-//!   `akua.lock`.
-//! - Every `[[package]]` in `akua.lock` corresponds to a declared dep
+//! - Every dep declared in `[dependencies]` appears in the lockfile.
+//! - Every `[[package]]` in the lockfile corresponds to a declared dep
 //!   (no orphans — someone modified the lockfile without updating the
 //!   manifest).
-//! - When `akua.toml` has `strict_signing = true` (the default), every
+//! - When `[package].strict_signing = true` (the default), every
 //!   locked package carries a `signature`.
-//! - Digests parse (sha256: prefix) — enforced by the lockfile parser
-//!   itself; we re-surface any parser error as a structured verify
-//!   failure rather than a library-level Rust error.
+//!
+//! Digest format (sha256: prefix) is enforced by the lockfile parser
+//! itself; parse errors surface here as structured verify failures.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use akua_core::cli_contract::{ExitCode, StructuredError};
+use akua_core::cli_contract::{codes, ExitCode, StructuredError};
 use akua_core::{AkuaLock, AkuaManifest, LockError, ManifestError};
 use serde::Serialize;
 
-use crate::contract::{Context, OutputMode};
+use crate::contract::{emit_output, Context};
 
 /// Verify verdict JSON shape. Stable across releases.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct VerifyOutput {
-    /// `"ok"` when everything checks out; `"fail"` otherwise.
-    pub status: Status,
+    /// `"ok"` when everything checks out; `"fail"` otherwise. Derived
+    /// from `violations.is_empty()`.
+    pub status: &'static str,
 
-    /// Counts of declared deps vs locked packages. Cheap overview for
-    /// dashboards.
     pub summary: Summary,
 
-    /// Structured violations. Empty when `status == Ok`.
+    /// Structured violations. Empty when `status == "ok"`.
     pub violations: Vec<Violation>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Status {
-    Ok,
-    Fail,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -68,9 +54,14 @@ pub enum Violation {
     MissingSignature { name: String, version: String },
 }
 
-/// Errors that prevent the verify check from running at all (missing
-/// files, parse failures). Distinct from [`Violation`]s which are check
-/// failures on well-formed inputs.
+impl VerifyOutput {
+    pub fn is_ok(&self) -> bool {
+        self.violations.is_empty()
+    }
+}
+
+/// Errors that prevent the verify check from running at all. Distinct
+/// from [`Violation`]s which are check failures on well-formed inputs.
 #[derive(Debug, thiserror::Error)]
 pub enum VerifyError {
     #[error("akua.toml not found at {0}")]
@@ -79,8 +70,12 @@ pub enum VerifyError {
     #[error("akua.lock not found at {0}")]
     LockMissing(PathBuf),
 
-    #[error("{0}")]
-    Io(#[from] std::io::Error),
+    #[error("i/o error on {path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 
     #[error("failed to parse akua.toml: {0}")]
     Manifest(#[from] ManifestError),
@@ -90,67 +85,71 @@ pub enum VerifyError {
 }
 
 impl VerifyError {
-    /// Map a verify error to the contract's structured-error shape.
-    /// Called by the CLI layer before emit_error.
     pub fn to_structured(&self) -> StructuredError {
         match self {
             VerifyError::ManifestMissing(path) => {
-                StructuredError::new("E_MANIFEST_MISSING", "akua.toml not found")
+                StructuredError::new(codes::E_MANIFEST_MISSING, "akua.toml not found")
                     .with_path(path.display().to_string())
                     .with_suggestion("run `akua init` or check the working directory")
                     .with_default_docs()
             }
             VerifyError::LockMissing(path) => {
-                StructuredError::new("E_LOCK_MISSING", "akua.lock not found")
+                StructuredError::new(codes::E_LOCK_MISSING, "akua.lock not found")
                     .with_path(path.display().to_string())
                     .with_suggestion("run `akua add` to resolve deps and generate the lockfile")
                     .with_default_docs()
             }
-            VerifyError::Io(e) => {
-                StructuredError::new("E_IO", format!("{e}")).with_default_docs()
-            }
+            VerifyError::Io { path, source } => StructuredError::new(codes::E_IO, source.to_string())
+                .with_path(path.display().to_string())
+                .with_default_docs(),
             VerifyError::Manifest(e) => {
-                StructuredError::new("E_MANIFEST_PARSE", format!("{e}")).with_default_docs()
+                StructuredError::new(codes::E_MANIFEST_PARSE, e.to_string()).with_default_docs()
             }
             VerifyError::Lock(e) => {
-                StructuredError::new("E_LOCK_PARSE", format!("{e}")).with_default_docs()
+                StructuredError::new(codes::E_LOCK_PARSE, e.to_string()).with_default_docs()
             }
         }
     }
 
-    /// Map to the appropriate typed exit code.
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            // Missing files = caller hasn't set up the workspace yet.
-            VerifyError::ManifestMissing(_) | VerifyError::LockMissing(_) => ExitCode::UserError,
-            // Parse errors = caller's files are malformed.
-            VerifyError::Manifest(_) | VerifyError::Lock(_) => ExitCode::UserError,
-            // I/O errors that aren't not-found = system/filesystem problem.
-            VerifyError::Io(_) => ExitCode::SystemError,
+            VerifyError::ManifestMissing(_)
+            | VerifyError::LockMissing(_)
+            | VerifyError::Manifest(_)
+            | VerifyError::Lock(_) => ExitCode::UserError,
+            VerifyError::Io { .. } => ExitCode::SystemError,
         }
     }
 }
 
+/// Read a file, mapping `NotFound` to the caller's preferred typed
+/// variant so verify can distinguish "workspace isn't set up" from
+/// "disk broke."
+fn read_or<F>(path: &Path, missing: F) -> Result<String, VerifyError>
+where
+    F: FnOnce(PathBuf) -> VerifyError,
+{
+    match std::fs::read_to_string(path) {
+        Ok(s) => Ok(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(missing(path.to_path_buf())),
+        Err(e) => Err(VerifyError::Io {
+            path: path.to_path_buf(),
+            source: e,
+        }),
+    }
+}
+
 /// Core check: load both files, run the cross-consistency checks, and
-/// return a [`VerifyOutput`]. Pure; no writes. Mirror this shape when
-/// wiring `akua verify` into an SDK method.
+/// return a [`VerifyOutput`]. Pure; no writes.
 pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
     let manifest_path = workspace.join("akua.toml");
     let lock_path = workspace.join("akua.lock");
 
-    if !manifest_path.exists() {
-        return Err(VerifyError::ManifestMissing(manifest_path));
-    }
-    if !lock_path.exists() {
-        return Err(VerifyError::LockMissing(lock_path));
-    }
-
-    let manifest = AkuaManifest::parse(&std::fs::read_to_string(&manifest_path)?)?;
-    let lock = AkuaLock::parse(&std::fs::read_to_string(&lock_path)?)?;
+    let manifest = AkuaManifest::parse(&read_or(&manifest_path, VerifyError::ManifestMissing)?)?;
+    let lock = AkuaLock::parse(&read_or(&lock_path, VerifyError::LockMissing)?)?;
 
     let mut violations = Vec::new();
 
-    // Check 1: every declared dep is locked.
     let locked_names: std::collections::HashSet<&str> =
         lock.packages.iter().map(|p| p.name.as_str()).collect();
     for dep_name in manifest.dependencies.keys() {
@@ -161,7 +160,6 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
         }
     }
 
-    // Check 2: no orphan locked packages.
     let declared_names: std::collections::HashSet<&str> =
         manifest.dependencies.keys().map(|s| s.as_str()).collect();
     for pkg in &lock.packages {
@@ -173,7 +171,6 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
         }
     }
 
-    // Check 3: strict-signing enforcement.
     if manifest.package.strict_signing {
         for pkg in &lock.packages {
             if pkg.signature.is_none() {
@@ -185,11 +182,7 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
         }
     }
 
-    let status = if violations.is_empty() {
-        Status::Ok
-    } else {
-        Status::Fail
-    };
+    let status = if violations.is_empty() { "ok" } else { "fail" };
 
     Ok(VerifyOutput {
         status,
@@ -202,33 +195,26 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
     })
 }
 
-/// Run the verb against the given workspace, writing output to
-/// `stdout`. Verify errors (missing/malformed files) are surfaced to
-/// the caller; check failures (violations) produce an exit 1 with
-/// structured verdict on stdout.
+/// Run the verb against the given workspace. Verify errors (missing /
+/// malformed files) are surfaced to the caller; check failures
+/// (violations) produce an exit 1 with verdict on stdout.
 pub fn run<W: Write>(
     ctx: &Context,
     workspace: &Path,
     stdout: &mut W,
 ) -> Result<ExitCode, VerifyError> {
     let output = check(workspace)?;
-
-    match ctx.output {
-        OutputMode::Json => {
-            let json = serde_json::to_string(&output)
-                .expect("VerifyOutput serialization is infallible");
-            writeln!(stdout, "{json}")?;
+    emit_output(stdout, ctx, &output, |w| write_text(w, &output)).map_err(|e| {
+        VerifyError::Io {
+            path: PathBuf::from("<stdout>"),
+            source: e,
         }
-        OutputMode::Text => {
-            write_text(stdout, &output)?;
-        }
-    }
-
-    let code = match output.status {
-        Status::Ok => ExitCode::Success,
-        Status::Fail => ExitCode::UserError,
-    };
-    Ok(code)
+    })?;
+    Ok(if output.is_ok() {
+        ExitCode::Success
+    } else {
+        ExitCode::UserError
+    })
 }
 
 fn write_text<W: Write>(stdout: &mut W, output: &VerifyOutput) -> std::io::Result<()> {
@@ -240,23 +226,18 @@ fn write_text<W: Write>(stdout: &mut W, output: &VerifyOutput) -> std::io::Resul
         output.summary.strict_signing,
     )?;
 
-    match output.status {
-        Status::Ok => {
-            writeln!(stdout, "ok")?;
-        }
-        Status::Fail => {
-            writeln!(stdout, "fail: {} violation(s)", output.violations.len())?;
-            for v in &output.violations {
-                match v {
-                    Violation::UnlockedDep { name } => {
-                        writeln!(stdout, "  - unlocked-dep: {name}")?;
-                    }
-                    Violation::OrphanLocked { name, version } => {
-                        writeln!(stdout, "  - orphan-locked: {name}@{version}")?;
-                    }
-                    Violation::MissingSignature { name, version } => {
-                        writeln!(stdout, "  - missing-signature: {name}@{version}")?;
-                    }
+    if output.is_ok() {
+        writeln!(stdout, "ok")?;
+    } else {
+        writeln!(stdout, "fail: {} violation(s)", output.violations.len())?;
+        for v in &output.violations {
+            match v {
+                Violation::UnlockedDep { name } => writeln!(stdout, "  - unlocked-dep: {name}")?,
+                Violation::OrphanLocked { name, version } => {
+                    writeln!(stdout, "  - orphan-locked: {name}@{version}")?
+                }
+                Violation::MissingSignature { name, version } => {
+                    writeln!(stdout, "  - missing-signature: {name}@{version}")?
                 }
             }
         }
@@ -310,7 +291,7 @@ signature = "cosign:key:acme"
     fn ok_verdict_when_manifest_and_lock_agree() {
         let ws = write_workspace(MANIFEST_TWO_OCI, LOCK_MATCHING);
         let result = check(ws.path()).expect("check");
-        assert_eq!(result.status, Status::Ok);
+        assert_eq!(result.status, "ok");
         assert_eq!(result.summary.declared_deps, 2);
         assert_eq!(result.summary.locked_packages, 2);
         assert!(result.summary.strict_signing);
@@ -331,7 +312,7 @@ signature = "cosign:sigstore:cloudnative-pg"
 "#;
         let ws = write_workspace(MANIFEST_TWO_OCI, lock_missing_webapp);
         let result = check(ws.path()).expect("check");
-        assert_eq!(result.status, Status::Fail);
+        assert_eq!(result.status, "fail");
         assert_eq!(result.violations.len(), 1);
         assert_eq!(
             result.violations[0],
@@ -355,7 +336,7 @@ signature = \"cosign:key:x\"
         );
         let ws = write_workspace(MANIFEST_TWO_OCI, &lock_with_orphan);
         let result = check(ws.path()).expect("check");
-        assert_eq!(result.status, Status::Fail);
+        assert_eq!(result.status, "fail");
         let has_orphan = result.violations.iter().any(|v| {
             matches!(v, Violation::OrphanLocked { name, version }
                 if name == "zzz-extra" && version == "9.9.9")
@@ -383,7 +364,7 @@ signature = "cosign:key:acme"
 "#;
         let ws = write_workspace(MANIFEST_TWO_OCI, lock_unsigned);
         let result = check(ws.path()).expect("check");
-        assert_eq!(result.status, Status::Fail);
+        assert_eq!(result.status, "fail");
         let has_missing = result.violations.iter().any(|v| {
             matches!(v, Violation::MissingSignature { name, .. } if name == "cnpg")
         });
@@ -413,7 +394,7 @@ digest  = "sha256:3c5d9e7f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c
 "#;
         let ws = write_workspace(permissive_manifest, unsigned_lock);
         let result = check(ws.path()).expect("check");
-        assert_eq!(result.status, Status::Ok);
+        assert_eq!(result.status, "ok");
         assert!(!result.summary.strict_signing);
     }
 
@@ -446,7 +427,7 @@ digest  = "sha256:22222222222222222222222222222222222222222222222222222222222222
 "#;
         let ws = write_workspace(manifest, lock);
         let result = check(ws.path()).expect("check");
-        assert_eq!(result.status, Status::Fail);
+        assert_eq!(result.status, "fail");
         // 2 unlocked-deps + 2 orphan-lockeds + 2 missing-sigs (strict on) = 6
         assert_eq!(result.violations.len(), 6, "violations: {:?}", result.violations);
     }
@@ -552,7 +533,7 @@ signature = "cosign:sigstore:cloudnative-pg"
             });
             assert_eq!(
                 result.status,
-                Status::Ok,
+                "ok",
                 "example {} has violations: {:?}",
                 path.display(),
                 result.violations

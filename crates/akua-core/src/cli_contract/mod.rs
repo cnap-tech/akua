@@ -11,6 +11,7 @@
 //! one implementation.
 
 pub mod agent;
+pub mod codes;
 pub mod error;
 pub mod exit;
 

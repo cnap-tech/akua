@@ -1,45 +1,51 @@
-//! Error emission per [cli-contract §1.2](../../../../docs/cli-contract.md#12-structured-errors-on-stderr).
+//! Error + primary-output emission per [cli-contract](../../../../docs/cli-contract.md).
 //!
-//! One helper every verb calls at the top of its error path. Writes a
-//! JSON-lines record to stderr when [`Context::output`] is `Json`;
-//! writes a human-readable block otherwise. The machine-readable `code`
-//! appears in both modes so scripts can still grep for it.
+//! - [`emit_output`] — write a verb's typed result to stdout. JSON
+//!   mode streams the value; text mode delegates to the verb's own
+//!   human-readable rendering closure.
+//! - [`emit_error`] — write a structured error to stderr. §1.2.
 
 use std::io::Write;
 
 use akua_core::cli_contract::StructuredError;
+use serde::Serialize;
 
 use super::context::{Context, OutputMode};
 
-/// Write a structured error to the given stderr writer.
+/// Write a verb's primary output to stdout.
 ///
-/// Abstracted over `impl Write` so tests can capture output into a
-/// Vec<u8>; production callers pass `&mut std::io::stderr().lock()`.
+/// JSON mode streams `value` via `serde_json::to_writer` (no
+/// intermediate `String`) followed by a trailing newline. Text mode
+/// delegates to the caller's closure so each verb owns its human
+/// rendering.
+pub fn emit_output<W, T, F>(writer: &mut W, ctx: &Context, value: &T, text: F) -> std::io::Result<()>
+where
+    W: Write,
+    T: Serialize,
+    F: FnOnce(&mut W) -> std::io::Result<()>,
+{
+    match ctx.output {
+        OutputMode::Json => {
+            serde_json::to_writer(&mut *writer, value)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            writeln!(writer)?;
+        }
+        OutputMode::Text => text(writer)?,
+    }
+    Ok(())
+}
+
+/// Write a structured error to the given stderr writer. Code appears
+/// in both JSON and text modes so scripts can grep either.
 pub fn emit_error<W: Write>(writer: &mut W, ctx: &Context, err: &StructuredError) -> std::io::Result<()> {
     match ctx.output {
         OutputMode::Json => {
             writeln!(writer, "{}", err.to_json_line())?;
         }
         OutputMode::Text => {
-            // Human block: one-line summary with code, then the
-            // optional context fields. Code is always present so grep
-            // still works.
             writeln!(writer, "error[{}]: {}", err.code, err.message)?;
             if let Some(path) = &err.path {
-                match (&err.field, err.line) {
-                    (Some(field), Some(line)) => {
-                        writeln!(writer, "  at {path}:{line} ({field})")?;
-                    }
-                    (Some(field), None) => {
-                        writeln!(writer, "  at {path} ({field})")?;
-                    }
-                    (None, Some(line)) => {
-                        writeln!(writer, "  at {path}:{line}")?;
-                    }
-                    (None, None) => {
-                        writeln!(writer, "  at {path}")?;
-                    }
-                }
+                writeln!(writer, "  at {}", format_location(path, err.field.as_deref(), err.line))?;
             }
             if let Some(suggestion) = &err.suggestion {
                 writeln!(writer, "  suggestion: {suggestion}")?;
@@ -56,6 +62,15 @@ pub fn emit_error<W: Write>(writer: &mut W, ctx: &Context, err: &StructuredError
         }
     }
     Ok(())
+}
+
+fn format_location(path: &str, field: Option<&str>, line: Option<u32>) -> String {
+    match (field, line) {
+        (Some(field), Some(line)) => format!("{path}:{line} ({field})"),
+        (Some(field), None) => format!("{path} ({field})"),
+        (None, Some(line)) => format!("{path}:{line}"),
+        (None, None) => path.to_string(),
+    }
 }
 
 #[cfg(test)]
