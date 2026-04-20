@@ -42,7 +42,7 @@ They're not competitors. Authors writing a Package define `check:` blocks inline
 
 ## 3. The Rego host
 
-A PolicySet is one or more `.rego` files at the workspace root or under `policies/`.
+A workspace's policy bundle is one or more `.rego` files, typically under `policies/`. akua does not specify a `PolicySet` kind — composition is just Rego file layout, imports, and rule merging.
 
 ```rego
 # policies/production.rego
@@ -157,7 +157,7 @@ Only things that genuinely require runtime context — not static rules — live
 | `akua.cluster(query)` | live cluster state (read-only, sandboxed) | live-mode policy only; never in CI policy |
 | `akua.attestation(ref)` | signature chain + SLSA predicate | verifying provenance against current transparency log |
 | `akua.diff(a, b)` | structural diff between package versions | upgrade-gate policies |
-| `akua.env(path)` | fields from the current Environment KRM | environment-specific rules |
+| `akua.env(path)` | fields from the workspace's Environment-shaped input (user-defined schema) | environment-specific rules |
 
 Implementation: each builtin is Go code registered with OPA at akua process start. The set is small (~8 builtins), stable, and documented. Customers can add their own by writing a Go plugin (advanced; most won't).
 
@@ -213,7 +213,7 @@ Input to Rego:
 {
   "resource":     { ... one Kubernetes resource ... },
   "resources":    [ ... all resources in the render ... ],
-  "environment":  { ... Environment KRM spec ... },
+  "environment":  { ... user-defined environment shape ... },
   "package":      { ... Package metadata ... },
   "team":         { ... Team context if available ... }
 }
@@ -442,7 +442,6 @@ rego> :trace
 - **[package-format.md](package-format.md)** — how `check:` blocks in KCL complement Rego
 - **[lockfile-format.md](lockfile-format.md)** — how Rego imports are pinned
 - **[cli.md — `akua policy` / `akua test` / `akua trace` / `akua bench`](cli.md)** — the verbs that operate on policy
-- **[krm-vocabulary.md — Policy / Environment](krm-vocabulary.md)** — how policy attaches to an Environment
 - **[embedded-engines.md](embedded-engines.md)** — OPA, Regal, Kyverno-to-Rego converter, CEL all embedded via wasmtime
 - **[skills/apply-policy-tier](../skills/apply-policy-tier/SKILL.md)** — agent workflow for subscribing to a tier
 - **[skills/test-and-lint](../skills/test-and-lint/SKILL.md)** — agent workflow for setting up tests + lint gates

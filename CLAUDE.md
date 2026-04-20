@@ -39,7 +39,6 @@ Plus: deploy driver (`akua deploy`), observability query (`akua query`), policy 
 | CLI invariants (universal contract) | [docs/cli-contract.md](docs/cli-contract.md) |
 | Package authoring shape | [docs/package-format.md](docs/package-format.md) |
 | Policy authoring shape | [docs/policy-format.md](docs/policy-format.md) |
-| KRM kinds + YAML view | [docs/krm-vocabulary.md](docs/krm-vocabulary.md) |
 | `akua.mod` + `akua.sum` | [docs/lockfile-format.md](docs/lockfile-format.md) |
 | Embedded engines (KCL / Helm / OPA / Regal / Kyverno / CEL / Kustomize) | [docs/embedded-engines.md](docs/embedded-engines.md) |
 | Agent install + skill format | [docs/agent-usage.md](docs/agent-usage.md) |
@@ -56,7 +55,7 @@ Violations of these are architectural bugs:
 
 **CLI contract holds universally.** Every verb emits `--json`, supports `--plan`, uses typed exit codes (0/1/2/3/4/5/6), accepts `--timeout` and `--idempotency-key` on writes. Structured errors on stderr, never prose. Agent-context auto-detection runs silently; see [cli-contract §1.5](docs/cli-contract.md#15-agent-context-auto-detection).
 
-**Canonical form is typed code.** KCL for Packages + cluster-facing KRMs (App, Environment, Cluster, Secret, SecretStore, Gateway). Rego for Policies. YAML is a derived view via `akua export`, never authoritative. Never author YAML and treat it as source of truth for these.
+**Canonical form is typed code.** KCL for Packages; Rego for Policies. YAML is a derived view via `akua export`, never authoritative. Users author their own higher-level schemas (App, Environment, Cluster, Workspace — whatever fits their shape) in KCL inside their workspace; akua does not ship a KRM vocabulary.
 
 **Determinism is load-bearing.** No `now()`, no `random()`, no env reads, no filesystem reads, no cluster reads inside the render pipeline. Same inputs + same lockfile + same akua version → byte-identical output.
 
@@ -71,10 +70,11 @@ Violations of these are architectural bugs:
 - **Embedded by default.** KCL, Helm, OPA, Regal, Kustomize, kro offline instantiator, CEL, Kyverno-to-Rego converter are all bundled into the akua binary via wasmtime (Rust engines linked directly). `$PATH` never required. Shell-out available as escape hatch via `--engine=shell`.
 - **Compose with the ecosystem, don't replace it.** ArgoCD, Flux, kro, Helm release lifecycle, kubectl, Crossplane are first-class consumers of akua output. We target their formats (`RawManifests`, `HelmChart`, `ResourceGraphDefinition`, `Crossplane`, `OCIBundle`). We don't ask customers to switch reconcilers.
 
-## KRM split
+## The one akua-specified shape
 
-- **Cluster-facing** (full `apiVersion/kind/metadata` envelope; KCL canonical, YAML view generated): `App`, `Environment`, `Cluster`, `Secret`, `SecretStore`, `Gateway`.
-- **Control-plane** (typed KCL only; YAML for interchange, not canonical): `Package`, `Policy`, `Rollout`, `Runbook`, `Budget`, `Incident`, `Experiment`, `Tenant`.
+- **`Package.k`** — a KCL program with four regions (imports / schema / body / outputs), publishable to OCI, signed, deterministically rendered. See [docs/package-format.md](docs/package-format.md).
+
+That's it. akua does **not** specify `App`, `Environment`, `Cluster`, `Secret`, `SecretStore`, `Gateway`, `PolicySet`, `Runbook`, `Rollout`, `Budget`, `Incident`, `Experiment`, or `Tenant` as akua-owned kinds. Users define their own schemas for those concepts in their workspace, shaped to their reality; ecosystems like ArgoCD / Flux / kro consume the rendered raw-Kubernetes output. akua Cloud may carry its own Convex-backed schemas for coordination concepts (Workspace, Tenant, etc.) — those live in Cloud, not in the OSS surface.
 
 ## What we refuse
 

@@ -1,8 +1,8 @@
 # Package format
 
-The canonical shape of an akua Package. A Package is a reusable definition authored in **KCL** and published as a signed OCI artifact. One Package produces many Apps across environments and customers.
+The canonical shape of an akua Package. A Package is a reusable definition authored in **KCL** and published as a signed OCI artifact. `Package.k` is the only shape akua itself specifies; higher-level workspace concepts (App / Environment / Cluster / PolicySet / etc.) are user-defined KCL schemas in the consumer's workspace, not akua-owned kinds.
 
-This document specifies what a `package.k` file may contain. Companion references: [krm-vocabulary.md](krm-vocabulary.md) for the KRM kinds, [lockfile-format.md](lockfile-format.md) for `akua.mod` / `akua.sum`, [policy-format.md](policy-format.md) for Rego.
+This document specifies what a `package.k` file may contain. Companion references: [lockfile-format.md](lockfile-format.md) for `akua.mod` / `akua.sum`, [policy-format.md](policy-format.md) for Rego.
 
 ---
 
@@ -493,6 +493,5 @@ Packages without tests ship with a lint warning; platform teams can enforce a po
 - **[cli.md — `akua init` / `akua add` / `akua render` / `akua export` / `akua test` / `akua publish`](cli.md)** — the verbs that operate on packages. `render` runs the program; `export` converts the canonical form to a view.
 - **[lockfile-format.md](lockfile-format.md)** — how `akua.mod` + `akua.sum` pin imports
 - **[policy-format.md](policy-format.md)** — how Rego policies evaluate against rendered resources (separate concern from `check:` blocks)
-- **[krm-vocabulary.md](krm-vocabulary.md)** — how App, Environment, Policy KRMs interact with Packages
 - **[embedded-engines.md](embedded-engines.md)** — which engines run your tests
 - **[examples/](../examples/)** — runnable Packages at increasing complexity

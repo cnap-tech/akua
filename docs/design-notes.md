@@ -6,7 +6,6 @@
 > - CLI shape → [`cli.md`](./cli.md) + [`cli-contract.md`](./cli-contract.md)
 > - Package authoring → [`package-format.md`](./package-format.md)
 > - Policy authoring → [`policy-format.md`](./policy-format.md)
-> - KRM kinds → [`krm-vocabulary.md`](./krm-vocabulary.md)
 > - Lockfile → [`lockfile-format.md`](./lockfile-format.md)
 > - Engines → [`embedded-engines.md`](./embedded-engines.md)
 > - SDK → [`sdk.md`](./sdk.md)
@@ -41,9 +40,9 @@ Violations of these are architectural bugs, regardless of how correct the change
 
 ### 2.1 Canonical form is typed code
 
-KCL for Packages + cluster-facing KRMs (App, Environment, Cluster, Secret, SecretStore, Gateway). Rego for Policies. Control-plane KRMs (Package, Policy, Rollout, Runbook, Budget, Incident, Experiment, Tenant) are typed KCL only. YAML is interchange; it is never authoritative.
+KCL for Packages. Rego for Policies. `Package.k` is the one akua-specified shape; everything higher-level (App, Environment, Cluster, Secret, Gateway, Workspace, PolicySet, Rollout, Runbook, Budget, Incident, …) is user territory — authored as user-defined KCL schemas inside the workspace. akua does not own that vocabulary.
 
-The distinction matters because *authoring* YAML drifts from what gets rendered. Authoring KCL type-checks before render runs. Every category error caught at author-time is an incident prevented at runtime.
+YAML is interchange; it is never authoritative. Authoring KCL type-checks before render runs. Every category error caught at author-time is an incident prevented at runtime.
 
 ### 2.2 Determinism is load-bearing
 
@@ -147,7 +146,7 @@ See the masterplan §18 for the authoritative open-questions list. The ones spec
 ## Glossary
 
 - **Package** — authored unit (KCL `Package.k` + engine sources). Reusable; published to OCI.
-- **App** — per-install KRM referencing a Package by OCI digest; carries the customer's values.
+- **App** — per-install document (user-defined schema) referencing a Package by OCI digest; carries the customer's values.
 - **Chart** — Helm's unit of distribution (`.tgz` + `Chart.yaml`). Akua consumes and emits these.
 - **Install** — one deployed instance of a Package in a specific environment.
 - **Source** — one component inside a Package (a chart, a KCL dir, a kustomize base).

@@ -143,7 +143,7 @@ Kinds:
 - `rgd` — kro ResourceGraphDefinition
 - `kcl` — another KCL package
 - `kustomize` — Kustomize base
-- `app` — convenience: add an App KRM for an existing Package
+- `app` — convenience: scaffold a user-authored App document referencing an existing Package
 
 ### Examples
 
@@ -251,7 +251,7 @@ Or on error:
 akua render [path] [flags]
 ```
 
-> **Not the same as `akua export`.** `render` executes the full pipeline against customer inputs and writes manifests a reconciler applies to a cluster. `export` converts a canonical artifact (schema, KRM resource, policy set) into a format view (JSON Schema, YAML, OpenAPI, Rego bundle). Render needs inputs; export usually doesn't. Render invokes engines; export is format translation. See [`akua export`](#akua-export) below.
+> **Not the same as `akua export`.** `render` executes the full pipeline against customer inputs and writes manifests a reconciler applies to a cluster. `export` converts a canonical artifact (schema, user-authored KCL document, policy bundle) into a format view (JSON Schema, YAML, OpenAPI, Rego bundle). Render needs inputs; export usually doesn't. Render invokes engines; export is format translation. See [`akua export`](#akua-export) below.
 
 ### Flags
 
@@ -476,7 +476,7 @@ akua inspect <ref> [flags]
 akua export [target] --format=<format> [flags]
 ```
 
-> **Not the same as `akua render`.** `export` is format translation — it doesn't invoke Helm / kro / Kustomize and doesn't need customer inputs. It answers *"how do I describe this artifact in a format other tools understand?"* Use `render` when you want deploy-ready manifests; use `export` when you want a schema, a YAML view of a KRM, a Rego bundle, or API docs. See [`akua render`](#akua-render) above.
+> **Not the same as `akua render`.** `export` is format translation — it doesn't invoke Helm / kro / Kustomize and doesn't need customer inputs. It answers *"how do I describe this artifact in a format other tools understand?"* Use `render` when you want deploy-ready manifests; use `export` when you want a schema, a YAML view of a KCL document, a Rego bundle, or API docs. See [`akua render`](#akua-render) above.
 
 ### Supported formats
 
@@ -484,8 +484,8 @@ akua export [target] --format=<format> [flags]
 |---|---|---|---|
 | `json-schema` | Package `Input` schema | JSON Schema Draft 2020-12 | install UIs, form renderers (rjsf, JSONForms) |
 | `openapi` | Package `Input` schema | OpenAPI 3.1 | API docs, client SDK generation, admission webhook schemas |
-| `yaml` | KRM resource (App, Environment, etc.) | Kubernetes YAML | interchange with non-KCL tooling |
-| `json` | KRM resource | JSON | scripting, jq pipelines |
+| `yaml` | any KCL document (user-defined App, Environment, …) | YAML view | interchange with non-KCL tooling |
+| `json` | any KCL document | JSON | scripting, jq pipelines |
 | `rego-bundle` | Policy set | OPA bundle tarball | uploading to Gatekeeper, Styra DAS, other OPA runtimes |
 
 ### Flags
@@ -506,14 +506,14 @@ akua export --format=json-schema > inputs.schema.json
 # Export as OpenAPI 3.1 for API docs
 akua export --format=openapi > package.openapi.json
 
-# Export an App KRM as YAML view (useful for pasting to docs or non-KCL pipelines)
+# Export any KCL document as YAML view (useful for docs or non-KCL pipelines)
 akua export app checkout --format=yaml > app.yaml
 
 # Export a policy set as OPA bundle
 akua export --policy tier/production --format=rego-bundle --out=production.tar.gz
 ```
 
-The export is a one-way projection; re-importing a YAML view back into the KCL workspace is done via `akua apply -f <file>.yaml`, which round-trips losslessly for KRM resources.
+The export is a one-way projection; re-importing a YAML view back into the KCL workspace is done via `akua apply -f <file>.yaml`, which round-trips losslessly for documents whose schema the workspace declares.
 
 ### Exit codes
 
@@ -625,7 +625,7 @@ Cross-repo / cross-service staged rollout orchestration.
 akua rollout <spec> [flags]
 ```
 
-Where `<spec>` is a Rollout KRM YAML or OCI ref.
+Where `<spec>` is a user-authored rollout document (KCL or YAML view) or OCI ref.
 
 ### Subcommands
 
@@ -1339,5 +1339,4 @@ From [cli-contract.md](cli-contract.md):
 
 - **Package format** — [package-format.md](package-format.md) (KCL Package, four regions, engine callables)
 - **Policy format** — [policy-format.md](policy-format.md) (Rego as host, compile-resolved imports, custom builtins)
-- **KRM vocabulary** — [krm-vocabulary.md](krm-vocabulary.md) (15 kinds, cluster-facing vs control-plane)
 - **Lockfile** — [lockfile-format.md](lockfile-format.md) (`akua.mod` + `akua.sum`)

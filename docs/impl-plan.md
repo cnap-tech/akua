@@ -215,8 +215,8 @@ Each task below is sized for a single agent session (~1–3 hours of focused wor
 **C.6 — Policy tier publishing**
 - Deliverable: `tier/dev`, `tier/startup`, `tier/production`, `tier/audit-ready` authored in Rego, published as signed OCI artifacts under `oci://policies.akua.dev/...`.
 
-**C.7 — `PolicySet` KRM**
-- Deliverable: typed KCL schema for `PolicySet` composing multiple tiers + workspace-custom rules. YAML view via `akua export`.
+**C.7 — policy composition convention**
+- Deliverable: document the conventional shape of a workspace's Rego layout — local `.rego` files in `./policies/`, tiers imported via `akua.mod` as compile-resolved `data.*`. No akua-specified `PolicySet` kind; users compose Rego files freely.
 
 **Phase C exit gate:** a PR on a test workspace that violates `tier/production` is blocked with a line-precise deny verdict.
 

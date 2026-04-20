@@ -97,18 +97,17 @@ Re-run `akua policy check` until verdict is `allow`.
 
 ### 5. Assign the tier to an environment
 
-Update `environments/<env>.yaml`:
+Environments are a user-defined workspace concept; akua does not specify the shape. A typical `environments/<env>.k` in KCL:
 
-```yaml
-apiVersion: akua.dev/v1alpha1
-kind: Environment
-metadata:
-  name: production
-spec:
-  policy: tier/production   # was: tier/startup
-  cluster: prod-eu
-  region:  eu-central-1
-  budget: { monthly: "$1500" }
+```python
+# environments/production.k
+production = {
+    name:   "production"
+    policy: "tier/production"   # was: tier/startup
+    cluster: "prod-eu"
+    region:  "eu-central-1"
+    budget:  { monthly: "$1500" }
+}
 ```
 
 Commit + PR. CI runs `akua policy check` on the PR against the rendered output; if verdict is anything other than `allow`, the PR is blocked (see [diff-gate](../diff-gate/SKILL.md) skill).

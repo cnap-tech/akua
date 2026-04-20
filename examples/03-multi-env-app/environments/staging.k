@@ -1,14 +1,12 @@
-import akua.krm.environment as env
+import ..schemas.environment as s
 
-staging = env.Environment {
-    metadata.name = "staging"
-    spec = env.Spec {
-        policy  = "tier/startup"
-        cluster = "staging-eu"
-        region  = "eu-central-1"
-        budget  = env.Budget {
-            monthly = "$200"
-            alertAt = [0.75, 0.9, 1.0]
-        }
+staging = s.Environment {
+    name:    "staging"
+    policy:  "tier/startup"
+    cluster: "staging-eu"
+    region:  "eu-central-1"
+    budget = s.Budget {
+        monthly: "$200"
+        alertAt: [0.75, 0.9, 1.0]
     }
 }

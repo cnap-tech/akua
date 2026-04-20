@@ -279,11 +279,11 @@ interface AppAPI {
   apply(app: AppSpec, opts?: ApplyOptions): Promise<DeployHandle>;
   delete(name: string, opts?: { force?: boolean }): Promise<void>;
 
-  // KRM resource export — generate a YAML view from the canonical KCL
+  // KCL-document export — generate a YAML view from the canonical KCL
   export(name: string, opts: { format: 'yaml' | 'json' }): Promise<string>;
 }
 
-// Every cluster-facing KRM has the same shape (Environment, Cluster, Secret,
+// User-authored KCL documents (e.g. Environment, Cluster, Secret — all user-defined) have the same shape (
 // SecretStore, Gateway). They all expose list / get / apply / delete / export.
 
 interface AppSpec {
@@ -883,14 +883,12 @@ You can always reach for the CLI if the SDK is missing something. You can always
 
 The SDK's types mirror the underlying format specs. For the authoritative data shapes:
 
-- **Package** (KCL program) — [package-format.md](package-format.md)
+- **Package** (KCL program, the one akua-specified shape) — [package-format.md](package-format.md)
 - **Policy** (Rego host + pluggable engines) — [policy-format.md](policy-format.md)
-- **App / Environment / Cluster / Secret / Gateway** (cluster-facing) — [krm-vocabulary.md](krm-vocabulary.md)
-- **Rollout / Runbook / Budget / Incident / Experiment / Tenant** (control-plane, typed KCL) — [krm-vocabulary.md](krm-vocabulary.md)
 - **Lockfile** (`akua.mod` + `akua.sum`) — [lockfile-format.md](lockfile-format.md)
 - **CLI contract** (invariants every method honors) — [cli-contract.md](cli-contract.md)
 - **CLI reference** (the verbs the SDK methods mirror) — [cli.md](cli.md)
 - **Embedded engines** (`engine?: 'auto' | 'embedded' | 'shell'`) — [embedded-engines.md](embedded-engines.md)
 - **Agent usage + auto-detection** — [agent-usage.md](agent-usage.md)
 
-TypeScript types in `@akua/sdk` are generated from the same KRM schemas the CLI consumes, so a field shape in the SDK always matches the file-format spec. When the spec evolves, the generated types follow on the next `@akua/sdk` release.
+TypeScript types in `@akua/sdk` are generated from the same akua-specified schemas the CLI consumes (Package, Policy, akua.mod — the shapes akua owns), so a field shape in the SDK always matches the file-format spec. When the spec evolves, the generated types follow on the next `@akua/sdk` release.

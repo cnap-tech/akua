@@ -168,7 +168,6 @@ Deep dives:
 [`docs/agent-usage.md`](docs/agent-usage.md) ·
 [`docs/package-format.md`](docs/package-format.md) ·
 [`docs/policy-format.md`](docs/policy-format.md) ·
-[`docs/krm-vocabulary.md`](docs/krm-vocabulary.md) ·
 [`docs/lockfile-format.md`](docs/lockfile-format.md) ·
 [`docs/embedded-engines.md`](docs/embedded-engines.md) ·
 [`skills/`](skills/) ·

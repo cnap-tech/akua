@@ -45,6 +45,8 @@ dist/
 # helm-engine wasm artifact (built via `task build:helm-engine-wasm`)
 crates/helm-engine-wasm/assets/helm-engine.wasm
 crates/helm-engine-wasm/go-src/go.sum
+# Stray build directories the Go toolchain may produce under go-src/
+crates/helm-engine-wasm/go-src/crates/
 
 # Coverage
 coverage/

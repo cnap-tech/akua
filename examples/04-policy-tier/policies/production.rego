@@ -46,7 +46,7 @@ deny[msg] {
 
 # Cross-resource aggregation — Rego's sweet spot. Sum the CPU requests of
 # every Deployment in the current batch and reject if the total exceeds the
-# Environment KRM's budget.
+# environment's budget (workspace-defined schema; see 03-multi-env-app).
 deny[msg] {
     deployments := [r | r := input.resources[_]; r.kind == "Deployment"]
     total_cpu := sum([

@@ -24,7 +24,7 @@ What this lets us do today: author a multi-source Helm package with JSON-Schema 
 
 ## Forward plan — toward the interface-spec target
 
-The target is defined by the specs in `docs/`: [`cli.md`](./cli.md), [`cli-contract.md`](./cli-contract.md), [`package-format.md`](./package-format.md), [`policy-format.md`](./policy-format.md), [`krm-vocabulary.md`](./krm-vocabulary.md), [`lockfile-format.md`](./lockfile-format.md), [`embedded-engines.md`](./embedded-engines.md), [`sdk.md`](./sdk.md), [`agent-usage.md`](./agent-usage.md).
+The target is defined by the specs in `docs/`: [`cli.md`](./cli.md), [`cli-contract.md`](./cli-contract.md), [`package-format.md`](./package-format.md), [`policy-format.md`](./policy-format.md), [`lockfile-format.md`](./lockfile-format.md), [`embedded-engines.md`](./embedded-engines.md), [`sdk.md`](./sdk.md), [`agent-usage.md`](./agent-usage.md).
 
 Implementation plan details (agent-driven rewrite, milestone criteria, task decomposition) live in [`impl-plan.md`](./impl-plan.md).
 
@@ -67,7 +67,7 @@ Goal: Rego as host language for Policies with compile-resolved imports; embedded
 - `akua policy check` verdict path (`allow` / `deny` / `needs-approval`).
 - `akua test` for Rego (`*_test.rego`) + KCL (`test_*.k`).
 - Policy tiers shipped as signed OCI artifacts: `tier/dev`, `tier/startup`, `tier/production`, `tier/audit-ready`.
-- `PolicySet` KRM (typed KCL, not YAML) that composes tiers + custom rules.
+- Workspace policy composition convention: local `.rego` files under `./policies/` importing tiers as compile-resolved data via `akua.mod`. No akua-owned PolicySet kind.
 
 Exit gate: policy tier published + consumed round-trip. Deny verdict on an over-quota App is line-precise.
 

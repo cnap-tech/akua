@@ -78,7 +78,7 @@ Staged rollout:
 
 - Rolls 2 consumers at a time
 - Soaks for 2 minutes between batches
-- Checks health gate (configured per `Environment`) after each batch
+- Checks health gate (configured in the workspace's environment schema) after each batch
 - Aborts + auto-rollback on health regression
 
 For services that hot-reload secrets (via External Secrets Operator + SIGHUP, or Vault Agent), no pod restart is needed — the operator handles it. akua detects this via the consumer's `kind: App` annotation.
