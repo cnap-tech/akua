@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::PathBuf;
 
-use super::hex::{hex_encode, is_valid_sha256_hex};
+use crate::hex::{hex_encode, is_valid_sha256_hex};
 use crate::umbrella::Dependency;
 
 pub(super) fn key_for_dep(dep: &Dependency) -> String {

@@ -1,0 +1,482 @@
+//! `akua render` — execute a Package against inputs and write manifests.
+//!
+//! Spec: [`docs/cli.md`](../../../../docs/cli.md) `akua render` section.
+
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+use akua_core::cli_contract::{codes, ExitCode, StructuredError};
+use akua_core::{
+    package_k::PackageKError, render_outputs, OutputSummary, PackageK, PackageRenderError,
+    RenderSummary,
+};
+use crate::contract::{emit_output, Context};
+
+#[derive(Debug, Clone)]
+pub struct RenderArgs<'a> {
+    pub package_path: &'a Path,
+
+    /// Optional inputs file. Parsed via `serde_yaml`, which accepts
+    /// both YAML and JSON.
+    pub inputs_path: Option<&'a Path>,
+
+    /// Root directory for `RawManifests` outputs (`--out`).
+    pub out_dir: &'a Path,
+
+    /// `--output=<name>`: render only the matching named output.
+    pub output_filter: Option<&'a str>,
+
+    /// `--dry-run`: compute the summary without writing files.
+    pub dry_run: bool,
+
+    /// `--stdout`: emit rendered manifests as multi-document YAML
+    /// instead of writing files. Requires exactly one output to be
+    /// selected.
+    pub stdout_mode: bool,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RenderError {
+    #[error(transparent)]
+    PackageK(#[from] PackageKError),
+
+    #[error("failed to read inputs file {path}: {source}")]
+    InputsIo {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
+    #[error("failed to parse inputs file {path}: {source}")]
+    InputsParse {
+        path: PathBuf,
+        #[source]
+        source: serde_yaml::Error,
+    },
+
+    #[error(transparent)]
+    Render(#[from] PackageRenderError),
+
+    #[error("--stdout requires exactly one output (package has {0})")]
+    StdoutMultiOutput(usize),
+
+    #[error("write to stdout failed: {0}")]
+    StdoutWrite(#[source] std::io::Error),
+}
+
+impl RenderError {
+    pub fn to_structured(&self) -> StructuredError {
+        match self {
+            RenderError::PackageK(PackageKError::Missing { path }) => {
+                StructuredError::new(codes::E_PACKAGE_MISSING, "Package.k not found")
+                    .with_path(path.display().to_string())
+                    .with_suggestion("pass the Package.k path explicitly or cd to its directory")
+                    .with_default_docs()
+            }
+            RenderError::PackageK(PackageKError::Io { path, source }) => {
+                StructuredError::new(codes::E_IO, source.to_string())
+                    .with_path(path.display().to_string())
+                    .with_default_docs()
+            }
+            RenderError::PackageK(PackageKError::KclEval(msg)) => {
+                StructuredError::new(codes::E_RENDER_KCL, msg.clone()).with_default_docs()
+            }
+            RenderError::PackageK(PackageKError::InputJson(e)) => {
+                StructuredError::new(codes::E_INPUTS_PARSE, e.to_string()).with_default_docs()
+            }
+            RenderError::PackageK(other) => {
+                StructuredError::new(codes::E_PACKAGE_PARSE, other.to_string()).with_default_docs()
+            }
+            RenderError::InputsIo { path, source } => {
+                let code = if source.kind() == std::io::ErrorKind::NotFound {
+                    codes::E_INPUTS_MISSING
+                } else {
+                    codes::E_IO
+                };
+                StructuredError::new(code, source.to_string())
+                    .with_path(path.display().to_string())
+                    .with_default_docs()
+            }
+            RenderError::InputsParse { path, source } => {
+                StructuredError::new(codes::E_INPUTS_PARSE, source.to_string())
+                    .with_path(path.display().to_string())
+                    .with_default_docs()
+            }
+            RenderError::Render(PackageRenderError::OutputNotFound { name }) => {
+                StructuredError::new(
+                    codes::E_RENDER_OUTPUT_NOT_FOUND,
+                    format!("--output `{name}` matched no output in the Package"),
+                )
+                .with_suggestion("check the `name` fields in the Package's outputs[] list")
+                .with_default_docs()
+            }
+            RenderError::Render(PackageRenderError::UnsupportedKind { kind }) => {
+                StructuredError::new(
+                    codes::E_RENDER_UNSUPPORTED_KIND,
+                    format!(
+                        "output kind `{kind}` is not implemented yet (Phase A renders \
+                         `RawManifests` only)"
+                    ),
+                )
+                .with_default_docs()
+            }
+            RenderError::Render(PackageRenderError::Io { path, source }) => {
+                StructuredError::new(codes::E_IO, source.to_string())
+                    .with_path(path.display().to_string())
+                    .with_default_docs()
+            }
+            RenderError::Render(PackageRenderError::Yaml { index, source }) => {
+                StructuredError::new(
+                    codes::E_RENDER_YAML,
+                    format!("resource #{index}: {source}"),
+                )
+                .with_default_docs()
+            }
+            RenderError::StdoutMultiOutput(_) => {
+                StructuredError::new(codes::E_RENDER_OUTPUT_AMBIGUOUS, self.to_string())
+                    .with_suggestion("pass `--output=<name>` to select a single output")
+                    .with_default_docs()
+            }
+            RenderError::StdoutWrite(e) => {
+                StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
+            }
+        }
+    }
+
+    pub fn exit_code(&self) -> ExitCode {
+        match self {
+            RenderError::PackageK(PackageKError::Io { .. }) => ExitCode::SystemError,
+            RenderError::InputsIo { source, .. }
+                if source.kind() != std::io::ErrorKind::NotFound =>
+            {
+                ExitCode::SystemError
+            }
+            RenderError::Render(PackageRenderError::Io { .. }) => ExitCode::SystemError,
+            RenderError::StdoutWrite(_) => ExitCode::SystemError,
+            _ => ExitCode::UserError,
+        }
+    }
+}
+
+pub fn run<W: Write>(
+    ctx: &Context,
+    args: &RenderArgs<'_>,
+    stdout: &mut W,
+) -> Result<ExitCode, RenderError> {
+    let package = PackageK::load(args.package_path)?;
+    let inputs = load_inputs(args.inputs_path)?;
+    let rendered = package.render(&inputs)?;
+
+    if args.stdout_mode {
+        let summary = render_outputs(&rendered, args.out_dir, args.output_filter, true)?;
+        if summary.outputs.len() != 1 {
+            return Err(RenderError::StdoutMultiOutput(summary.outputs.len()));
+        }
+        write_multi_doc_yaml(stdout, &rendered.resources).map_err(RenderError::StdoutWrite)?;
+        return Ok(ExitCode::Success);
+    }
+
+    let summary =
+        render_outputs(&rendered, args.out_dir, args.output_filter, args.dry_run)?;
+
+    emit_output(stdout, ctx, &summary, |w| write_text(w, &summary, args.dry_run))
+        .map_err(RenderError::StdoutWrite)?;
+    Ok(ExitCode::Success)
+}
+
+fn load_inputs(path: Option<&Path>) -> Result<serde_yaml::Value, RenderError> {
+    let Some(path) = path else {
+        return Ok(serde_yaml::Value::Mapping(Default::default()));
+    };
+    let bytes = std::fs::read(path).map_err(|e| RenderError::InputsIo {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    serde_yaml::from_slice(&bytes).map_err(|e| RenderError::InputsParse {
+        path: path.to_path_buf(),
+        source: e,
+    })
+}
+
+/// Emit `resources` as a single YAML stream with `---` separators.
+/// Used by `--stdout`.
+fn write_multi_doc_yaml<W: Write>(
+    writer: &mut W,
+    resources: &[serde_yaml::Value],
+) -> std::io::Result<()> {
+    for (i, resource) in resources.iter().enumerate() {
+        if i > 0 {
+            writeln!(writer, "---")?;
+        }
+        let yaml = serde_yaml::to_string(resource)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        writer.write_all(yaml.as_bytes())?;
+    }
+    Ok(())
+}
+
+fn write_text<W: Write>(
+    writer: &mut W,
+    summary: &RenderSummary,
+    dry_run: bool,
+) -> std::io::Result<()> {
+    let verb = if dry_run { "would render" } else { "rendered" };
+    for out in &summary.outputs {
+        writeln!(writer, "{verb}: {}", format_output_line(out))?;
+    }
+    if summary.outputs.is_empty() {
+        writeln!(writer, "{verb}: (no outputs declared)")?;
+    }
+    Ok(())
+}
+
+fn format_output_line(out: &OutputSummary) -> String {
+    let name = out.name.as_deref().unwrap_or("<default>");
+    format!(
+        "{name} — {manifests} manifest(s) → {target} ({hash})",
+        manifests = out.manifests,
+        target = out.target.display(),
+        hash = out.hash,
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    const MINIMAL_PACKAGE: &str = r#"
+schema Input:
+    replicas: int = 2
+
+input: Input = option("input") or Input {}
+
+resources = [{
+    apiVersion: "v1"
+    kind: "ConfigMap"
+    metadata.name: "demo"
+    data.count: str(input.replicas)
+}]
+
+outputs = [{ kind: "RawManifests", target: "./" }]
+"#;
+
+    fn write_package(tmp: &TempDir, body: &str) -> PathBuf {
+        let p = tmp.path().join("Package.k");
+        fs::write(&p, body).expect("write");
+        p
+    }
+
+    fn ctx_json() -> Context {
+        Context::resolve(
+            &crate::contract::args::UniversalArgs {
+                json: true,
+                ..Default::default()
+            },
+            akua_core::cli_contract::AgentContext::none(),
+        )
+    }
+
+    fn args<'a>(pkg: &'a Path, out: &'a Path) -> RenderArgs<'a> {
+        RenderArgs {
+            package_path: pkg,
+            inputs_path: None,
+            out_dir: out,
+            output_filter: None,
+            dry_run: false,
+            stdout_mode: false,
+        }
+    }
+
+    #[test]
+    fn run_writes_manifests_and_emits_json_summary() {
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, MINIMAL_PACKAGE);
+        let out = tmp.path().join("deploy");
+        let mut stdout = Vec::new();
+        let code = run(&ctx_json(), &args(&pkg, &out), &mut stdout).expect("run");
+        assert_eq!(code, ExitCode::Success);
+
+        assert!(out.join("000-configmap-demo.yaml").is_file());
+
+        let text = String::from_utf8(stdout).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(text.trim()).unwrap();
+        assert_eq!(parsed["outputs"][0]["manifests"], 1);
+        assert_eq!(parsed["outputs"][0]["format"], "raw-manifests");
+        assert!(parsed["outputs"][0]["hash"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:"));
+    }
+
+    #[test]
+    fn dry_run_does_not_write_any_files() {
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, MINIMAL_PACKAGE);
+        let out = tmp.path().join("deploy");
+        let a = RenderArgs { dry_run: true, ..args(&pkg, &out) };
+        let mut stdout = Vec::new();
+        let code = run(&Context::human(), &a, &mut stdout).expect("run");
+        assert_eq!(code, ExitCode::Success);
+        assert!(!out.exists());
+        assert!(String::from_utf8(stdout).unwrap().contains("would render"));
+    }
+
+    #[test]
+    fn stdout_mode_prints_multi_document_yaml() {
+        let tmp = TempDir::new().unwrap();
+        let body = r#"
+input = option("input") or {}
+
+resources = [
+    { apiVersion: "v1", kind: "ConfigMap", metadata.name: "a" },
+    { apiVersion: "v1", kind: "Service",   metadata.name: "b" },
+]
+
+outputs = [{ kind: "RawManifests", target: "./" }]
+"#;
+        let pkg = write_package(&tmp, body);
+        let a = RenderArgs { stdout_mode: true, ..args(&pkg, tmp.path()) };
+        let mut stdout = Vec::new();
+        run(&Context::human(), &a, &mut stdout).expect("run");
+        let text = String::from_utf8(stdout).unwrap();
+        assert!(text.contains("kind: ConfigMap"), "{text}");
+        assert!(text.contains("kind: Service"), "{text}");
+        assert!(text.contains("---"), "{text}");
+        assert!(!tmp.path().join("000-configmap-a.yaml").exists());
+    }
+
+    #[test]
+    fn stdout_mode_rejects_multi_output_without_filter() {
+        let tmp = TempDir::new().unwrap();
+        let body = r#"
+input = option("input") or {}
+resources = [{ apiVersion: "v1", kind: "ConfigMap", metadata.name: "a" }]
+outputs = [
+    { name: "one", kind: "RawManifests", target: "./one" },
+    { name: "two", kind: "RawManifests", target: "./two" },
+]
+"#;
+        let pkg = write_package(&tmp, body);
+        let a = RenderArgs { stdout_mode: true, ..args(&pkg, tmp.path()) };
+        let mut stdout = Vec::new();
+        let err = run(&Context::human(), &a, &mut stdout).expect_err("should fail");
+        assert!(matches!(err, RenderError::StdoutMultiOutput(2)));
+        assert_eq!(err.to_structured().code, codes::E_RENDER_OUTPUT_AMBIGUOUS);
+    }
+
+    #[test]
+    fn inputs_file_threaded_through_to_kcl() {
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, MINIMAL_PACKAGE);
+        let inputs = tmp.path().join("inputs.yaml");
+        fs::write(&inputs, "replicas: 7\n").unwrap();
+
+        let out = tmp.path().join("deploy");
+        let a = RenderArgs { inputs_path: Some(&inputs), ..args(&pkg, &out) };
+        let mut stdout = Vec::new();
+        run(&ctx_json(), &a, &mut stdout).expect("run");
+
+        let cm = fs::read_to_string(out.join("000-configmap-demo.yaml")).unwrap();
+        assert!(
+            cm.contains("count: '7'") || cm.contains("count: \"7\"") || cm.contains("count: 7"),
+            "{cm}"
+        );
+    }
+
+    #[test]
+    fn inputs_file_accepts_json_syntax() {
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, MINIMAL_PACKAGE);
+        let inputs = tmp.path().join("inputs.json");
+        fs::write(&inputs, r#"{"replicas": 5}"#).unwrap();
+
+        let out = tmp.path().join("deploy");
+        let a = RenderArgs { inputs_path: Some(&inputs), ..args(&pkg, &out) };
+        let mut stdout = Vec::new();
+        run(&Context::human(), &a, &mut stdout).expect("run");
+        assert!(fs::read_to_string(out.join("000-configmap-demo.yaml"))
+            .unwrap()
+            .contains('5'));
+    }
+
+    #[test]
+    fn missing_package_surfaces_typed_error() {
+        let tmp = TempDir::new().unwrap();
+        let missing = tmp.path().join("missing.k");
+        let a = RenderArgs { dry_run: true, ..args(&missing, tmp.path()) };
+        let err = run(&Context::human(), &a, &mut Vec::new()).unwrap_err();
+        assert_eq!(err.to_structured().code, codes::E_PACKAGE_MISSING);
+        assert_eq!(err.exit_code(), ExitCode::UserError);
+    }
+
+    #[test]
+    fn missing_inputs_file_surfaces_typed_error() {
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, MINIMAL_PACKAGE);
+        let missing = tmp.path().join("no-such.yaml");
+        let a = RenderArgs {
+            inputs_path: Some(&missing),
+            dry_run: true,
+            ..args(&pkg, tmp.path())
+        };
+        let err = run(&Context::human(), &a, &mut Vec::new()).unwrap_err();
+        assert_eq!(err.to_structured().code, codes::E_INPUTS_MISSING);
+    }
+
+    #[test]
+    fn malformed_inputs_surfaces_typed_parse_error() {
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, MINIMAL_PACKAGE);
+        let inputs = tmp.path().join("inputs.yaml");
+        fs::write(&inputs, ":::: not yaml ::::").unwrap();
+        let a = RenderArgs {
+            inputs_path: Some(&inputs),
+            dry_run: true,
+            ..args(&pkg, tmp.path())
+        };
+        let err = run(&Context::human(), &a, &mut Vec::new()).unwrap_err();
+        assert_eq!(err.to_structured().code, codes::E_INPUTS_PARSE);
+    }
+
+    #[test]
+    fn kcl_eval_error_surfaces_typed() {
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, "this is not valid kcl");
+        let a = RenderArgs { dry_run: true, ..args(&pkg, tmp.path()) };
+        let err = run(&Context::human(), &a, &mut Vec::new()).unwrap_err();
+        assert_eq!(err.to_structured().code, codes::E_RENDER_KCL);
+    }
+
+    #[test]
+    fn output_filter_no_match_surfaces_typed() {
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, MINIMAL_PACKAGE);
+        let a = RenderArgs {
+            output_filter: Some("does-not-exist"),
+            dry_run: true,
+            ..args(&pkg, tmp.path())
+        };
+        let err = run(&Context::human(), &a, &mut Vec::new()).unwrap_err();
+        assert_eq!(err.to_structured().code, codes::E_RENDER_OUTPUT_NOT_FOUND);
+    }
+
+    #[test]
+    fn unsupported_kind_surfaces_typed() {
+        let tmp = TempDir::new().unwrap();
+        let body = r#"
+input = option("input") or {}
+resources = []
+outputs = [{ kind: "ResourceGraphDefinition", target: "./" }]
+"#;
+        let pkg = write_package(&tmp, body);
+        let a = RenderArgs { dry_run: true, ..args(&pkg, tmp.path()) };
+        let err = run(&Context::human(), &a, &mut Vec::new()).unwrap_err();
+        assert_eq!(err.to_structured().code, codes::E_RENDER_UNSUPPORTED_KIND);
+    }
+}

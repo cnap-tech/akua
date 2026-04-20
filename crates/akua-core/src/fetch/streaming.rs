@@ -12,7 +12,7 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 
-use super::hex::hex_encode;
+use crate::hex::hex_encode;
 use super::options::{limit_exceeded, LimitKind};
 use super::FetchError;
 

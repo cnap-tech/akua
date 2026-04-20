@@ -41,7 +41,7 @@ publish = ["dep:oci-client", "dep:tar", "dep:flate2", "dep:tokio", "dep:tempfile
 # KCL engine — native Rust via kcl-lang/lib (git dep). Not WASM-safe;
 # browser consumers use @kcl-lang/wasm-lib on the JS side and pass rendered
 # YAML into akua-wasm's umbrella assembler separately.
-engine-kcl = ["dep:kcl-lang"]
+engine-kcl = ["dep:kcl-lang", "dep:sha2"]
 # helmfile engine — shells to `helmfile`. Not WASM-safe.
 engine-helmfile = []
 

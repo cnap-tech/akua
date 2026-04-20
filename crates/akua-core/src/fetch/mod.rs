@@ -81,7 +81,6 @@ pub enum FetchError {
 
 mod cache;
 mod digest;
-mod hex;
 mod http_helm;
 mod oci;
 mod options;

@@ -12,7 +12,7 @@ use super::FetchError;
 /// - Accepts both bare hex and `sha256:<hex>` forms for `advertised`.
 /// - Case-insensitive — some registries emit upper-hex, our local
 ///   computation is lower-hex.
-/// - `actual` must be bare lower-hex (what [`super::hex::hex_encode`]
+/// - `actual` must be bare lower-hex (what [`crate::hex::hex_encode`]
 ///   returns). Returns [`FetchError::DigestMismatch`] with the
 ///   original `advertised` preserved for operator debugging; the
 ///   caller supplies `url` (redacted for error logs).

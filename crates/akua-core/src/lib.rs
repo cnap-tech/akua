@@ -32,12 +32,15 @@ pub mod diff;
 pub mod engine;
 #[cfg(feature = "fetch")]
 pub mod fetch;
+pub(crate) mod hex;
 pub mod lock_file;
 pub mod manifest;
 pub mod metadata;
 pub mod mod_file;
 #[cfg(feature = "engine-kcl")]
 pub mod package_k;
+#[cfg(feature = "engine-kcl")]
+pub mod package_render;
 #[cfg(feature = "publish")]
 pub mod publish;
 #[cfg(feature = "helm-cli")]
@@ -63,6 +66,11 @@ pub use mod_file::{
 };
 #[cfg(feature = "engine-kcl")]
 pub use package_k::{OutputSpec, PackageK, PackageKError, RenderedPackage};
+#[cfg(feature = "engine-kcl")]
+pub use package_render::{
+    render_outputs, OutputSummary, RenderError as PackageRenderError, RenderSummary,
+    FORMAT_RAW_MANIFESTS,
+};
 pub use diff::{compare as compare_charts, ChartDiff, ChartSnapshot};
 pub use engine::{Engine, EngineError, HelmEngine, PrepareContext, PreparedSource};
 #[cfg(feature = "fetch")]
