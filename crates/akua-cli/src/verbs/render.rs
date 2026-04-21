@@ -158,7 +158,8 @@ pub fn run<W: Write>(
     stdout: &mut W,
 ) -> Result<ExitCode, RenderError> {
     let package = PackageK::load(args.package_path)?;
-    let inputs = load_inputs(args.inputs_path)?;
+    let resolved_inputs = resolve_inputs_path(args);
+    let inputs = load_inputs(resolved_inputs.as_deref())?;
     let rendered = package.render(&inputs)?;
 
     if args.stdout_mode {
@@ -177,6 +178,27 @@ pub fn run<W: Write>(
     })
     .map_err(RenderError::StdoutWrite)?;
     Ok(ExitCode::Success)
+}
+
+/// When the caller passes `--inputs`, honour it verbatim. Otherwise
+/// probe for the two conventional defaults (alongside the
+/// `package.k`): `inputs.yaml` first, then `inputs.example.yaml` as a
+/// fallback so the freshly-scaffolded `akua init` output renders
+/// without the user having to pass `--inputs` manually. Returns
+/// `None` when nothing is found; `load_inputs` then produces an empty
+/// mapping.
+fn resolve_inputs_path(args: &RenderArgs<'_>) -> Option<PathBuf> {
+    if let Some(p) = args.inputs_path {
+        return Some(p.to_path_buf());
+    }
+    let package_dir = args.package_path.parent().unwrap_or(Path::new("."));
+    for candidate in ["inputs.yaml", "inputs.example.yaml"] {
+        let probe = package_dir.join(candidate);
+        if probe.is_file() {
+            return Some(probe);
+        }
+    }
+    None
 }
 
 fn load_inputs(path: Option<&Path>) -> Result<serde_yaml::Value, RenderError> {
@@ -490,5 +512,98 @@ outputs = [{ kind: "ResourceGraphDefinition", target: "./" }]
         };
         let err = run(&Context::human(), &a, &mut Vec::new()).unwrap_err();
         assert_eq!(err.to_structured().code, codes::E_RENDER_UNSUPPORTED_KIND);
+    }
+
+    // --- inputs auto-discovery --------------------------------------------
+
+    #[test]
+    fn auto_discovers_inputs_yaml_when_flag_absent() {
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, MINIMAL_PACKAGE);
+        fs::write(tmp.path().join("inputs.yaml"), "replicas: 4\n").unwrap();
+
+        let out_dir = tmp.path().join("out");
+        run(&ctx_json(), &args(&pkg, &out_dir), &mut Vec::new()).expect("run");
+
+        let cm = fs::read_to_string(out_dir.join("000-configmap-demo.yaml")).unwrap();
+        assert!(
+            cm.contains("count: '4'") || cm.contains("count: 4") || cm.contains("count: \"4\""),
+            "expected replicas from inputs.yaml; got:\n{cm}"
+        );
+    }
+
+    #[test]
+    fn inputs_yaml_wins_over_inputs_example_yaml() {
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, MINIMAL_PACKAGE);
+        fs::write(tmp.path().join("inputs.yaml"), "replicas: 7\n").unwrap();
+        fs::write(tmp.path().join("inputs.example.yaml"), "replicas: 99\n").unwrap();
+
+        let out_dir = tmp.path().join("out");
+        run(&ctx_json(), &args(&pkg, &out_dir), &mut Vec::new()).expect("run");
+
+        let cm = fs::read_to_string(out_dir.join("000-configmap-demo.yaml")).unwrap();
+        assert!(cm.contains('7') && !cm.contains("99"), "{cm}");
+    }
+
+    #[test]
+    fn falls_back_to_inputs_example_yaml_when_inputs_yaml_absent() {
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, MINIMAL_PACKAGE);
+        fs::write(tmp.path().join("inputs.example.yaml"), "replicas: 5\n").unwrap();
+
+        let out_dir = tmp.path().join("out");
+        run(&ctx_json(), &args(&pkg, &out_dir), &mut Vec::new()).expect("run");
+
+        let cm = fs::read_to_string(out_dir.join("000-configmap-demo.yaml")).unwrap();
+        assert!(cm.contains('5'), "{cm}");
+    }
+
+    #[test]
+    fn explicit_inputs_flag_overrides_auto_discovery() {
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, MINIMAL_PACKAGE);
+        fs::write(tmp.path().join("inputs.yaml"), "replicas: 7\n").unwrap();
+        let explicit = tmp.path().join("other.yaml");
+        fs::write(&explicit, "replicas: 11\n").unwrap();
+
+        let out_dir = tmp.path().join("out");
+        let a = RenderArgs {
+            inputs_path: Some(&explicit),
+            ..args(&pkg, &out_dir)
+        };
+        run(&ctx_json(), &a, &mut Vec::new()).expect("run");
+
+        let cm = fs::read_to_string(out_dir.join("000-configmap-demo.yaml")).unwrap();
+        assert!(cm.contains("11") && !cm.contains(": 7"), "{cm}");
+    }
+
+    #[test]
+    fn malformed_auto_discovered_inputs_errors_instead_of_falling_through() {
+        // Regression guard: if `inputs.yaml` exists but is malformed,
+        // the verb must surface the parse error — not silently fall
+        // through to `inputs.example.yaml`. Precedence is "first
+        // match wins," not "first valid wins."
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, MINIMAL_PACKAGE);
+        fs::write(tmp.path().join("inputs.yaml"), ":::: not yaml ::::").unwrap();
+        fs::write(tmp.path().join("inputs.example.yaml"), "replicas: 5\n").unwrap();
+
+        let err = run(&Context::human(), &args(&pkg, tmp.path()), &mut Vec::new())
+            .unwrap_err();
+        assert_eq!(err.to_structured().code, codes::E_INPUTS_PARSE);
+    }
+
+    #[test]
+    fn no_inputs_file_at_all_uses_schema_defaults() {
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, MINIMAL_PACKAGE);
+        // No inputs.yaml, no inputs.example.yaml, no --inputs.
+        let out_dir = tmp.path().join("out");
+        run(&Context::human(), &args(&pkg, &out_dir), &mut Vec::new()).expect("run");
+
+        // Schema default `replicas: int = 2` wins.
+        let cm = fs::read_to_string(out_dir.join("000-configmap-demo.yaml")).unwrap();
+        assert!(cm.contains("count: '2'") || cm.contains("count: 2"), "{cm}");
     }
 }

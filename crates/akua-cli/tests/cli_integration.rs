@@ -144,6 +144,21 @@ fn init_then_render_produces_deterministic_manifests() {
 }
 
 #[test]
+fn init_then_render_without_inputs_flag_uses_scaffold_inputs_example() {
+    // After `akua init`, the scaffold drops `inputs.example.yaml` next
+    // to package.k. `akua render` without --inputs should auto-discover
+    // it so the scaffold workflow is a single command.
+    let dir = tempdir();
+    run(dir.path(), &["init", "app"]);
+    let app = dir.path().join("app");
+    let out = run(&app, &["render", "--out", "./deploy", "--json"]);
+    assert_exit(&out, 0);
+    let parsed = stdout_json(&out);
+    assert_eq!(parsed["outputs"][0]["manifests"], 1);
+    assert!(app.join("deploy/000-configmap-hello.yaml").is_file());
+}
+
+#[test]
 fn render_missing_package_surfaces_structured_error_on_stderr() {
     let dir = tempdir();
     let out = run(

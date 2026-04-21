@@ -195,58 +195,56 @@ For `chart` and `rgd`: generates a typed KCL subpackage under `./sources/<name>/
 
 ## `akua lint` ✅
 
-Validate the current package. Checks schema, inputs, source references, policy compatibility.
+Parse-only check of a `package.k` — catches syntax errors and import-
+resolution failures without executing the program. Runtime errors
+(schema validation, unresolved options, engine failures) surface
+through `akua render --dry-run`.
 
 ```
-akua lint [path] [flags]
+akua lint [flags]
 ```
 
 ### Flags
 
 | flag | description |
 |---|---|
-| `--inputs=<file>` | validate with these inputs (JSON or YAML) |
-| `--policy=<tier>` | check against a specific policy tier |
-| `--strict` | treat warnings as errors |
-| `--fix` | auto-fix formatting issues (KCL fmt, yaml style) |
+| `--package=<path>` | path to the `package.k` file (default `./package.k`) |
 
 ### Exit codes
 
-0 clean, 1 validation errors, 3 policy deny.
+0 clean, 1 parse errors (or user error), 2 system error.
 
 ### JSON output
 
 ```json
 {
-  "valid": true,
-  "warnings": [],
-  "errors": [],
-  "checked": {
-    "schema": true,
-    "sources": 3,
-    "inputs": true,
-    "policy": "tier/startup"
-  }
+  "status": "ok",
+  "issues": []
 }
 ```
 
-Or on error:
+Or on parse failure:
 
 ```json
 {
-  "valid": false,
-  "errors": [
+  "status": "fail",
+  "issues": [
     {
-      "code": "E_SCHEMA_INVALID",
-      "path": "package.k",
-      "line": 14,
-      "field": "replicas",
-      "message": "expected int, got string",
-      "suggestion": "remove quotes"
+      "level": "error",
+      "code": "Error(InvalidSyntax)",
+      "message": "invalid token '!', consider using 'not '",
+      "file": "/abs/path/package.k",
+      "line": 2,
+      "column": 2
     }
   ]
 }
 ```
+
+> **Planned expansion (🚧).** The target surface also checks
+> Regal-style Rego lints, policy-tier compatibility, cross-engine
+> reference integrity, and offers `--fix` auto-format integration.
+> Lands with the policy pipeline (Phase C).
 
 ---
 
@@ -266,19 +264,18 @@ akua render [path] [flags]
 
 | flag | description |
 |---|---|
-| `--inputs=<file>` | inputs (JSON/YAML); applies when rendering a single Package directly |
+| `--package=<path>` | path to the `package.k` file (default `./package.k`) |
+| `--inputs=<file>` | inputs file (JSON or YAML). When omitted, probes `./inputs.yaml` then `./inputs.example.yaml` next to the package; falls back to schema defaults if neither exists |
 | `--output=<name>` | render only this named output (from the Package's `outputs` list) |
-| `--filter=<expr>` | narrow multi-document discovery (e.g. `--filter=spec.env=production`, `--filter=metadata.labels.team=payments`) |
 | `--out=<dir>` | write to directory (default: `./deploy/`) |
-| `--stdout` | print rendered YAML to stdout (single document, single output) |
+| `--stdout` | print rendered YAML to stdout (requires a single selected output) |
 | `--dry-run` | render but don't write files |
-| `--format=<raw\|helm\|rgd\|xr\|oci>` | override output format for single output |
 
-> **No `--env` or `--all-envs` flag.** Environments are a workspace concept, not an akua primitive. Compose envs in KCL (see [examples/03-multi-env-app](../examples/03-multi-env-app/)); narrow with `--filter` over any field you care about.
+> **Shipped today vs planned.** The verb executes the Package's KCL + the `RawManifests` output emitter. Other output kinds (`HelmChart`, `ResourceGraphDefinition`, `Crossplane`, `OCIBundle`) return `E_RENDER_UNSUPPORTED_KIND` until their engine callables land (Phase B). Multi-document workspace discovery (`akua render` with no path + `--filter`), render-time policy verdicts, and SLSA attestation files are future surface.
 
 ### Exit codes
 
-0 success, 1 render error, 3 policy deny (on render-time policy check).
+0 success, 1 user error, 2 system error. (Phase B adds 3 for policy deny.)
 
 ### JSON output
 
@@ -286,17 +283,17 @@ akua render [path] [flags]
 {
   "outputs": [
     {
-      "name": "static",
       "format": "raw-manifests",
-      "target": "deploy/",
-      "manifests": 12,
-      "hash": "sha256:…"
+      "target": "./deploy",
+      "manifests": 1,
+      "hash": "sha256:…",
+      "files": ["000-configmap-hello.yaml"]
     }
-  ],
-  "policy": { "verdict": "allow" },
-  "attestation": "./deploy/.attestation.json"
+  ]
 }
 ```
+
+Each output carries `format`, `target`, `manifests` (count), `hash` (`sha256:` prefix), and `files`. `name` is present only when the Package declared a named output.
 
 ---
 
@@ -996,57 +993,6 @@ Uses embedded `kcl fmt` for `.k` files and embedded `opa fmt` for `.rego` files.
 ### Exit codes
 
 0 success, 1 formatting needed (with `--check`), 2 parse error.
-
----
-
-## `akua lint` ✅
-
-Style + correctness linting across the workspace.
-
-```
-akua lint [path] [flags]
-```
-
-Runs:
-
-- **Regal** on `.rego` files (Rego style + common-error rules)
-- **`kcl lint`** on `.k` files (KCL style + schema correctness)
-- Cross-engine checks unique to akua (e.g., `Package` references `Policy` that doesn't exist)
-
-### Flags
-
-| flag | description |
-|---|---|
-| `--fix` | apply auto-fixable lint rules |
-| `--severity=<warn\|error>` | minimum severity to report (default warn) |
-| `--engine=<auto\|embedded\|shell>` | engine selection |
-
-### JSON output
-
-```json
-{
-  "issues": [
-    {
-      "file":     "policies/production.rego",
-      "line":     14,
-      "col":      3,
-      "rule":     "regal:style/use-in-operator",
-      "severity": "warn",
-      "message":  "prefer 'in' over loop iteration",
-      "fix":      "replace ... with ..."
-    },
-    {
-      "file":     "package.k",
-      "line":     8,
-      "col":      1,
-      "rule":     "kcl:style/missing-docstring",
-      "severity": "warn",
-      "message":  "schema Input has no docstring"
-    }
-  ],
-  "summary": { "warn": 2, "error": 0 }
-}
-```
 
 ---
 
