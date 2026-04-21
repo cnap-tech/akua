@@ -7,11 +7,18 @@ use std::io::Write;
 
 use akua_core::cli_contract::ExitCode;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "schema-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
 
 use crate::contract::{Context, OutputMode};
 
 /// Version response shape.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../sdk-types/"))]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct VersionOutput {
     /// Semver version of the `akua` binary.
     pub version: String,

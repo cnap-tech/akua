@@ -74,6 +74,19 @@
         "message"
       ],
       "type": "object"
+    },
+    "VersionOutput": {
+      "description": "Version response shape.",
+      "properties": {
+        "version": {
+          "description": "Semver version of the `akua` binary.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "type": "object"
     }
   },
   "$id": "https://akua.dev/schemas/v1/akua.json",

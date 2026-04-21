@@ -15,6 +15,12 @@ path = "src/lib.rs"
 name = "akua"
 path = "src/main.rs"
 
+[features]
+# Mirror akua-core's SDK-export features so types defined in this crate
+# (e.g. VersionOutput) land in the generated bindings + bundle.
+ts-export = ["akua-core/ts-export", "dep:ts-rs"]
+schema-export = ["akua-core/schema-export", "dep:schemars"]
+
 [dependencies]
 akua-core = { path = "../akua-core" }
 clap = { workspace = true }
@@ -22,6 +28,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
+ts-rs = { version = "11", optional = true }
+schemars = { version = "1", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
