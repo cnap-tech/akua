@@ -169,7 +169,7 @@ jobs:
           tar -xzf "dist/akua-${version}-x86_64-unknown-linux-gnu.tar.gz" -C image-context/amd64 akua
           tar -xzf "dist/akua-${version}-aarch64-unknown-linux-gnu.tar.gz" -C image-context/arm64 akua
       - name: Build + push multi-arch image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: image-context
           file: scripts/Dockerfile
