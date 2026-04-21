@@ -1,5 +1,45 @@
 {
   "$defs": {
+    "ExitCode": {
+      "description": "The seven typed exit codes every akua verb may produce.\n\nAgents branch on these. Humans read them. The stability contract is\nthat meanings never change; new codes require a major version bump.\n\nSerialized as the stable kebab-case name (`\"success\"`, `\"user-error\"`,\n`\"policy-deny\"`, etc.) — same string [`ExitCode::name`] returns. The\nSDK maps from the numeric `child.exitCode` (0..=6) to this name.",
+      "oneOf": [
+        {
+          "const": "success",
+          "description": "`0` — operation completed as requested.",
+          "type": "string"
+        },
+        {
+          "const": "user-error",
+          "description": "`1` — invalid inputs, bad flags, missing required arguments.\nSomething the caller got wrong.",
+          "type": "string"
+        },
+        {
+          "const": "system-error",
+          "description": "`2` — unexpected failure (disk, network, bug). Something akua\ncouldn't recover from that isn't the caller's fault.",
+          "type": "string"
+        },
+        {
+          "const": "policy-deny",
+          "description": "`3` — the policy engine rejected the operation.",
+          "type": "string"
+        },
+        {
+          "const": "rate-limited",
+          "description": "`4` — registry / API rate limits. Retry with backoff.",
+          "type": "string"
+        },
+        {
+          "const": "needs-approval",
+          "description": "`5` — the operation is allowed but requires human approval\nbefore it can proceed.",
+          "type": "string"
+        },
+        {
+          "const": "timeout",
+          "description": "`6` — operation did not complete within `--timeout`.",
+          "type": "string"
+        }
+      ]
+    },
     "Level": {
       "description": "Log severity. Almost always `Error`; `Warn` for recoverable issues.",
       "enum": [

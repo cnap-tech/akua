@@ -16,7 +16,7 @@
 use std::path::Path;
 
 use akua_cli::verbs::version::VersionOutput;
-use akua_core::cli_contract::StructuredError;
+use akua_core::cli_contract::{ExitCode, StructuredError};
 use akua_core::cli_contract::error::Level;
 use schemars::generate::SchemaSettings;
 
@@ -29,6 +29,7 @@ fn export_json_schema_bundle() {
     // is only for top-level discoverability by agents.
     generator.subschema_for::<StructuredError>();
     generator.subschema_for::<Level>();
+    generator.subschema_for::<ExitCode>();
     generator.subschema_for::<VersionOutput>();
 
     let defs = generator.take_definitions(true);

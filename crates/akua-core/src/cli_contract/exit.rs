@@ -5,11 +5,25 @@
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+#[cfg(feature = "schema-export")]
+use schemars::JsonSchema;
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
+
 /// The seven typed exit codes every akua verb may produce.
 ///
 /// Agents branch on these. Humans read them. The stability contract is
 /// that meanings never change; new codes require a major version bump.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// Serialized as the stable kebab-case name (`"success"`, `"user-error"`,
+/// `"policy-deny"`, etc.) — same string [`ExitCode::name`] returns. The
+/// SDK maps from the numeric `child.exitCode` (0..=6) to this name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../sdk-types/"))]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 #[repr(u8)]
 pub enum ExitCode {
     /// `0` — operation completed as requested.
