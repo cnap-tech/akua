@@ -333,7 +333,7 @@ pub fn format_kcl(source: &str) -> Result<String, PackageKError> {
 }
 
 fn eval_kcl(path: &Path, code: &str, option_json: &str) -> Result<String, PackageKError> {
-    use kcl_lang::{Argument, ExecProgramArgs, API};
+    use kcl_lang::{Argument, ExecProgramArgs, ExternalPkg, API};
 
     // A non-zero plugin_agent installs the akua-side plugin dispatcher
     // so `kcl_plugin.<module>.<fn>` calls inside the Package resolve
@@ -348,6 +348,13 @@ fn eval_kcl(path: &Path, code: &str, option_json: &str) -> Result<String, Packag
         args: vec![Argument {
             name: INPUT_OPTION_KEY.to_string(),
             value: option_json.to_string(),
+        }],
+        // Expose the bundled akua KCL stdlib as the `akua` package,
+        // so Packages can write `import akua.helm` / `import akua.pkg`
+        // instead of reaching into `kcl_plugin.*` directly.
+        external_pkgs: vec![ExternalPkg {
+            pkg_name: "akua".to_string(),
+            pkg_path: crate::stdlib::stdlib_root().to_string_lossy().into_owned(),
         }],
         ..Default::default()
     };

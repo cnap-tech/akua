@@ -9,7 +9,7 @@ and `helm` is on PATH.
 
 | file | purpose |
 |---|---|
-| `package.k` | KCL Package; imports `kcl_plugin.helm`, calls `helm.template`, wires the result into `resources = …`. |
+| `package.k` | KCL Package; imports `akua.helm`, calls `helm.template`, wires the result into `resources = …`. |
 | `akua.toml` | Manifest — no external deps. |
 | `inputs.example.yaml` | Auto-discovered by `akua render` when `--inputs` is omitted. |
 | `chart/` | A tiny in-tree Helm chart (one `ConfigMap` template). |
@@ -41,8 +41,9 @@ The rendered `ConfigMap` lands at `./deploy/000-configmap-hello-greeting.yaml`.
 
 ## What's happening
 
-`package.k` imports `kcl_plugin.helm` — KCL's plugin namespace — and
-calls `helm.template(chart_path, values, release_name, release_namespace)`.
+`package.k` imports `akua.helm` — the bundled akua KCL stdlib, a
+thin typed wrapper over `kcl_plugin.helm` — and calls
+`helm.template(chart_path, values, release_name, release_namespace)`.
 Under the hood, akua's plugin dispatcher routes the call to a Rust
 handler that shells out to `helm template`, parses the multi-document
 YAML output back into KCL values, and splats them into `resources`.

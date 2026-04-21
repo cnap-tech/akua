@@ -11,7 +11,7 @@
 # Inputs flow through KCL's `option()` mechanism; `inputs.example.yaml`
 # is auto-discovered when --inputs is omitted.
 
-import kcl_plugin.helm
+import akua.helm
 
 schema Input:
     """Public inputs for 00-helm-hello."""

@@ -30,6 +30,8 @@ pub mod package_k;
 pub mod package_render;
 #[cfg(feature = "engine-kcl")]
 pub mod pkg_render;
+#[cfg(feature = "engine-kcl")]
+pub mod stdlib;
 
 pub use cli_contract::{AgentContext, AgentSource, ExitCode, StructuredError};
 pub use lock_file::{

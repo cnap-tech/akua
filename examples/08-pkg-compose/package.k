@@ -10,7 +10,7 @@
 # Produces two ConfigMaps: `config-frontend` and `config-backend`,
 # each with its own data payload from the outer's inputs.
 
-import kcl_plugin.pkg
+import akua.pkg
 
 schema ComponentInput:
     """Per-component inputs — name + payload passed through to the
