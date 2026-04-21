@@ -71,6 +71,26 @@ pub fn register(
         .insert(method.into(), Box::new(handler));
 }
 
+/// Pull the single Options schema instance every akua plugin expects
+/// out of `args[0]` — returns it as a JSON map, ready for field
+/// lookups. Shared error wording: `"{plugin}: arg 0 must be a
+/// {schema} options object"`.
+///
+/// Every `akua.*` stdlib wrapper calls its plugin as
+/// `_plugin.foo(opts)` where `opts` is a schema instance. KCL
+/// serializes that as a single-element JSON array containing one
+/// object — this helper unwraps it uniformly.
+pub fn extract_options_arg<'a>(
+    args: &'a Value,
+    plugin_name: &str,
+    schema_name: &str,
+) -> Result<&'a serde_json::Map<String, Value>, String> {
+    args.as_array()
+        .and_then(|a| a.first())
+        .and_then(Value::as_object)
+        .ok_or_else(|| format!("{plugin_name}: arg 0 must be a {schema_name} options object"))
+}
+
 /// Remove a handler. Returns true if one was present.
 pub fn unregister(method: &str) -> bool {
     registry()

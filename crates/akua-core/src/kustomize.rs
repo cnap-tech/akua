@@ -6,10 +6,16 @@
 //!
 //! ## Plugin contract
 //!
+//! KCL side (preferred — via the `akua.kustomize` stdlib wrapper):
+//!
 //! ```kcl
 //! import akua.kustomize
-//! _manifests = kustomize.build("./overlays/prod")
+//! _manifests = kustomize.build(kustomize.Build {
+//!     path = "./overlays/prod"
+//! })
 //! ```
+//!
+//! The plugin receives a single JSON object in `args[0]`, with field:
 //!
 //! - `path: str` — filesystem path to a kustomization directory
 //!   (one containing `kustomization.yaml` / `.yml` / `Kustomization`).
@@ -38,14 +44,7 @@ fn err(msg: impl std::fmt::Display) -> String {
 /// Idempotent — re-registering replaces the prior handler.
 pub fn install() {
     kcl_plugin::register(PLUGIN_NAME, |args, _kwargs| {
-        // Callers pass a single `kustomize.Build` schema instance.
-        let arr = args
-            .as_array()
-            .ok_or_else(|| err("expected positional args as JSON array"))?;
-        let opts = arr
-            .first()
-            .and_then(Value::as_object)
-            .ok_or_else(|| err("arg 0 must be a kustomize.Build options object"))?;
+        let opts = kcl_plugin::extract_options_arg(args, PLUGIN_NAME, "kustomize.Build")?;
         let path = opts
             .get("path")
             .and_then(Value::as_str)
@@ -91,7 +90,7 @@ pub fn build(path: &Path) -> Result<Vec<Value>, String> {
         return Err(err(format!("`kustomize build` failed: {}", stderr.trim())));
     }
 
-    parse_multi_doc(&output.stdout)
+    crate::yaml_multidoc::parse(&output.stdout, PLUGIN_NAME)
 }
 
 /// Kustomize recognizes any of these filenames as the entrypoint —
@@ -106,31 +105,6 @@ fn has_kustomization_file(path: &Path) -> bool {
     false
 }
 
-fn parse_multi_doc(bytes: &[u8]) -> Result<Vec<Value>, String> {
-    use serde::de::Deserialize;
-
-    let text = std::str::from_utf8(bytes).map_err(|e| err(format!("output not utf-8: {e}")))?;
-
-    let mut out = Vec::new();
-    for doc in serde_yaml::Deserializer::from_str(text) {
-        let value = Value::deserialize(doc)
-            .map_err(|e| err(format!("parsing output as YAML: {e}")))?;
-        if is_empty_doc(&value) {
-            continue;
-        }
-        out.push(value);
-    }
-    Ok(out)
-}
-
-fn is_empty_doc(v: &Value) -> bool {
-    match v {
-        Value::Null => true,
-        Value::Object(m) => m.is_empty(),
-        _ => false,
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -140,32 +114,6 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
-
-    #[test]
-    fn parses_multi_doc_yaml_into_resource_list() {
-        let text = br#"
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: first
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: second
-"#;
-        let docs = parse_multi_doc(text).expect("parse");
-        assert_eq!(docs.len(), 2);
-        assert_eq!(docs[0]["kind"], "ConfigMap");
-        assert_eq!(docs[1]["kind"], "Service");
-    }
-
-    #[test]
-    fn drops_empty_separator_docs() {
-        let text = b"---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n---\n---\n";
-        let docs = parse_multi_doc(text).expect("parse");
-        assert_eq!(docs.len(), 1);
-    }
 
     #[test]
     fn has_kustomization_file_accepts_every_canonical_name() {

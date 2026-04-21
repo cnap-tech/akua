@@ -21,6 +21,8 @@ pub mod dir_diff;
 pub mod helm;
 #[cfg(feature = "engine-kustomize-shell")]
 pub mod kustomize;
+#[cfg(any(feature = "engine-helm-shell", feature = "engine-kustomize-shell"))]
+pub(crate) mod yaml_multidoc;
 pub(crate) mod hex;
 #[cfg(feature = "engine-kcl")]
 pub mod kcl_plugin;

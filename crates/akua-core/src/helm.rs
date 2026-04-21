@@ -55,31 +55,28 @@ fn err(msg: impl std::fmt::Display) -> String {
 /// Idempotent — re-registering replaces the prior handler.
 pub fn install() {
     kcl_plugin::register(PLUGIN_NAME, |args, _kwargs| {
-        // Callers pass a single `helm.Template` schema instance; KCL
-        // serializes it as one JSON object in `args[0]`. See
-        // `stdlib/akua/helm.k` for the schema + field defaults.
-        let arr = args
-            .as_array()
-            .ok_or_else(|| err("expected positional args as JSON array"))?;
-        let opts = arr
-            .first()
-            .and_then(Value::as_object)
-            .ok_or_else(|| err("arg 0 must be a helm.Template options object"))?;
+        let opts = kcl_plugin::extract_options_arg(args, PLUGIN_NAME, "helm.Template")?;
 
         let chart_path = opts
             .get("chart")
             .and_then(Value::as_str)
             .ok_or_else(|| err("options.chart must be a string"))?;
-        // A null/missing `values` becomes `{}` rather than serialized
-        // `null` — chart templates that deref `.Values.x` without a
-        // default would otherwise error on `<nil>.x`.
+        // Null/missing `values` becomes `{}` rather than serialized `null` — chart
+        // templates that deref `.Values.x` without a default would otherwise error
+        // on `<nil>.x`.
         let empty = Value::Object(serde_json::Map::new());
         let values_ref = opts
             .get("values")
             .filter(|v| !v.is_null())
             .unwrap_or(&empty);
-        let release_name = opts.get("release").and_then(Value::as_str).unwrap_or("release");
-        let release_ns = opts.get("namespace").and_then(Value::as_str).unwrap_or("default");
+        let release_name = opts
+            .get("release")
+            .and_then(Value::as_str)
+            .unwrap_or("release");
+        let release_ns = opts
+            .get("namespace")
+            .and_then(Value::as_str)
+            .unwrap_or("default");
 
         validate_release_name(release_name)?;
         validate_namespace(release_ns)?;
@@ -192,35 +189,7 @@ pub fn template(
         return Err(err(format!("`helm template` failed: {}", stderr.trim())));
     }
 
-    parse_multi_doc(&output.stdout)
-}
-
-/// Parse helm's multi-document YAML output into one `Value` per
-/// document. Empty docs (helm emits them between resources) are
-/// dropped so the returned list is usable in `resources = [*_x]`.
-fn parse_multi_doc(bytes: &[u8]) -> Result<Vec<Value>, String> {
-    use serde::de::Deserialize;
-
-    let text = std::str::from_utf8(bytes).map_err(|e| err(format!("output not utf-8: {e}")))?;
-
-    let mut out = Vec::new();
-    for doc in serde_yaml::Deserializer::from_str(text) {
-        let value = Value::deserialize(doc)
-            .map_err(|e| err(format!("parsing output as YAML: {e}")))?;
-        if is_empty_doc(&value) {
-            continue;
-        }
-        out.push(value);
-    }
-    Ok(out)
-}
-
-fn is_empty_doc(v: &Value) -> bool {
-    match v {
-        Value::Null => true,
-        Value::Object(m) => m.is_empty(),
-        _ => false,
-    }
+    crate::yaml_multidoc::parse(&output.stdout, PLUGIN_NAME)
 }
 
 // ---------------------------------------------------------------------------
@@ -232,45 +201,6 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
-
-    #[test]
-    fn parses_multi_doc_yaml_into_resource_list() {
-        let text = br#"
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: first
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: second
-"#;
-        let docs = parse_multi_doc(text).expect("parse");
-        assert_eq!(docs.len(), 2);
-        assert_eq!(docs[0]["kind"], "ConfigMap");
-        assert_eq!(docs[1]["kind"], "Service");
-    }
-
-    #[test]
-    fn drops_empty_separator_docs() {
-        let text = b"---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: x\n---\n---\n";
-        let docs = parse_multi_doc(text).expect("parse");
-        assert_eq!(docs.len(), 1);
-        assert_eq!(docs[0]["metadata"]["name"], "x");
-    }
-
-    #[test]
-    fn empty_input_produces_empty_list() {
-        assert_eq!(parse_multi_doc(b"").unwrap(), Vec::<Value>::new());
-        assert_eq!(parse_multi_doc(b"---\n").unwrap(), Vec::<Value>::new());
-    }
-
-    #[test]
-    fn invalid_utf8_surfaces_typed_error() {
-        let err = parse_multi_doc(&[0xff, 0xfe, 0xfd]).unwrap_err();
-        assert!(err.contains("not utf-8"));
-    }
 
     fn write_minimal_chart(dir: &std::path::Path) {
         fs::write(

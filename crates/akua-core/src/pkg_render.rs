@@ -1,4 +1,4 @@
-//! `pkg.render({ path, inputs }) -> sentinel` — recursive Package composition.
+//! `pkg.render(Render) -> sentinel` — recursive Package composition.
 //!
 //! # Architecture: post-eval expansion
 //!
@@ -55,14 +55,7 @@ fn err(msg: impl std::fmt::Display) -> String {
 /// to [`expand_sentinels`].
 pub fn install() {
     kcl_plugin::register(PLUGIN_NAME, |args, _kwargs| {
-        // Callers pass a single `pkg.Render` schema instance.
-        let arr = args
-            .as_array()
-            .ok_or_else(|| err("expected positional args as JSON array"))?;
-        let opts = arr
-            .first()
-            .and_then(serde_json::Value::as_object)
-            .ok_or_else(|| err("arg 0 must be a pkg.Render options object"))?;
+        let opts = kcl_plugin::extract_options_arg(args, PLUGIN_NAME, "pkg.Render")?;
         let path_str = opts
             .get("path")
             .and_then(serde_json::Value::as_str)
