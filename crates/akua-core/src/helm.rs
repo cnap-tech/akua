@@ -31,25 +31,38 @@ use serde_json::Value;
 
 use crate::kcl_plugin;
 
+/// Plugin name KCL uses to reach the handler. Stable across the
+/// shell-out and future WASM-embedded engines — swapping the
+/// implementation doesn't change the Package-authoring surface.
+pub const PLUGIN_NAME: &str = "helm.template";
+
+/// Every error from this module is prefixed so they're easy to
+/// attribute in the `__kcl_PanicInfo__` envelope that ends up in a
+/// user's render output.
+fn err(msg: impl std::fmt::Display) -> String {
+    format!("{PLUGIN_NAME}: {msg}")
+}
+
 /// Register `helm.template` with the global plugin dispatcher. Call
 /// once at process start when the `engine-helm-shell` feature is on.
 /// Idempotent — re-registering replaces the prior handler.
 pub fn install() {
-    kcl_plugin::register("helm.template", |args, _kwargs| {
+    kcl_plugin::register(PLUGIN_NAME, |args, _kwargs| {
         let arr = args
             .as_array()
-            .ok_or_else(|| "helm.template: expected positional args as JSON array".to_string())?;
+            .ok_or_else(|| err("expected positional args as JSON array"))?;
         let chart_path = arr
             .first()
             .and_then(Value::as_str)
-            .ok_or_else(|| "helm.template: arg 0 (chart_path) must be a string".to_string())?;
+            .ok_or_else(|| err("arg 0 (chart_path) must be a string"))?;
         // A null/missing `values` becomes `{}` rather than serialized
         // `null` — chart templates that deref `.Values.x` without a
         // default would otherwise error on `<nil>.x`.
-        let values = match arr.get(1) {
-            Some(Value::Null) | None => Value::Object(Default::default()),
-            Some(v) => v.clone(),
-        };
+        let empty = Value::Object(serde_json::Map::new());
+        let values_ref = arr
+            .get(1)
+            .filter(|v| !v.is_null())
+            .unwrap_or(&empty);
         let release_name = arr.get(2).and_then(Value::as_str).unwrap_or("release");
         let release_ns = arr.get(3).and_then(Value::as_str).unwrap_or("default");
 
@@ -58,7 +71,7 @@ pub fn install() {
 
         let rendered = template(
             &PathBuf::from(chart_path),
-            &values,
+            values_ref,
             release_name,
             release_ns,
         )?;
@@ -73,22 +86,20 @@ pub fn install() {
 /// helm flag.
 fn validate_release_name(name: &str) -> Result<(), String> {
     if name.is_empty() || name.len() > 53 {
-        return Err(format!(
-            "helm.template: release name `{name}` must be 1..=53 chars"
-        ));
+        return Err(err(format!("release name `{name}` must be 1..=53 chars")));
     }
     let mut chars = name.chars();
     let first = chars.next().unwrap();
     if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
-        return Err(format!(
-            "helm.template: release name `{name}` must start with a lowercase letter or digit"
-        ));
+        return Err(err(format!(
+            "release name `{name}` must start with a lowercase letter or digit"
+        )));
     }
     for c in chars {
         if !c.is_ascii_lowercase() && !c.is_ascii_digit() && c != '-' {
-            return Err(format!(
-                "helm.template: release name `{name}` may contain only [a-z0-9-]"
-            ));
+            return Err(err(format!(
+                "release name `{name}` may contain only [a-z0-9-]"
+            )));
         }
     }
     Ok(())
@@ -98,23 +109,20 @@ fn validate_release_name(name: &str) -> Result<(), String> {
 /// `-`, must start + end with alphanumeric.
 fn validate_namespace(ns: &str) -> Result<(), String> {
     if ns.is_empty() || ns.len() > 63 {
-        return Err(format!(
-            "helm.template: namespace `{ns}` must be 1..=63 chars"
-        ));
+        return Err(err(format!("namespace `{ns}` must be 1..=63 chars")));
     }
     let chars: Vec<char> = ns.chars().collect();
-    let ok_edge =
-        |c: char| -> bool { c.is_ascii_lowercase() || c.is_ascii_digit() };
+    let ok_edge = |c: char| -> bool { c.is_ascii_lowercase() || c.is_ascii_digit() };
     if !ok_edge(chars[0]) || !ok_edge(*chars.last().unwrap()) {
-        return Err(format!(
-            "helm.template: namespace `{ns}` must start and end with a lowercase letter or digit"
-        ));
+        return Err(err(format!(
+            "namespace `{ns}` must start and end with a lowercase letter or digit"
+        )));
     }
     for c in &chars {
         if !ok_edge(*c) && *c != '-' {
-            return Err(format!(
-                "helm.template: namespace `{ns}` may contain only [a-z0-9-]"
-            ));
+            return Err(err(format!(
+                "namespace `{ns}` may contain only [a-z0-9-]"
+            )));
         }
     }
     Ok(())
@@ -129,8 +137,8 @@ pub fn template(
     release_name: &str,
     release_namespace: &str,
 ) -> Result<Vec<Value>, String> {
-    let values_yaml = serde_yaml::to_string(values)
-        .map_err(|e| format!("serializing helm values: {e}"))?;
+    let values_yaml =
+        serde_yaml::to_string(values).map_err(|e| err(format!("serializing values: {e}")))?;
 
     let mut cmd = Command::new("helm");
     cmd.arg("template")
@@ -146,9 +154,9 @@ pub fn template(
 
     let mut child = cmd.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
-            "helm.template: `helm` not found on PATH (engine-helm-shell requires it)".to_string()
+            err("`helm` not found on PATH (engine-helm-shell requires it)")
         } else {
-            format!("helm.template: spawn failed: {e}")
+            err(format!("spawn failed: {e}"))
         }
     })?;
 
@@ -157,15 +165,15 @@ pub fn template(
         .as_mut()
         .expect("stdin piped")
         .write_all(values_yaml.as_bytes())
-        .map_err(|e| format!("helm.template: writing values to stdin: {e}"))?;
+        .map_err(|e| err(format!("writing values to stdin: {e}")))?;
 
     let output = child
         .wait_with_output()
-        .map_err(|e| format!("helm.template: waiting for helm: {e}"))?;
+        .map_err(|e| err(format!("waiting for helm: {e}")))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("helm.template: `helm template` failed: {}", stderr.trim()));
+        return Err(err(format!("`helm template` failed: {}", stderr.trim())));
     }
 
     parse_multi_doc(&output.stdout)
@@ -177,13 +185,12 @@ pub fn template(
 fn parse_multi_doc(bytes: &[u8]) -> Result<Vec<Value>, String> {
     use serde::de::Deserialize;
 
-    let text = std::str::from_utf8(bytes)
-        .map_err(|e| format!("helm output not utf-8: {e}"))?;
+    let text = std::str::from_utf8(bytes).map_err(|e| err(format!("output not utf-8: {e}")))?;
 
     let mut out = Vec::new();
     for doc in serde_yaml::Deserializer::from_str(text) {
         let value = Value::deserialize(doc)
-            .map_err(|e| format!("parsing helm output as YAML: {e}"))?;
+            .map_err(|e| err(format!("parsing output as YAML: {e}")))?;
         if is_empty_doc(&value) {
             continue;
         }
