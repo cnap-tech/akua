@@ -45,6 +45,30 @@ tasks:
       - task: fmt:check
       - task: lint
       - task: test
+      - task: sdk:check
+
+  # ---------------------------------------------------------------------------
+  # SDK — generated TS types + JSON Schema bundle + @akua/sdk package
+  # ---------------------------------------------------------------------------
+
+  sdk:gen:
+    desc: Regenerate sdk-types/*.ts and sdk-schemas/akua.json from Rust serde types
+    cmds:
+      - cargo test -p akua-core --features ts-export --lib -- export_bindings
+      - cargo test -p akua-cli  --features ts-export --lib -- export_bindings
+      - cargo test -p akua-cli  --features ts-export,schema-export --test export_sdk_bundle
+
+  sdk:check:
+    desc: Fail if generated SDK artifacts drift from the Rust source
+    cmds:
+      - task: sdk:gen
+      - git diff --exit-code -- sdk-types sdk-schemas
+
+  sdk:test:
+    desc: Run @akua/sdk TS unit tests
+    dir: packages/sdk
+    cmds:
+      - node --test --experimental-strip-types src/*.test.ts
 
   release:local:
     desc: Build the release binary locally
