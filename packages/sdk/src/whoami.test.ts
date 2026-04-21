@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 
 import { AkuaContractError, validateAs } from './validate.ts';
-import type { WhoamiOutput } from '../../../sdk-types/WhoamiOutput.ts';
+import type { WhoamiOutput } from './types/WhoamiOutput.ts';
 
 function expectContractError(fn: () => unknown) {
 	assert.throws(fn, (err: unknown) => err instanceof AkuaContractError);

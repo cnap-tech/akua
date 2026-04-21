@@ -7,9 +7,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::contract_type;
-
-contract_type! {
+crate::contract_type! {
 /// The seven typed exit codes every akua verb may produce.
 ///
 /// Agents branch on these. Humans read them. The stability contract is

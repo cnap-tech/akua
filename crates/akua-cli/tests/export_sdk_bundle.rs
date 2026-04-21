@@ -46,8 +46,9 @@ fn export_json_schema_bundle() {
         "$defs": defs,
     });
 
-    let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sdk-schemas/akua.json");
-    std::fs::create_dir_all(out.parent().expect("has parent")).expect("create sdk-schemas");
+    let out =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../packages/sdk/src/schemas/akua.json");
+    std::fs::create_dir_all(out.parent().expect("has parent")).expect("create schemas dir");
     let json = serde_json::to_string_pretty(&bundle).expect("bundle -> json");
     std::fs::write(&out, json).expect("write bundle");
 }

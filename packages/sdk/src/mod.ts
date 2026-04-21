@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 
-import type { VersionOutput } from '../../../sdk-types/VersionOutput.ts';
-import type { WhoamiOutput } from '../../../sdk-types/WhoamiOutput.ts';
+import type { VersionOutput } from './types/VersionOutput.ts';
+import type { WhoamiOutput } from './types/WhoamiOutput.ts';
 
 import { classifyCliError } from './errors.ts';
 import { type SchemaName, validateAs } from './validate.ts';
@@ -10,10 +10,10 @@ export * from './errors.ts';
 export { AkuaContractError, standardSchemaFor, validateAs } from './validate.ts';
 export type { SchemaName } from './validate.ts';
 export type { VersionOutput, WhoamiOutput };
-export type { ExitCode } from '../../../sdk-types/ExitCode.ts';
-export type { StructuredError, Level } from '../../../sdk-types/StructuredError.ts';
-export type { AgentContext } from '../../../sdk-types/AgentContext.ts';
-export type { AgentSource } from '../../../sdk-types/AgentSource.ts';
+export type { ExitCode } from './types/ExitCode.ts';
+export type { StructuredError, Level } from './types/StructuredError.ts';
+export type { AgentContext } from './types/AgentContext.ts';
+export type { AgentSource } from './types/AgentSource.ts';
 
 // 64 MiB covers large `inspect` / `render` outputs. Verbs that stream
 // multi-hundred-MiB artifacts should use a streaming API instead of

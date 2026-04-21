@@ -2,7 +2,7 @@
 // name Rust ships. Index in BY_NUMBER = integer value in Rust (matches
 // akua-core::ExitCode::from_code).
 
-import type { ExitCode } from '../../../sdk-types/ExitCode.ts';
+import type { ExitCode } from './types/ExitCode.ts';
 
 const BY_NUMBER: readonly ExitCode[] = [
 	'success',

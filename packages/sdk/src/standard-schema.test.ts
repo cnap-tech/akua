@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 
 import { standardSchemaFor } from './validate.ts';
-import type { VersionOutput } from '../../../sdk-types/VersionOutput.ts';
+import type { VersionOutput } from './types/VersionOutput.ts';
 
 type IssueResult = { issues: ReadonlyArray<{ message: string; path?: ReadonlyArray<unknown> }> };
 

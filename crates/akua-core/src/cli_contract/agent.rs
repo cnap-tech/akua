@@ -11,9 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::contract_type;
-
-contract_type! {
+crate::contract_type! {
 /// Which env var triggered agent detection. Recorded in `akua whoami`
 /// output for introspection and in debug-level logs for post-hoc diagnosis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -45,7 +43,7 @@ impl AgentSource {
     }
 }
 
-contract_type! {
+crate::contract_type! {
 /// Result of agent-context detection at process start.
 ///
 /// When `detected == true`, the CLI layer should (per §1.5) auto-enable

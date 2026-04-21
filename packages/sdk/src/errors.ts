@@ -3,8 +3,8 @@
 // by reading `err.structured.code` — the stable `E_*` identifier
 // cli-contract §1.2 guarantees.
 
-import type { ExitCode } from '../../../sdk-types/ExitCode.ts';
-import type { StructuredError } from '../../../sdk-types/StructuredError.ts';
+import type { ExitCode } from './types/ExitCode.ts';
+import type { StructuredError } from './types/StructuredError.ts';
 
 import { exitCodeFromNumber } from './exit-code.ts';
 
@@ -37,8 +37,18 @@ export class AkuaTransportError extends AkuaError {
 }
 
 // Subclasses are distinct classes (not tagged instances) so `instanceof`
-// works and Node's stack traces carry the real class name.
-function defineExitError(name: string, exitCode: Exclude<ExitCode, 'success'>) {
+// works and Node's stack traces carry the real class name. The explicit
+// constructor type is required for JSR slow-type checking — otherwise
+// JSR can't emit `.d.ts` for Node consumers.
+export type AkuaErrorSubclass = new (
+	message: string,
+	init?: Omit<AkuaErrorInit, 'exitCode'>,
+) => AkuaError;
+
+function defineExitError(
+	name: string,
+	exitCode: Exclude<ExitCode, 'success'>,
+): AkuaErrorSubclass {
 	class Cls extends AkuaError {
 		constructor(message: string, init: Omit<AkuaErrorInit, 'exitCode'> = {}) {
 			super(message, { ...init, exitCode });
@@ -49,14 +59,23 @@ function defineExitError(name: string, exitCode: Exclude<ExitCode, 'success'>) {
 	return Cls;
 }
 
-export const AkuaUserError = defineExitError('AkuaUserError', 'user-error');
-export const AkuaSystemError = defineExitError('AkuaSystemError', 'system-error');
-export const AkuaPolicyDenyError = defineExitError('AkuaPolicyDenyError', 'policy-deny');
-export const AkuaRateLimitedError = defineExitError('AkuaRateLimitedError', 'rate-limited');
-export const AkuaNeedsApprovalError = defineExitError('AkuaNeedsApprovalError', 'needs-approval');
-export const AkuaTimeoutError = defineExitError('AkuaTimeoutError', 'timeout');
+export const AkuaUserError: AkuaErrorSubclass = defineExitError('AkuaUserError', 'user-error');
+export const AkuaSystemError: AkuaErrorSubclass = defineExitError('AkuaSystemError', 'system-error');
+export const AkuaPolicyDenyError: AkuaErrorSubclass = defineExitError(
+	'AkuaPolicyDenyError',
+	'policy-deny',
+);
+export const AkuaRateLimitedError: AkuaErrorSubclass = defineExitError(
+	'AkuaRateLimitedError',
+	'rate-limited',
+);
+export const AkuaNeedsApprovalError: AkuaErrorSubclass = defineExitError(
+	'AkuaNeedsApprovalError',
+	'needs-approval',
+);
+export const AkuaTimeoutError: AkuaErrorSubclass = defineExitError('AkuaTimeoutError', 'timeout');
 
-const BY_EXIT_CODE: Record<Exclude<ExitCode, 'success'>, typeof AkuaUserError> = {
+const BY_EXIT_CODE: Record<Exclude<ExitCode, 'success'>, AkuaErrorSubclass> = {
 	'user-error': AkuaUserError,
 	'system-error': AkuaSystemError,
 	'policy-deny': AkuaPolicyDenyError,

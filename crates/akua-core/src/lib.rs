@@ -43,7 +43,10 @@
 macro_rules! contract_type {
     ($item:item) => {
         #[cfg_attr(feature = "ts-export", derive(::ts_rs::TS))]
-        #[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../sdk-types/"))]
+        #[cfg_attr(
+            feature = "ts-export",
+            ts(export, export_to = "../../../packages/sdk/src/types/")
+        )]
         #[cfg_attr(feature = "schema-export", derive(::schemars::JsonSchema))]
         $item
     };

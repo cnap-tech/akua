@@ -62,7 +62,14 @@ tasks:
     desc: Fail if generated SDK artifacts drift from the Rust source
     cmds:
       - task: sdk:gen
-      - git diff --exit-code -- sdk-types sdk-schemas
+      - git diff --exit-code -- packages/sdk/src/types packages/sdk/src/schemas
+
+  sdk:publish:check:
+    desc: Dry-run `jsr publish` — catches manifest + slow-type issues before tag push
+    deps: [sdk:install]
+    dir: packages/sdk
+    cmds:
+      - bunx jsr publish --dry-run --allow-dirty
 
   sdk:install:
     desc: Install @akua/sdk deps (bun)

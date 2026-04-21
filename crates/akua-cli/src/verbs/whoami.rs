@@ -5,15 +5,12 @@
 
 use std::io::Write;
 
-use akua_core::{
-    cli_contract::{AgentContext, ExitCode},
-    contract_type,
-};
+use akua_core::cli_contract::{AgentContext, ExitCode};
 use serde::{Deserialize, Serialize};
 
 use crate::contract::{emit_output, Context};
 
-contract_type! {
+akua_core::contract_type! {
 /// Whoami response shape. Part of the stability contract — new fields
 /// may be added (backward-compatible); existing field semantics never
 /// change.

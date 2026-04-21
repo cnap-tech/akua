@@ -7,7 +7,7 @@ import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020.
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 
 import { AkuaError } from './errors.ts';
-import akuaSchema from '../../../sdk-schemas/akua.json' with { type: 'json' };
+import akuaSchema from './schemas/akua.json' with { type: 'json' };
 
 type SchemaBundle = {
 	$id: string;
@@ -39,7 +39,7 @@ function compile(name: SchemaName): ValidateFunction {
 	const validator = ajv.getSchema(`${bundle.$id}#/$defs/${name}`);
 	if (!validator) {
 		throw new Error(
-			`No schema named "${name}" in sdk-schemas/akua.json — regenerate via \`task sdk:gen\`?`,
+			`No schema named "${name}" in schemas/akua.json — regenerate via \`task sdk:gen\`?`,
 		);
 	}
 	cache.set(name, validator);

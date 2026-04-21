@@ -7,9 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::contract_type;
-
-contract_type! {
+crate::contract_type! {
 /// The canonical error shape. One struct; every verb reuses it.
 ///
 /// `code` is the stable, load-bearing identifier. `message` is the one-line
@@ -59,7 +57,7 @@ pub struct StructuredError {
 }
 }
 
-contract_type! {
+crate::contract_type! {
 /// Log severity. Almost always `Error`; `Warn` for recoverable issues.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

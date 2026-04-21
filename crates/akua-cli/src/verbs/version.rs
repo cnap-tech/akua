@@ -5,12 +5,12 @@
 
 use std::io::Write;
 
-use akua_core::{cli_contract::ExitCode, contract_type};
+use akua_core::cli_contract::ExitCode;
 use serde::{Deserialize, Serialize};
 
 use crate::contract::{Context, OutputMode};
 
-contract_type! {
+akua_core::contract_type! {
 /// Version response shape.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VersionOutput {
