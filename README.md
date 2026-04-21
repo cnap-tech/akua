@@ -82,6 +82,7 @@ Deep dives:
 [`docs/policy-format.md`](docs/policy-format.md) ·
 [`docs/lockfile-format.md`](docs/lockfile-format.md) ·
 [`docs/embedded-engines.md`](docs/embedded-engines.md) ·
+[`docs/performance.md`](docs/performance.md) ·
 [`skills/`](skills/) ·
 [`examples/`](examples/) ·
 [`docs/roadmap.md`](docs/roadmap.md)
