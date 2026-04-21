@@ -1,27 +1,40 @@
-# akua/helm — typed wrappers over the `kcl_plugin.helm` surface.
+# akua/helm — typed wrapper over the `kcl_plugin.helm` surface.
 #
 # Users:
 #
 #   import akua.helm
 #
-#   resources = helm.template("./chart", { replicas = 3 })
+#   resources = helm.template(helm.Template {
+#       chart     = "./chart"
+#       values    = { replicas = 3 }
+#       release   = "myapp"
+#       namespace = "prod"
+#   })
 #
-# The underlying `kcl_plugin.helm.template` plugin is what actually
-# runs (dispatched by akua-core's plugin bridge). This file exists so
-# authoring code isn't forced to reach into KCL's raw `kcl_plugin.*`
-# namespace — users see `akua.helm.template`, implementers can swap
-# the backend without breaking imports.
+# Options-schema call style so every argument is named + docstring'd at
+# the call site. The underlying `kcl_plugin.helm.template` plugin is
+# what actually runs (dispatched by akua-core's plugin bridge).
 
 import kcl_plugin.helm as _helm
 
-# Render a Helm chart into a list of Kubernetes resources.
-#
-# `chart` is a filesystem path (directory or `.tgz`) resolved against
-# the calling Package's directory. `values` is a values tree serialized
-# to YAML for helm. `release` + `namespace` default to `"release"` /
-# `"default"`.
-#
-# Returns a list of resource dicts — splat with `*` into `resources`.
-template = lambda chart: str, values: {str:} = {}, release: str = "release", namespace: str = "default" -> [{str:}] {
-    _helm.template(chart, values, release, namespace)
+schema Template:
+    """Options for a single `helm template` invocation."""
+
+    chart: str
+    """Filesystem path to a chart directory or `.tgz`. Relative paths
+    resolve against the calling Package's directory."""
+
+    values: {str:} = {}
+    """Arbitrary values tree, serialized to YAML for helm."""
+
+    release: str = "release"
+    """Helm release name. Lowercase alphanumerics + `-`, max 53 chars."""
+
+    namespace: str = "default"
+    """Kubernetes namespace the release targets. DNS-1123 label rules."""
+
+# Render a Helm chart into a list of Kubernetes resources. Returns the
+# dicts helm produced — splat with `*` into `resources`.
+template = lambda opts: Template -> [{str:}] {
+    _helm.template(opts.chart, opts.values, opts.release, opts.namespace)
 }

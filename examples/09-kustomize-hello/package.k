@@ -21,7 +21,9 @@ input: Input = option("input") or Input {}
 
 # kustomize.build returns a list of Kubernetes resources. `*_manifests`
 # splats it into `resources`.
-_manifests = kustomize.build("./overlay")
+_manifests = kustomize.build(kustomize.Build {
+    path = "./overlay"
+})
 
 resources = _manifests
 

@@ -4,22 +4,26 @@
 #
 #   import akua.kustomize
 #
-#   resources = kustomize.build("./overlays/prod")
+#   resources = kustomize.build(kustomize.Build {
+#       path = "./overlays/prod"
+#   })
 #
-# The underlying `kcl_plugin.kustomize.build` plugin is what runs
-# (dispatched by akua-core's plugin bridge). This file lets authoring
-# code write `akua.kustomize.build` instead of reaching into KCL's
-# raw `kcl_plugin.*` namespace.
+# Options-schema call style matches `akua.helm` — every argument is named
+# + docstring'd at the call site. The underlying `kcl_plugin.kustomize.build`
+# plugin is what actually runs (dispatched by akua-core's plugin bridge).
 
 import kcl_plugin.kustomize as _kustomize
 
+schema Build:
+    """Options for a single `kustomize build` invocation."""
+
+    path: str
+    """Kustomization root — a directory containing
+    `kustomization.yaml` / `.yml` / `Kustomization`. Relative paths
+    resolve against the calling Package's directory."""
+
 # Render a kustomize overlay directory into a list of Kubernetes resources.
-#
-# `path` is the kustomization root — a directory containing
-# `kustomization.yaml` / `.yml` / `Kustomization`. Resolved against
-# the calling Package's directory.
-#
-# Returns a list of resource dicts — splat with `*` into `resources`.
-build = lambda path: str -> [{str:}] {
-    _kustomize.build(path)
+# Splat with `*` into `resources`.
+build = lambda opts: Build -> [{str:}] {
+    _kustomize.build(opts.path)
 }

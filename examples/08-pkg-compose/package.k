@@ -29,14 +29,20 @@ input: Input = option("input") or Input {}
 # pipeline walks the resources list post-eval, expands each
 # sentinel by loading + rendering `./shared/package.k` with the
 # supplied inputs, then splices the nested resources in place.
-_frontend = pkg.render("./shared", {
-    name    = input.frontend.name
-    payload = input.frontend.data
+_frontend = pkg.render(pkg.Render {
+    path   = "./shared"
+    inputs = {
+        name    = input.frontend.name
+        payload = input.frontend.data
+    }
 })
 
-_backend = pkg.render("./shared", {
-    name    = input.backend.name
-    payload = input.backend.data
+_backend = pkg.render(pkg.Render {
+    path   = "./shared"
+    inputs = {
+        name    = input.backend.name
+        payload = input.backend.data
+    }
 })
 
 resources = _frontend + _backend

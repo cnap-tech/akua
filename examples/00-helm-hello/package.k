@@ -27,15 +27,15 @@ input: Input = option("input") or Input {}
 # helm.template returns a list of Kubernetes resources — a single
 # ConfigMap in this case. `*_manifests` splats the list into
 # `resources`.
-_manifests = helm.template(
-    "./chart",
-    {
+_manifests = helm.template(helm.Template {
+    chart     = "./chart"
+    values    = {
         greeting = input.greeting
         replicas = input.replicas
-    },
-    "hello",
-    "default",
-)
+    }
+    release   = "hello"
+    namespace = "default"
+})
 
 resources = _manifests
 
