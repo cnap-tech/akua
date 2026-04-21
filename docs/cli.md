@@ -4,6 +4,13 @@ Complete reference for the `akua` binary. Every verb, every subcommand, every fl
 
 For the universal contract every verb honors (JSON output, exit codes, idempotency, plan mode, timeouts), see [cli-contract.md](cli-contract.md).
 
+> **Status marker.** Sections marked ✅ describe verbs available in the shipping binary. Sections marked 🚧 describe verbs from the target surface that aren't wired yet. If a verb isn't marked, assume 🚧.
+>
+> **Shipped today (13 verbs):**
+> `init` · `whoami` · `version` · `verify` · `render` · `fmt` · `lint` · `check` · `diff` · `add` · `remove` · `tree` · `inspect`
+>
+> Run `akua --help` at the command line for the authoritative live list.
+
 ---
 
 ## Top-level flags
@@ -82,7 +89,7 @@ Thirty verbs. Grouped by purpose. Each covered below.
 
 ---
 
-## `akua init`
+## `akua init` ✅
 
 Scaffold a new package or workspace.
 
@@ -130,7 +137,7 @@ Creates a directory with:
 
 ---
 
-## `akua add`
+## `akua add` ✅
 
 Add a dependency, chart, or source to the current package.
 
@@ -186,7 +193,7 @@ For `chart` and `rgd`: generates a typed KCL subpackage under `./sources/<name>/
 
 ---
 
-## `akua lint`
+## `akua lint` ✅
 
 Validate the current package. Checks schema, inputs, source references, policy compatibility.
 
@@ -243,7 +250,7 @@ Or on error:
 
 ---
 
-## `akua render`
+## `akua render` ✅
 
 **Run the Package's program.** Evaluate the KCL, invoke every source engine (Helm, kro, Kustomize), compose results, produce deploy-ready manifests.
 
@@ -293,7 +300,7 @@ akua render [path] [flags]
 
 ---
 
-## `akua diff`
+## `akua diff` ✅
 
 Structural diff between two package versions, or between a local package and a published version.
 
@@ -340,7 +347,7 @@ akua diff <ref>                    # diff local HEAD against published ref
 
 ---
 
-## `akua attest`
+## `akua attest` 🚧
 
 Emit a SLSA v1 provenance predicate for the current package or a built artifact.
 
@@ -374,7 +381,7 @@ akua attest [path] [flags]
 
 ---
 
-## `akua publish`
+## `akua publish` 🚧
 
 Push a signed package to an OCI registry.
 
@@ -412,7 +419,7 @@ akua publish [path] [flags]
 
 ---
 
-## `akua pull`
+## `akua pull` 🚧
 
 Fetch a package from an OCI registry into the local cache.
 
@@ -430,7 +437,7 @@ akua pull <ref> [flags]
 
 ---
 
-## `akua inspect`
+## `akua inspect` ✅
 
 Audit a package — schema, sources, attestation, structural diff.
 
@@ -473,7 +480,7 @@ akua inspect <ref> [flags]
 
 ---
 
-## `akua export`
+## `akua export` 🚧
 
 **Convert a canonical artifact to a format view.** The canonical form stays KCL (or Rego, for policies); `akua export` emits JSON Schema, OpenAPI, YAML, or other standard formats for consumers that expect them.
 
@@ -526,7 +533,7 @@ The export is a one-way projection; re-importing a YAML view back into the KCL w
 
 ---
 
-## `akua dev`
+## `akua dev` 🚧
 
 Start the hot-reload development loop.
 
@@ -566,7 +573,7 @@ Useful for agents that want to drive `akua dev` programmatically.
 
 ---
 
-## `akua deploy`
+## `akua deploy` 🚧
 
 Deploy rendered output to a reconciler target.
 
@@ -622,7 +629,7 @@ akua deploy cancel   --handle=<h>
 
 ---
 
-## `akua rollout`
+## `akua rollout` 🚧
 
 Cross-repo / cross-service staged rollout orchestration.
 
@@ -653,7 +660,7 @@ akua rollout abort   --handle=<h>     # triggers rollback
 
 ---
 
-## `akua secret`
+## `akua secret` 🚧
 
 Typed secret operations. Secrets move as refs, never raw bytes.
 
@@ -695,7 +702,7 @@ akua secret delete  <name>                    # soft delete; needs approval
 
 ---
 
-## `akua policy`
+## `akua policy` 🚧
 
 Policy tier operations.
 
@@ -741,7 +748,7 @@ akua policy publish <tier>                            # publish custom tier to O
 
 ---
 
-## `akua audit`
+## `akua audit` 🚧
 
 Causality spine. Trace changes, explain incidents, query the audit trail.
 
@@ -788,7 +795,7 @@ akua audit who       <resource>                       # who has permission to mo
 
 ---
 
-## `akua query`
+## `akua query` 🚧
 
 Structured queries against observability stores.
 
@@ -827,7 +834,7 @@ akua query "error_rate p99 last 1h service=checkout" --json
 
 ---
 
-## `akua infra`
+## `akua infra` 🚧
 
 Cluster, network, DNS, cert primitives. Wraps Crossplane or Terraform under the hood.
 
@@ -847,7 +854,7 @@ akua infra import <resource>        # bring external resource under management
 
 ---
 
-## `akua login`
+## `akua login` 🚧
 
 Authenticate to OCI registries and signing providers.
 
@@ -867,7 +874,7 @@ Credentials are stored in the system credential store (Keychain, libsecret, Cred
 
 ---
 
-## `akua logout`
+## `akua logout` 🚧
 
 Remove stored credentials.
 
@@ -878,7 +885,7 @@ akua logout --all
 
 ---
 
-## `akua whoami`
+## `akua whoami` ✅
 
 Display current identity, logged-in registries, and scopes.
 
@@ -908,7 +915,7 @@ akua whoami [flags]
 
 ---
 
-## `akua test`
+## `akua test` 🚧
 
 Run unit tests for packages, policies, or both. Unified test runner across engines — detects target types by file extension.
 
@@ -964,7 +971,7 @@ Discovers and runs:
 
 ---
 
-## `akua fmt`
+## `akua fmt` ✅
 
 Format KCL and Rego sources in place.
 
@@ -987,7 +994,7 @@ Uses embedded `kcl fmt` for `.k` files and embedded `opa fmt` for `.rego` files.
 
 ---
 
-## `akua lint`
+## `akua lint` ✅
 
 Style + correctness linting across the workspace.
 
@@ -1038,7 +1045,7 @@ Runs:
 
 ---
 
-## `akua check`
+## `akua check` ✅
 
 Syntax + type + dependency check. No execution, no rendering. Fast.
 
@@ -1076,7 +1083,7 @@ On error:
 
 ---
 
-## `akua bench`
+## `akua bench` 🚧
 
 Benchmark policy evaluation and package render latency.
 
@@ -1113,7 +1120,7 @@ Uses OPA partial evaluation for policy benchmarks; the KCL interpreter's own tim
 
 ---
 
-## `akua trace`
+## `akua trace` 🚧
 
 Explain the evaluation path of a policy query. Useful for debugging "why did this rule deny?" or "why didn't this rule fire?"
 
@@ -1147,7 +1154,7 @@ ALLOW deny[msg] evaluated to {"production Deployments must have a team label"}
 
 ---
 
-## `akua cov`
+## `akua cov` 🚧
 
 Generate a test coverage report across rules (Rego) and schemas (KCL).
 
@@ -1166,7 +1173,7 @@ Equivalent to `akua test --coverage` but produces a standalone report. Useful fo
 
 ---
 
-## `akua repl`
+## `akua repl` 🚧
 
 Interactive REPL for exploring policies and packages.
 
@@ -1183,7 +1190,7 @@ Useful for experimenting before committing to a rule or package change.
 
 ---
 
-## `akua eval`
+## `akua eval` 🚧
 
 One-shot evaluator — cheap, scriptable. For Rego queries and KCL expressions without entering the REPL.
 
@@ -1214,7 +1221,7 @@ akua eval --lang=kcl  'schema Input; input = Input {...}; input.replicas * 2'
 
 ---
 
-## `akua help`
+## `akua help` 🚧
 
 ```
 akua help                    # list all verbs
@@ -1226,7 +1233,7 @@ The `--json` form is the agent-discovery surface.
 
 ---
 
-## `akua version`
+## `akua version` ✅
 
 ```
 akua version                 # print version + git SHA
@@ -1246,7 +1253,7 @@ akua version --json
 
 ---
 
-## `akua telemetry`
+## `akua telemetry` 🚧
 
 Opt-in, anonymized usage data.
 
@@ -1261,7 +1268,7 @@ Default: disabled. Agents enable explicitly if desired.
 
 ---
 
-## `akua lint-cli` (internal, advanced)
+## `akua lint-cli` (internal, advanced) 🚧
 
 Validate that the current binary honors the CLI contract.
 

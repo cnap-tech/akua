@@ -2,21 +2,23 @@
 
 Working examples of akua Packages, Apps, Environments, and Policies. Each directory is a standalone example you can copy, edit, and render locally.
 
-Every example renders without a cluster. Run `akua render` (or `akua policy check` for 04) in any subdirectory and get committable output.
+> **Status, as of today.** Examples 01–07 are *aspirational* — they illustrate the full target authoring shape, but most exercise engine callables (`helm.template()`, `rgd.instantiate()`, `kustomize.build()`) and policy primitives that aren't wired into the binary yet. Only packages with no engine imports render cleanly today. See the table below.
 
 ---
 
 ## The examples
 
-| # | directory | what it shows |
-|---|---|---|
-| 01 | [01-hello-webapp/](01-hello-webapp/) | simplest Package: one schema input, one Helm chart, docstrings + `@ui` decorators |
-| 02 | [02-webapp-postgres/](02-webapp-postgres/) | cross-source wiring — a webapp consuming a CNPG-managed Postgres secret via convention; `test_package.k` |
-| 03 | [03-multi-env-app/](03-multi-env-app/) | Package + App + Environment as typed KCL — the full workspace authoring shape |
-| 04 | [04-policy-tier/](04-policy-tier/) | Rego tier + Kyverno compile-resolved import, with passing + failing fixtures; shows that policy composition is just Rego file layout — no akua-owned PolicySet kind |
-| 05 | [05-tests-and-golden/](05-tests-and-golden/) | `test_*.k` + `*_test.rego` + golden-fixture render snapshots — the three kinds of tests side by side |
-| 06 | [06-multi-engine/](06-multi-engine/) | Helm + Kustomize + kro RGD + inline KCL resources in one Package, with per-source output routing |
-| 07 | [07-package-reuse/](07-package-reuse/) | one akua Package composing another via `pkg.render()` — nested `Input` schemas, OCI-pinned base, attestation-chain provenance |
+| # | directory | what it shows | renders today? |
+|---|---|---|---|
+| 01 | [01-hello-webapp/](01-hello-webapp/) | simplest Package: one schema input, one Helm chart, docstrings + `@ui` decorators | ❌ needs `helm.template()` |
+| 02 | [02-webapp-postgres/](02-webapp-postgres/) | cross-source wiring — a webapp consuming a CNPG-managed Postgres secret via convention; `test_package.k` | ❌ needs `helm.template()` |
+| 03 | [03-multi-env-app/](03-multi-env-app/) | Package + App + Environment as typed KCL — the full workspace authoring shape | ❌ needs `helm.template()` |
+| 04 | [04-policy-tier/](04-policy-tier/) | Rego tier + Kyverno compile-resolved import, with passing + failing fixtures; shows that policy composition is just Rego file layout — no akua-owned PolicySet kind | ❌ needs the policy engine |
+| 05 | [05-tests-and-golden/](05-tests-and-golden/) | `test_*.k` + `*_test.rego` + golden-fixture render snapshots — the three kinds of tests side by side | ❌ needs `helm.template()` + test runner |
+| 06 | [06-multi-engine/](06-multi-engine/) | Helm + Kustomize + kro RGD + inline KCL resources in one Package, with per-source output routing | ❌ needs all three engine callables |
+| 07 | [07-package-reuse/](07-package-reuse/) | one akua Package composing another via `pkg.render()` — nested `Input` schemas, OCI-pinned base, attestation-chain provenance | ❌ needs `pkg.render()` + OCI fetch |
+
+What **does** run today: any pure-KCL Package (no engine imports). The `akua init` scaffold is a minimal working example — `akua init my-pkg && cd my-pkg && akua render --inputs inputs.example.yaml --out ./deploy` renders a `ConfigMap` end-to-end.
 
 ---
 
@@ -25,27 +27,23 @@ Every example renders without a cluster. Run `akua render` (or `akua policy chec
 Install akua:
 
 ```sh
-curl -fsSL https://akua.dev/install | sh
+cargo install --git https://github.com/cnap-tech/akua akua-cli
 ```
 
-Render any example:
+Render the scaffold (works today):
+
+```sh
+akua init my-pkg && cd my-pkg
+akua render --inputs inputs.example.yaml --out ./deploy
+ls deploy/
+```
+
+Once engine callables land (Phase B):
 
 ```sh
 cd examples/02-webapp-postgres
 akua render --inputs inputs.yaml --out ./rendered
 ```
-
-Check a policy:
-
-```sh
-cd examples/04-policy-tier
-akua add                 # resolve deps → writes akua.lock
-akua policy check --tier=./policies --input=fixtures/good.yaml
-akua policy check --tier=./policies --input=fixtures/bad.yaml
-akua test policies/
-```
-
-Inspect the resulting YAML. Diff between examples to learn the progressive additions.
 
 ---
 
