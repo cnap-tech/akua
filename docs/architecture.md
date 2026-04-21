@@ -31,19 +31,21 @@ Three stages, each independently pluggable. See [`docs/package-format.md`](./pac
 
 ## Three consumers, one core
 
-| consumer | surface | when used |
-|---|---|---|
-| **CLI** — `akua` binary | 30 verbs (see [`cli.md`](./cli.md)) | developers, CI, agents in sandboxes |
-| **SDK** — `@akua/sdk` | same capabilities, Node/Bun-native | backend services that embed akua in-process |
-| **Browser** — playground at `akua.dev` + local `akua dev` UI | subset that compiles to WebAssembly | authoring, review, live-preview |
+| consumer | surface | transport | when used |
+|---|---|---|---|
+| **CLI** — `akua` binary | 30 verbs (see [`cli.md`](./cli.md)) | subprocess | developers, CI, agents in sandboxes |
+| **SDK** — `@akua/sdk` | same capabilities, Node/Bun-native | **WASM-in-SDK** (v0.1) or **daemon** (`akua serve`, v0.3+) | backend services that embed akua in-process |
+| **Browser** — playground at `akua.dev` + local `akua dev` UI | read-only/render subset | WASM module | authoring, review, live-preview |
 
 **Trust contract:** the binary, the SDK, and the browser produce byte-identical output for the same inputs. No "the real thing is behind the paywall." A backend service calling `@akua/sdk.render()` gets the same bytes a developer gets from `akua render` in their terminal.
+
+**SDK transport model:** `@akua/sdk` does not shell out to the `akua` binary. The Rust core is compiled to WASM and bundled inside the npm/JSR package. SDK version = WASM module version; always in lockstep. A long-lived daemon transport (`akua serve`) is on the v0.3 roadmap for high-throughput servers that need warm engine state shared across many parallel callers. See [`docs/sdk.md §Transport model`](./sdk.md#transport-model).
 
 See [`docs/cli-contract.md`](./cli-contract.md) for the universal contract every consumer honors.
 
 ## Embedded engines
 
-All engines bundled into the binary via wasmtime (native Rust engines linked directly). `$PATH` is never required. Shell-out available as an escape hatch via `--engine=shell`.
+All engines bundled into the binary via wasmtime (native Rust engines linked directly). `$PATH` is never required. The CLI exposes `--engine=shell` as an escape hatch for developers who need a specific engine version from `$PATH`; the SDK (`@akua/sdk`) never does this — it uses only the embedded WASM core.
 
 See [`docs/embedded-engines.md`](./embedded-engines.md) for the embedding contract, version pinning, and size budget.
 

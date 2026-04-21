@@ -144,6 +144,12 @@ This is stronger than shell-out, where binaries inherit the invoking shell's ful
 
 The one exception: `akua deploy` shells to `kubectl` or similar because those verbs genuinely do need cluster access. Engines (things that transform inputs to outputs) are sandboxed; system integrations (things that touch cluster state) use standard binaries.
 
+### KCL sandboxing — CLI vs SDK
+
+In the CLI binary, KCL is linked directly (`kclvm-rs` native Rust crate) — fast, full feature set. In the **SDK** (`@akua/sdk`), the KCL compiler is compiled to `wasm32-wasi` and hosted by wasmtime with zero I/O imports. This means user-supplied KCL programs evaluated in a Temporal activity worker or other SDK host cannot escape to the filesystem or network, even if they contain malicious code. The WASM guest has no import for file I/O, no network, no env reads.
+
+This is the same embedding model as `helm-engine-wasm`. The performance overhead is ~2× for typical workloads (verified: ~31 ms at 500 resources vs ~15 ms native; within acceptable bounds for the workflow use-case). AOT precompilation cuts module init to ~8 ms. See [docs/performance.md](./performance.md).
+
 ---
 
 ## What's NOT embedded

@@ -32,7 +32,7 @@ The Node SDK wraps the full CLI contract programmatically. The browser SDK wraps
 1. **One class per primitive.** `Akua` is the root; everything hangs off it.
 2. **Async everywhere.** Every operation returns a Promise. No sync I/O.
 3. **Typed end-to-end.** Full TypeScript types for every input and output.
-4. **Thin wrapper, not a framework.** The SDK shells out to the `akua` binary or uses the same Rust core via WASM; it doesn't reimplement.
+4. **Thin wrapper, not a framework.** The SDK loads the same Rust core via WASM; it doesn't reimplement. No shell-out, no CLI binary required.
 5. **Results mirror `--json` output.** If you know the CLI, you know the SDK's return shapes.
 6. **Idempotent writes.** Every write method accepts `idempotencyKey`; if omitted, one is generated.
 7. **Streaming where the CLI streams.** `dev()` and long-running operations return AsyncIterables.
@@ -126,20 +126,20 @@ class Akua {
 
 ```ts
 interface AkuaOptions {
-  binary?: string;             // path to akua binary (default: 'akua')
+  binary?: string;             // path to WASM module or daemon socket; rarely needed
   registry?: string;           // default OCI registry
   token?: string;              // API token; if omitted, uses credential store
   cacheDir?: string;           // override cache location
   timeout?: string;            // default timeout for operations (e.g. '5m')
   logLevel?: 'debug'|'info'|'warn'|'error';
-  engine?: 'auto' | 'embedded' | 'shell';  // engine selection default
+  engine?: 'auto' | 'embedded'; // engine selection default
   signal?: AbortSignal;        // cancel long-running ops
 }
 ```
 
 ### Universal option — `engine`
 
-Methods that invoke an engine (render, test, lint, bench, policy.check, etc.) accept an `engine?: 'auto' | 'embedded' | 'shell'` override. Default behavior: embedded engine bundled with akua. Shell-out is an escape hatch when a specific engine version on `$PATH` is required. See [embedded-engines.md](embedded-engines.md).
+Methods that invoke an engine (render, test, lint, bench, policy.check, etc.) accept an `engine?: 'auto' | 'embedded'` override. Default behavior (`auto`): use the engine bundled with the WASM module. `embedded` forces that same bundled engine even if the daemon exposes a newer version. Shell-out (`--engine=shell`) is a CLI-only escape hatch — not exposed via the SDK, where the transport model guarantees version determinism. See [embedded-engines.md](embedded-engines.md).
 
 ### Universal option — `idempotencyKey`
 
@@ -854,9 +854,20 @@ The browser SDK loads the Rust core as a WASM module (once, lazily) and uses it 
 
 ---
 
-## Server-side contexts (CI, webhook handlers)
+## Transport model
 
-For CI jobs or webhook handlers that need a subset of the SDK without spawning subprocesses, future versions will ship `@akua/sdk/lib` — a pure-WASM library variant with the same API shape but no CLI dependency. Tracked for v0.3.
+`@akua/sdk` does not shell out to the `akua` binary. It uses one of two transports:
+
+| transport | when | version relation |
+|---|---|---|
+| **WASM-in-SDK** (default, v0.1+) | the Rust core is compiled to wasm32-unknown-unknown and bundled inside the npm/JSR package | SDK version = WASM module version; always in lockstep, no binary on `$PATH` required |
+| **Daemon** (`akua serve`, v0.3+) | the SDK connects to a running `akua` daemon over a Unix socket or HTTP | version checked at connect via `/v1/healthz`; allows sharing one long-lived process across many SDK clients |
+
+For most consumers — including Temporal activity workers — the WASM transport is the right choice. Load once, evaluate many times, no process isolation overhead, guaranteed version lockstep.
+
+The daemon transport exists for scenarios that need long-running hot state (warm KCL import cache, pre-compiled Helm WASM module) shared across many parallel callers. Use it when you have measured shell-call latency as a bottleneck at scale.
+
+Shell-out (`--engine=shell` / `binary: '/path/to/akua'` pointed at the CLI binary) is a CLI-only escape hatch for developers who need a specific engine version from `$PATH`. The SDK never does this — it would break version determinism and make the sandbox security model unenforceable.
 
 ---
 
@@ -871,16 +882,14 @@ For CI jobs or webhook handlers that need a subset of the SDK without spawning s
 
 ## Relationship to the CLI
 
-The SDK is a thin wrapper. Internally it either:
-- Spawns the `akua` binary with `--json` and parses the result, or
-- (v0.3+) calls the Rust core via WASM directly in-process.
+The SDK and the CLI share the same Rust core. The CLI exposes it as a subprocess with `--json`; the SDK loads that same core as a WASM module in-process. Same algorithms, same determinism guarantees, same engine versions.
 
 This means:
-- Every SDK feature has a CLI equivalent.
+- Every SDK feature has a CLI equivalent (same verb, same flags, same JSON output shape).
 - CLI behavior and SDK behavior are identical for the same input.
-- Contract changes to the CLI are reflected one-for-one in the SDK.
+- Contract changes to the CLI are reflected one-for-one in the SDK on the next release.
 
-You can always reach for the CLI if the SDK is missing something. You can always reach for the SDK if scripting from Node is nicer than shell.
+You can always reach for the CLI if the SDK is missing something. You can always reach for the SDK if calling from Node is nicer than shell. The outputs are byte-identical.
 
 ---
 

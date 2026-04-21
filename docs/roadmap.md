@@ -39,7 +39,7 @@ Goal: the interface-spec's load-bearing contracts exist as working code, even if
 - `akua render` on a single-engine Package (KCL-only to start).
 - `akua publish` + `akua verify` (cosign + SLSA v1); reuse v0.3 OCI client.
 - `akua whoami` + agent context auto-detection (`CLAUDECODE` / `CURSOR_CLI` / `GEMINI_CLI` / `AGENT`).
-- `@akua/sdk` typed wrapper with capability parity to the above verbs.
+- `@akua/sdk` typed wrapper with capability parity to the above verbs. **Transport: WASM-in-SDK** — the Rust core compiled to `wasm32-unknown-unknown`, bundled inside the npm/JSR package. No CLI binary required. No shell-out.
 
 Exit gate: `akua render`, `akua publish`, `akua verify` round-trip on the [`examples/01-hello-webapp`](./examples/01-hello-webapp/) sample. `@akua/sdk.render()` produces byte-identical output to the CLI.
 
@@ -80,6 +80,7 @@ Goal: the signature experience.
 - `akua repl` (Rego + KCL).
 - `akua trace`, `akua cov` for policy evaluation inspection.
 - `akua query` against cluster-native Loki / Prom (no federation).
+- **`akua serve`** — long-lived daemon over Unix socket + HTTP bearer auth. REST + chunked JSON streaming. Exposes all render/policy/deploy verbs as HTTP endpoints. The SDK's daemon transport (`AkuaOptions.transport: 'daemon'`) connects here. Use case: high-throughput Temporal workers sharing a warm engine cache across hundreds of concurrent activities. Version handshake via `GET /v1/healthz` on connect.
 
 Exit gate: solo-developer journey from [`masterplan §19.1`](../../cortex/workspaces/robin/akua-masterplan.md) runs end-to-end on a fresh laptop in under 5 minutes.
 
