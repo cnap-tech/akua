@@ -1,0 +1,26 @@
+[package]
+name = "helm-engine-wasm"
+description = "Embedded Helm v4 template engine — Go→wasip1 module hosted via wasmtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[build-dependencies]
+# build.rs precompiles helm-engine.wasm → native-code .cwasm. Needs the
+# full wasmtime feature set (cranelift) so the default features are fine.
+wasmtime = "43"
+
+[dependencies]
+wasmtime = "43"
+wasmtime-wasi = "43"
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = "0.22"
+thiserror = { workspace = true }
+flate2 = "1"
+tar = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

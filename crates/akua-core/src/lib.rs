@@ -17,6 +17,8 @@
 pub mod cli_contract;
 #[cfg(feature = "engine-kcl")]
 pub mod dir_diff;
+#[cfg(all(feature = "engine-kcl", feature = "engine-helm"))]
+pub mod helm;
 pub(crate) mod hex;
 #[cfg(feature = "engine-kcl")]
 pub mod kcl_plugin;

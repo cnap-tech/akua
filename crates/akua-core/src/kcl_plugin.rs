@@ -120,6 +120,9 @@ pub fn install_builtin_plugins() {
     static INSTALLED: OnceLock<()> = OnceLock::new();
     INSTALLED.get_or_init(|| {
         crate::pkg_render::install();
+        #[cfg(feature = "engine-helm")]
+        crate::helm::install();
+        #[cfg(not(feature = "engine-helm"))]
         register_engine_stub("helm.template", "helm-engine-wasm (Phase 1)");
         register_engine_stub("kustomize.build", "kustomize-engine-wasm (Phase 3)");
     });

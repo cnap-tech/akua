@@ -1,0 +1,428 @@
+--- helm-v4/pkg/engine/engine.go	2026-04-19 00:28:49
++++ helm-fork/pkg/engine/engine.go	2026-04-19 00:30:27
+@@ -28,12 +28,15 @@
+ 	"strings"
+ 	"text/template"
+ 
+-	"k8s.io/client-go/rest"
+-
+ 	ci "helm.sh/helm/v4/pkg/chart"
+ 	"helm.sh/helm/v4/pkg/chart/common"
+ )
+ 
++// akua fork: upstream imported k8s.io/client-go/rest here to satisfy
++// constructors that accepted a *rest.Config. We removed those constructors
++// entirely — only the zero-value Engine and the ClientProvider-injection
++// entrypoint remain.
++
+ // Engine is an implementation of the Helm rendering implementation for templates.
+ type Engine struct {
+ 	// If strict is enabled, template rendering will fail if a template references
+@@ -49,13 +52,12 @@
+ 	CustomTemplateFuncs template.FuncMap
+ }
+ 
+-// New creates a new instance of Engine using the passed in rest config.
+-func New(config *rest.Config) Engine {
+-	var clientProvider ClientProvider = clientProviderFromConfig{config}
+-	return Engine{
+-		clientProvider: &clientProvider,
+-	}
+-}
++// akua fork: upstream's `New(config *rest.Config) Engine` and
++// `RenderWithClient(..., config *rest.Config)` were removed. They existed to
++// wire up the `lookup` template function against a live cluster, which
++// requires client-go — a ~60 MB transitive dep in the Go→wasip1 binary.
++// Callers who need lookup can still use `RenderWithClientProvider` with a
++// home-grown ClientProvider.
+ 
+ // Render takes a chart, optional values, and value overrides, and attempts to render the Go templates.
+ //
+@@ -85,16 +87,6 @@
+ // render the Go templates using the default options.
+ func Render(chrt ci.Charter, values common.Values) (map[string]string, error) {
+ 	return new(Engine).Render(chrt, values)
+-}
+-
+-// RenderWithClient takes a chart, optional values, and value overrides, and attempts to
+-// render the Go templates using the default options. This engine is client aware and so can have template
+-// functions that interact with the client.
+-func RenderWithClient(chrt ci.Charter, values common.Values, config *rest.Config) (map[string]string, error) {
+-	var clientProvider ClientProvider = clientProviderFromConfig{config}
+-	return Engine{
+-		clientProvider: &clientProvider,
+-	}.Render(chrt, values)
+ }
+ 
+ // RenderWithClientProvider takes a chart, optional values, and value overrides, and attempts to
+--- helm-v4/pkg/engine/lookup_func.go	2026-04-19 00:28:49
++++ helm-fork/pkg/engine/lookup_func.go	2026-04-19 00:29:55
+@@ -14,135 +14,42 @@
+ limitations under the License.
+ */
+ 
++// akua fork: this file originally imported k8s.io/client-go/{rest,dynamic,discovery}
++// to implement the `lookup` template function, which queries a live cluster.
++// Dragging client-go added ~60 MB to the Go→wasip1 binary. akua renders
++// offline only, so we stub the lookup path entirely: no client-go imports, no
++// dynamic resource interface. When a chart template invokes `lookup` it gets
++// an error at render time.
++
+ package engine
+ 
+ import (
+-	"context"
+ 	"fmt"
+-	"log/slog"
+-	"strings"
+-
+-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+-	"k8s.io/apimachinery/pkg/runtime/schema"
+-	"k8s.io/client-go/discovery"
+-	"k8s.io/client-go/dynamic"
+-	"k8s.io/client-go/rest"
+ )
+ 
+-type lookupFunc = func(apiversion string, resource string, namespace string, name string) (map[string]interface{}, error)
+-
+-// NewLookupFunction returns a function for looking up objects in the cluster.
+-//
+-// If the resource does not exist, no error is raised.
+-func NewLookupFunction(config *rest.Config) lookupFunc { //nolint:revive
+-	return newLookupFunction(clientProviderFromConfig{config: config})
+-}
+-
++// ClientProvider mirrors the upstream interface name so that the public
++// RenderWithClientProvider API still compiles for callers that pass a provider
++// they built themselves. We erase the concrete return type to `any` since the
++// akua build never instantiates this.
+ type ClientProvider interface {
+-	// GetClientFor returns a dynamic.NamespaceableResourceInterface suitable for interacting with resources
+-	// corresponding to the provided apiVersion and kind, as well as a boolean indicating whether the resources
+-	// are namespaced.
+-	GetClientFor(apiVersion, kind string) (dynamic.NamespaceableResourceInterface, bool, error)
++	GetClientFor(apiVersion, kind string) (any, bool, error)
+ }
+ 
+-type clientProviderFromConfig struct {
+-	config *rest.Config
+-}
++type lookupFunc = func(apiversion string, kind string, namespace string, name string) (map[string]any, error)
+ 
+-func (c clientProviderFromConfig) GetClientFor(apiVersion, kind string) (dynamic.NamespaceableResourceInterface, bool, error) {
+-	return getDynamicClientOnKind(apiVersion, kind, c.config)
++// NewLookupFunction existed upstream as a helper that took *rest.Config. The
++// akua fork no longer depends on client-go, so we return an always-erroring
++// func with a matching signature and a stubbed provider argument.
++func NewLookupFunction(_ any) lookupFunc { //nolint:revive
++	return newLookupFunction(nil)
+ }
+ 
+-func newLookupFunction(clientProvider ClientProvider) lookupFunc {
+-	return func(apiversion string, kind string, namespace string, name string) (map[string]interface{}, error) {
+-		var client dynamic.ResourceInterface
+-		c, namespaced, err := clientProvider.GetClientFor(apiversion, kind)
+-		if err != nil {
+-			return map[string]interface{}{}, err
+-		}
+-		if namespaced && namespace != "" {
+-			client = c.Namespace(namespace)
+-		} else {
+-			client = c
+-		}
+-		if name != "" {
+-			// this will return a single object
+-			obj, err := client.Get(context.Background(), name, metav1.GetOptions{})
+-			if err != nil {
+-				if apierrors.IsNotFound(err) {
+-					// Just return an empty interface when the object was not found.
+-					// That way, users can use `if not (lookup ...)` in their templates.
+-					return map[string]interface{}{}, nil
+-				}
+-				return map[string]interface{}{}, err
+-			}
+-			return obj.UnstructuredContent(), nil
+-		}
+-		// this will return a list
+-		obj, err := client.List(context.Background(), metav1.ListOptions{})
+-		if err != nil {
+-			if apierrors.IsNotFound(err) {
+-				// Just return an empty interface when the object was not found.
+-				// That way, users can use `if not (lookup ...)` in their templates.
+-				return map[string]interface{}{}, nil
+-			}
+-			return map[string]interface{}{}, err
+-		}
+-		return obj.UnstructuredContent(), nil
+-	}
+-}
+-
+-// getDynamicClientOnKind returns a dynamic client on an Unstructured type. This client can be further namespaced.
+-func getDynamicClientOnKind(apiversion string, kind string, config *rest.Config) (dynamic.NamespaceableResourceInterface, bool, error) {
+-	gvk := schema.FromAPIVersionAndKind(apiversion, kind)
+-	apiRes, err := getAPIResourceForGVK(gvk, config)
+-	if err != nil {
+-		slog.Error(
+-			"unable to get apiresource",
+-			slog.String("groupVersionKind", gvk.String()),
+-			slog.Any("error", err),
++func newLookupFunction(_ ClientProvider) lookupFunc {
++	return func(apiversion, kind, namespace, name string) (map[string]any, error) {
++		return nil, fmt.Errorf(
++			"the 'lookup' template function is disabled in the akua fork of helm "+
++				"(apiversion=%q kind=%q namespace=%q name=%q)",
++			apiversion, kind, namespace, name,
+ 		)
+-		return nil, false, fmt.Errorf("unable to get apiresource from unstructured: %s: %w", gvk.String(), err)
+ 	}
+-	gvr := schema.GroupVersionResource{
+-		Group:    apiRes.Group,
+-		Version:  apiRes.Version,
+-		Resource: apiRes.Name,
+-	}
+-	intf, err := dynamic.NewForConfig(config)
+-	if err != nil {
+-		slog.Error("unable to get dynamic client", slog.Any("error", err))
+-		return nil, false, err
+-	}
+-	res := intf.Resource(gvr)
+-	return res, apiRes.Namespaced, nil
+ }
+-
+-func getAPIResourceForGVK(gvk schema.GroupVersionKind, config *rest.Config) (metav1.APIResource, error) {
+-	res := metav1.APIResource{}
+-	discoveryClient, err := discovery.NewDiscoveryClientForConfig(config)
+-	if err != nil {
+-		slog.Error("unable to create discovery client", slog.Any("error", err))
+-		return res, err
+-	}
+-	resList, err := discoveryClient.ServerResourcesForGroupVersion(gvk.GroupVersion().String())
+-	if err != nil {
+-		slog.Error(
+-			"unable to retrieve resource list",
+-			slog.String("GroupVersion", gvk.GroupVersion().String()),
+-			slog.Any("error", err),
+-		)
+-		return res, err
+-	}
+-	for _, resource := range resList.APIResources {
+-		// if a resource contains a "/" it's referencing a subresource. we don't support subresource for now.
+-		if resource.Kind == gvk.Kind && !strings.Contains(resource.Name, "/") {
+-			res = resource
+-			res.Group = gvk.Group
+-			res.Version = gvk.Version
+-			break
+-		}
+-	}
+-	return res, nil
+-}
+--- helm-v4/pkg/chart/common/capabilities.go	2026-04-19 00:28:49
++++ helm-fork/pkg/chart/common/capabilities.go	2026-04-19 00:31:04
+@@ -13,6 +13,13 @@
+ limitations under the License.
+ */
+ 
++// akua fork: upstream populates DefaultVersionSet by walking
++// k8s.io/client-go/kubernetes/scheme and the apiextensions packages. That
++// drags client-go + apiextensions-apiserver into the Go→wasip1 binary
++// (~60 MB of dead weight for a renderer). We replace the import with a
++// hand-maintained list of the common API groups/versions that chart
++// templates typically check with `.Capabilities.APIVersions.Has`.
++
+ package common
+ 
+ import (
+@@ -23,10 +30,7 @@
+ 	"testing"
+ 
+ 	"github.com/Masterminds/semver/v3"
+-	"k8s.io/client-go/kubernetes/scheme"
+ 
+-	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+-	apiextensionsv1beta1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1beta1"
+ 	k8sversion "k8s.io/apimachinery/pkg/util/version"
+ 
+ 	helmversion "helm.sh/helm/v4/internal/version"
+@@ -53,11 +57,8 @@
+ 
+ // Capabilities describes the capabilities of the Kubernetes cluster.
+ type Capabilities struct {
+-	// KubeVersion is the Kubernetes version.
+ 	KubeVersion KubeVersion
+-	// APIVersions are supported Kubernetes API versions.
+ 	APIVersions VersionSet
+-	// HelmVersion is the build information for this helm version
+ 	HelmVersion helmversion.BuildInfo
+ }
+ 
+@@ -71,14 +72,12 @@
+ 
+ // KubeVersion is the Kubernetes version.
+ type KubeVersion struct {
+-	Version           string // Full version (e.g., v1.33.4-gke.1245000)
+-	normalizedVersion string // Normalized for constraint checking (e.g., v1.33.4)
+-	Major             string // Kubernetes major version
+-	Minor             string // Kubernetes minor version
++	Version           string
++	normalizedVersion string
++	Major             string
++	Minor             string
+ }
+ 
+-// String implements fmt.Stringer.
+-// Returns the normalized version used for constraint checking.
+ func (kv *KubeVersion) String() string {
+ 	if kv.normalizedVersion != "" {
+ 		return kv.normalizedVersion
+@@ -91,22 +90,16 @@
+ // Deprecated: use KubeVersion.Version.
+ func (kv *KubeVersion) GitVersion() string { return kv.Version }
+ 
+-// ParseKubeVersion parses kubernetes version from string
+ func ParseKubeVersion(version string) (*KubeVersion, error) {
+-	// Based on the original k8s version parser.
+-	// https://github.com/kubernetes/kubernetes/blob/b266ac2c3e42c2c4843f81e20213d2b2f43e450a/staging/src/k8s.io/apimachinery/pkg/util/version/version.go#L137
+ 	sv, err := k8sversion.ParseGeneric(version)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 
+-	// Preserve original input (e.g., v1.33.4-gke.1245000)
+ 	gitVersion := version
+ 	if !strings.HasPrefix(version, "v") {
+ 		gitVersion = "v" + version
+ 	}
+-
+-	// Normalize for constraint checking (strips all suffixes)
+ 	normalizedVer := "v" + sv.String()
+ 
+ 	return &KubeVersion{
+@@ -121,48 +114,59 @@
+ type VersionSet []string
+ 
+ // Has returns true if the version string is in the set.
+-//
+-//	vs.Has("apps/v1")
+ func (v VersionSet) Has(apiVersion string) bool {
+ 	return slices.Contains(v, apiVersion)
+ }
+ 
++// allKnownVersions returns the GV list that chart templates commonly check.
++// akua fork: this was built by walking client-go's scheme registry upstream.
++// Hand-maintained here to avoid the client-go transitive dep. Keep in sync
++// with `k get --raw /openapi/v2 | jq '.definitions | keys[]'` on a
++// representative cluster if upstream ships a new GA group.
+ func allKnownVersions() VersionSet {
+-	// We should register the built in extension APIs as well so CRDs are
+-	// supported in the default version set. This has caused problems with `helm
+-	// template` in the past, so let's be safe
+-	apiextensionsv1beta1.AddToScheme(scheme.Scheme)
+-	apiextensionsv1.AddToScheme(scheme.Scheme)
+-
+-	groups := scheme.Scheme.PrioritizedVersionsAllGroups()
+-	vs := make(VersionSet, 0, len(groups))
+-	for _, gv := range groups {
+-		vs = append(vs, gv.String())
++	return VersionSet{
++		"v1",
++		"admissionregistration.k8s.io/v1",
++		"apiextensions.k8s.io/v1",
++		"apiregistration.k8s.io/v1",
++		"apps/v1",
++		"authentication.k8s.io/v1",
++		"authorization.k8s.io/v1",
++		"autoscaling/v1",
++		"autoscaling/v2",
++		"batch/v1",
++		"certificates.k8s.io/v1",
++		"coordination.k8s.io/v1",
++		"discovery.k8s.io/v1",
++		"events.k8s.io/v1",
++		"flowcontrol.apiserver.k8s.io/v1",
++		"flowcontrol.apiserver.k8s.io/v1beta3",
++		"networking.k8s.io/v1",
++		"node.k8s.io/v1",
++		"policy/v1",
++		"rbac.authorization.k8s.io/v1",
++		"scheduling.k8s.io/v1",
++		"storage.k8s.io/v1",
+ 	}
+-	return vs
+ }
+ 
+ func makeDefaultCapabilities() (*Capabilities, error) {
+-	// Test builds don't include debug info / module info
+-	// (And even if they did, we probably want stable capabilities for tests anyway)
+-	// Return a default value for test builds
+ 	if testing.Testing() {
+ 		return newCapabilities(kubeVersionMajorTesting, kubeVersionMinorTesting)
+ 	}
+ 
+-	vstr, err := helmversion.K8sIOClientGoModVersion()
++	// akua fork: upstream calls helmversion.K8sIOClientGoModVersion() which
++	// inspects debug.BuildInfo for the client-go module version and adds 1
++	// to derive the k8s major. Hardcoding the version that matches the
++	// client-go version our upstream go.mod was built against (v0.35.1 →
++	// k8s 1.35). If upstream bumps client-go, bump this in lockstep.
++	const hardcodedClientGoVersion = "v0.35.1"
++	v, err := semver.NewVersion(hardcodedClientGoVersion)
+ 	if err != nil {
+-		return nil, fmt.Errorf("failed to retrieve k8s.io/client-go version: %w", err)
++		return nil, fmt.Errorf("akua fork: parse hardcoded client-go version: %w", err)
+ 	}
+-
+-	v, err := semver.NewVersion(vstr)
+-	if err != nil {
+-		return nil, fmt.Errorf("unable to parse k8s.io/client-go version %q: %v", vstr, err)
+-	}
+-
+ 	kubeVersionMajor := v.Major() + 1
+ 	kubeVersionMinor := v.Minor()
+-
+ 	return newCapabilities(kubeVersionMajor, kubeVersionMinor)
+ }
+ 
+--- helm-v4/internal/version/clientgo.go	2026-04-19 00:28:49
++++ helm-fork/internal/version/clientgo.go	2026-04-19 00:32:19
+@@ -14,31 +14,17 @@
+ limitations under the License.
+ */
+ 
++// akua fork: upstream blank-imports k8s.io/client-go/kubernetes here to
++// force client-go into debug.BuildInfo so that `K8sIOClientGoModVersion()`
++// can read its version string and derive the default KubeVersion. That
++// blank-import drags ~60 MB of client-go transitively into the Go→wasip1
++// binary. Our fork of pkg/chart/common/capabilities.go hardcodes the k8s
++// version, so this helper is never called — stubbed out entirely.
++
+ package version
+ 
+-import (
+-	"fmt"
+-	"runtime/debug"
+-	"slices"
++import "fmt"
+ 
+-	_ "k8s.io/client-go/kubernetes" // Force k8s.io/client-go to be included in the build
+-)
+-
+ func K8sIOClientGoModVersion() (string, error) {
+-	info, ok := debug.ReadBuildInfo()
+-	if !ok {
+-		return "", fmt.Errorf("failed to read build info")
+-	}
+-
+-	idx := slices.IndexFunc(info.Deps, func(m *debug.Module) bool {
+-		return m.Path == "k8s.io/client-go"
+-	})
+-
+-	if idx == -1 {
+-		return "", fmt.Errorf("k8s.io/client-go not found in build info")
+-	}
+-
+-	m := info.Deps[idx]
+-
+-	return m.Version, nil
++	return "", fmt.Errorf("akua fork: client-go version lookup stubbed out")
+ }

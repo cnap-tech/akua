@@ -54,19 +54,21 @@ Removes the security escape hatch entirely. Establishes sandbox-first as the def
 
 ---
 
-## Phase 1 — `helm-engine-wasm` restoration (1-2 weeks)
+## Phase 1 — `helm-engine-wasm` restoration (SHIPPED — 2026-04-21)
 
-Research recommendation (see agent reports): revive akua's deleted fork, not vendor kclipper. kclipper uses Helm v3 with the heavier `action.Install` call path, never compiled to wasip1. Our prior work used Helm v4 + a ~100-line client-go strip + direct `engine.Render` — proven 20 MB WASM + 2.3s cold render + 1.4s warm (precompiled). Apache-2.0 on both ends; fork is cheap to maintain (~30 min per Helm release).
+Research recommendation: revive akua's deleted fork, not vendor kclipper. Prior work used Helm v4 + direct `engine.Render` — proven 20 MB WASM forked, 75 MB stock.
 
-- [ ] Restore `crates/helm-engine-wasm/` from git history (`git show 0ade7f0^:…`)
-- [ ] Resync fork to Helm v4.1.4 (latest stable at time of writing)
-- [ ] Taskfile target `build:helm-engine-wasm` with cached output at `crates/helm-engine-wasm/assets/helm-engine.wasm`
-- [ ] Wasmtime host in akua-core: load helm-engine.wasm at startup, expose `helm.template` plugin over it
-- [ ] Plugin handler swaps in — same `akua.helm.Template` schema, same plugin name, just the backend changes
-- [ ] Example 00-helm-hello renders again via the embedded engine (no `helm` on PATH required)
-- [ ] Benchmark: confirm warm render stays under the 100ms dev-loop budget
+- [x] Restore `crates/helm-engine-wasm/` from git history — *cb…(Phase 1 commit)*
+- [x] Go build works against stock Helm v4.1.4 via `-buildmode=c-shared` on wasip1
+- [x] Taskfile target `build:helm-engine-wasm` — produces `crates/helm-engine-wasm/assets/helm-engine.wasm` (74 MB stock)
+- [x] Wasmtime host in `crates/helm-engine-wasm/src/lib.rs` — loads `.cwasm`, renders via `pkg/engine.Render`
+- [x] Plugin handler `crates/akua-core/src/helm.rs` — same `akua.helm.Template` schema, swaps in behind `engine-helm` feature
+- [x] `examples/00-helm-hello` renders end-to-end via the embedded engine — **verified with `PATH=/nonexistent`**; byte-identical sha256 to prior shell-out render
+- [ ] Benchmark: confirm warm render stays under the 100ms dev-loop budget (deferred to Phase 1c)
+- [ ] Phase 1b: apply `fork/helm-v4.1.4.patch` to strip client-go (75 MB → 20 MB)
+- [ ] Phase 1c: update `docs/performance.md` with embedded-engine numbers
 
-**Exit gate:** `examples/00-helm-hello` renders end-to-end in a sandbox. `helm` on PATH is never consulted.
+**Exit gate:** ✅ `examples/00-helm-hello` renders in a sandbox. `helm` on PATH never consulted. Phase 1a complete; 1b + 1c are size + bench follow-ups.
 
 ---
 

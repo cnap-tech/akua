@@ -1,14 +1,10 @@
 # 00-helm-hello
 
-> **Status: temporarily broken.** The shell-out Helm backend was removed
-> in `e5b77dc` / Phase 0 of [`docs/roadmap.md`](../../docs/roadmap.md).
-> `helm.template` now returns `E_ENGINE_NOT_AVAILABLE` until the embedded
-> `helm-engine-wasm` restoration lands (Phase 1). See
-> [`docs/security-model.md`](../../docs/security-model.md) for why: akua
-> doesn't shell out to external binaries in the render path, ever.
->
-> This Package's source stays intact as the target shape for the embedded
-> engine to satisfy. Rendering will resume once Phase 1 ships.
+> **Renders end-to-end** via the embedded `helm-engine-wasm`. No `helm`
+> binary on `$PATH` needed or consulted. All template rendering happens
+> inside a wasmtime WASI sandbox. See
+> [`docs/security-model.md`](../../docs/security-model.md) +
+> [`docs/roadmap.md`](../../docs/roadmap.md) Phase 1.
 
 The smallest Package that exercises akua's `helm.template` engine
 callable end-to-end.
@@ -25,23 +21,15 @@ callable end-to-end.
 ## Render
 
 `package.k` passes `"./chart"` to `helm.template`; akua resolves that
-against the Package.k's directory, so `akua render` works from any
-cwd — point `--package` at this directory:
+against the Package.k's directory (via the path-traversal-guarded
+`resolve_in_package`) and hands the chart tarball to the embedded
+WASM Helm engine. `akua render` works from any cwd — point
+`--package` at this directory:
 
 ```sh
-cargo run -q --features engine-helm-shell -p akua-cli -- \
-    render --package examples/00-helm-hello/package.k --out ./rendered
-```
+# Build the embedded helm engine once per machine:
+task build:helm-engine-wasm
 
-Or from inside this directory:
-
-```sh
-cargo run -q --features engine-helm-shell -p akua-cli -- render --out ./rendered
-```
-
-Once a release binary ships with the feature built in:
-
-```sh
 akua render --package examples/00-helm-hello/package.k --out ./rendered
 ```
 
@@ -53,14 +41,16 @@ output without running anything.
 
 `package.k` imports `akua.helm` — the bundled akua KCL stdlib, a
 thin typed wrapper over `kcl_plugin.helm` — and calls
-`helm.template(chart_path, values, release_name, release_namespace)`.
-Under the hood, akua's plugin dispatcher routes the call to a Rust
-handler that shells out to `helm template`, parses the multi-document
-YAML output back into KCL values, and splats them into `resources`.
+`helm.template(helm.Template { ... })`. Under the hood, akua's plugin
+dispatcher routes the call to a Rust handler that tars the chart
+directory, hands it to a **Go program compiled to wasm32-wasip1**
+hosted via wasmtime (see [`crates/helm-engine-wasm/`](../../crates/helm-engine-wasm/)),
+parses the multi-document YAML output back into resources, and
+splats them into `resources`.
 
-The shell-out engine is transitional. A future WASM-embedded
-`helm-engine` will register under the same `helm.template` name; the
-Package authoring surface won't change.
+No `helm` binary touched. No subprocess. No `$PATH`. The entire
+render path lives inside a WASI sandbox. Per CLAUDE.md: "No
+shell-out, ever."
 
 ## Spec
 

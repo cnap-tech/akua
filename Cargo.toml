@@ -3,6 +3,7 @@ resolver = "2"
 members = [
 	"crates/akua-core",
 	"crates/akua-cli",
+	"crates/helm-engine-wasm",
 ]
 
 [workspace.package]

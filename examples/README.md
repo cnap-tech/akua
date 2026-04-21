@@ -16,7 +16,7 @@ Working examples of akua Packages, Apps, Environments, and Policies. Each direct
 
 | # | directory | what it shows | renders today? |
 |---|---|---|---|
-| 00 | [00-helm-hello/](00-helm-hello/) | simplest Package exercising `helm.template` against a bundled chart | ⏳ waiting on `helm-engine-wasm` (roadmap Phase 1) |
+| 00 | [00-helm-hello/](00-helm-hello/) | simplest Package exercising `helm.template` against a bundled chart | ✅ via embedded `helm-engine-wasm` |
 | 01 | [01-hello-webapp/](01-hello-webapp/) | simplest Package: one schema input, one Helm chart, docstrings + `@ui` decorators | ⏳ needs typed `charts.*` deps (roadmap Phase 2) + `helm-engine-wasm` |
 | 02 | [02-webapp-postgres/](02-webapp-postgres/) | cross-source wiring — a webapp consuming a CNPG-managed Postgres secret via convention; `test_package.k` | ⏳ Phases 1 + 2 |
 | 03 | [03-multi-env-app/](03-multi-env-app/) | Package + App + Environment as typed KCL — the full workspace authoring shape | ⏳ Phases 1 + 2 |
@@ -30,9 +30,10 @@ Working examples of akua Packages, Apps, Environments, and Policies. Each direct
 What **does** run today:
 
 - Any pure-KCL Package (no engine imports). The `akua init` scaffold is a minimal working example.
+- `examples/00-helm-hello/` — embedded WASM Helm engine. Requires `task build:helm-engine-wasm` once.
 - `examples/08-pkg-compose/` — pure-KCL Package-of-Packages composition via `pkg.render`.
 
-Examples 00 and 09 previously relied on shell-outs to `helm` / `kustomize` binaries. Those paths were removed in Phase 0 — akua doesn't shell out from the render path, ever. Their Packages stay as the target shape for the embedded WASM engines (Phases 1 + 3 of [`docs/roadmap.md`](../docs/roadmap.md)).
+Example 09 used to shell out to `kustomize`. That path was removed in Phase 0 — akua doesn't shell out from the render path, ever. The Package stays as the target shape for the embedded kustomize WASM engine (Phase 3 of [`docs/roadmap.md`](../docs/roadmap.md)).
 
 ---
 
