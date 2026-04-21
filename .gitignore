@@ -57,5 +57,9 @@ coverage/
 
 # Claude Code worktrees
 .claude/worktrees/
+
 # Agent-spawned git worktrees at the repo root.
 .worktrees/
+
+# go-task cache (per-machine checksum store for `sources:`/`generates:`)
+.task/
