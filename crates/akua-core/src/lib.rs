@@ -11,6 +11,19 @@
 //! Spec: [`docs/package-format.md`](../../../docs/package-format.md),
 //! [`docs/lockfile-format.md`](../../../docs/lockfile-format.md),
 //! [`docs/cli-contract.md`](../../../docs/cli-contract.md).
+//!
+//! ## Invariant: no CLI coupling
+//!
+//! This crate is a pure library. It does not depend on `clap`, does not
+//! call `std::process::exit`, does not read `std::env::args`, and has
+//! no `[[bin]]` target. The only process-spawn usage is [`helm`] shelling
+//! out to the `helm` binary — a library capability, not a CLI coupling.
+//!
+//! The invariant exists so future non-CLI consumers (Node-API binding,
+//! Python `py03` binding, in-process `@akua/sdk` without spawn, an HTTP
+//! server) can depend on this crate without inheriting CLI assumptions.
+//! Don't introduce `clap`, argv parsing, or process::exit here. Those
+//! live in the `akua-cli` crate.
 
 #![allow(dead_code)]
 
