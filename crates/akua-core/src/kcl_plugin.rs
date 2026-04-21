@@ -88,13 +88,15 @@ pub fn unregister(method: &str) -> bool {
 ///
 /// Currently registers:
 ///
+/// - `pkg.render` — always (pure Rust).
 /// - `helm.template` — when `engine-helm-shell` is on.
 ///
-/// Future (kustomize.build, rgd.instantiate, pkg.render) will plug
-/// in here as their feature flags and engines land.
+/// Future (kustomize.build, rgd.instantiate) will plug in here as
+/// their feature flags and engines land.
 pub fn install_builtin_plugins() {
     static INSTALLED: OnceLock<()> = OnceLock::new();
     INSTALLED.get_or_init(|| {
+        crate::pkg_render::install();
         #[cfg(feature = "engine-helm-shell")]
         crate::helm::install();
     });

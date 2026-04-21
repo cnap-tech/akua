@@ -1,0 +1,11 @@
+frontend:
+  name: frontend
+  data:
+    PUBLIC_API_URL: https://api.example.com
+    THEME: dark
+
+backend:
+  name: backend
+  data:
+    DATABASE_URL: postgres://db.internal:5432/app
+    LOG_LEVEL: info

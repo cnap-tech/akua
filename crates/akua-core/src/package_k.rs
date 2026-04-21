@@ -96,6 +96,9 @@ pub enum PackageKError {
 
     #[error("`outputs` must be a sequence of output specs; got {got}")]
     OutputsWrongShape { got: &'static str },
+
+    #[error("cycle detected while expanding pkg.render — `{path}` is already on the render stack")]
+    Cycle { path: PathBuf },
 }
 
 impl PackageK {
@@ -138,7 +141,16 @@ impl PackageK {
 
         let json = serde_json::to_string(inputs)?;
         let yaml = eval_kcl(&self.path, &self.source, &json)?;
-        parse_rendered(&yaml)
+        let parsed = parse_rendered(&yaml)?;
+
+        // Expand pkg.render sentinels now that eval_kcl has
+        // returned — see `pkg_render` module docs for why this is
+        // post-eval rather than inline.
+        let resources = crate::pkg_render::expand_sentinels(parsed.resources)?;
+        Ok(RenderedPackage {
+            resources,
+            outputs: parsed.outputs,
+        })
     }
 }
 

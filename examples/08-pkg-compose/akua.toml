@@ -1,0 +1,6 @@
+[package]
+name    = "08-pkg-compose"
+version = "0.1.0"
+edition = "akua.dev/v1alpha1"
+
+[dependencies]
