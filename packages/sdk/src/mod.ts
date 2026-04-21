@@ -12,15 +12,18 @@
 import { execFile } from 'node:child_process';
 
 import type { VersionOutput } from '../../../sdk-types/VersionOutput.ts';
+import type { WhoamiOutput } from '../../../sdk-types/WhoamiOutput.ts';
 
 import { AkuaTransportError, classifyCliError } from './errors.ts';
 import { validateAs } from './validate.ts';
 
 export * from './errors.ts';
 export { AkuaContractError, standardSchemaFor, validateAs } from './validate.ts';
-export type { VersionOutput };
+export type { VersionOutput, WhoamiOutput };
 export type { ExitCode } from '../../../sdk-types/ExitCode.ts';
 export type { StructuredError, Level } from '../../../sdk-types/StructuredError.ts';
+export type { AgentContext } from '../../../sdk-types/AgentContext.ts';
+export type { AgentSource } from '../../../sdk-types/AgentSource.ts';
 
 export interface AkuaOptions {
 	/** Path to the `akua` binary. Defaults to `"akua"` (resolved via PATH). */
@@ -48,6 +51,11 @@ export class Akua {
 	async version(): Promise<VersionOutput> {
 		const { stdout } = await this.runJson(['version', '--json']);
 		return validateAs<VersionOutput>('VersionOutput', JSON.parse(stdout));
+	}
+
+	async whoami(): Promise<WhoamiOutput> {
+		const { stdout } = await this.runJson(['whoami', '--json']);
+		return validateAs<WhoamiOutput>('WhoamiOutput', JSON.parse(stdout));
 	}
 
 	// ---- internals ----

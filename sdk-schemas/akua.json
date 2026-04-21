@@ -1,5 +1,70 @@
 {
   "$defs": {
+    "AgentContext": {
+      "description": "Result of agent-context detection at process start.\n\nWhen `detected == true`, the CLI layer should (per §1.5) auto-enable\n`--json`, `--log=json`, `--no-color`, `--no-progress`, `--no-interactive`.\nExplicit user flags win over these defaults.",
+      "properties": {
+        "detected": {
+          "type": "boolean"
+        },
+        "disabled_via_env": {
+          "description": "Whether detection was disabled via `AKUA_NO_AGENT_DETECT=1`.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "The value of the detected env var (e.g. `\"goose\"` for `AGENT=goose`).\nFor bool-style markers (`CLAUDECODE=1`) this is the raw string.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which env var surfaced the agent (present iff `detected`)."
+        }
+      },
+      "required": [
+        "detected",
+        "disabled_via_env"
+      ],
+      "type": "object"
+    },
+    "AgentSource": {
+      "description": "Which env var triggered agent detection. Recorded in `akua whoami`\noutput for introspection and in debug-level logs for post-hoc diagnosis.",
+      "oneOf": [
+        {
+          "const": "agent",
+          "description": "Generic `AGENT=<name>` variable (Goose, Amp, Codex, Cline, OpenCode).",
+          "type": "string"
+        },
+        {
+          "const": "claude_code",
+          "description": "Claude Code (`CLAUDECODE=1`).",
+          "type": "string"
+        },
+        {
+          "const": "gemini_cli",
+          "description": "Gemini CLI (`GEMINI_CLI=1`).",
+          "type": "string"
+        },
+        {
+          "const": "cursor_cli",
+          "description": "Cursor CLI (`CURSOR_CLI=1`).",
+          "type": "string"
+        },
+        {
+          "const": "akua_agent",
+          "description": "akua-specific fallback (`AKUA_AGENT=<name>`).",
+          "type": "string"
+        }
+      ]
+    },
     "ExitCode": {
       "description": "The seven typed exit codes every akua verb may produce.\n\nAgents branch on these. Humans read them. The stability contract is\nthat meanings never change; new codes require a major version bump.\n\nSerialized as the stable kebab-case name (`\"success\"`, `\"user-error\"`,\n`\"policy-deny\"`, etc.) — same string [`ExitCode::name`] returns. The\nSDK maps from the numeric `child.exitCode` (0..=6) to this name.",
       "oneOf": [
@@ -124,6 +189,24 @@
         }
       },
       "required": [
+        "version"
+      ],
+      "type": "object"
+    },
+    "WhoamiOutput": {
+      "description": "Whoami response shape. Part of the stability contract — new fields\nmay be added (backward-compatible); existing field semantics never\nchange.",
+      "properties": {
+        "agent_context": {
+          "$ref": "#/$defs/AgentContext",
+          "description": "Agent-context detection result per cli-contract §1.5."
+        },
+        "version": {
+          "description": "akua binary version (same as `akua --version`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_context",
         "version"
       ],
       "type": "object"

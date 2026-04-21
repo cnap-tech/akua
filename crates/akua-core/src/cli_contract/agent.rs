@@ -9,12 +9,19 @@
 //! `AKUA_NO_AGENT_DETECT=1` disables detection even when the agent env
 //! vars are set.
 
+#[cfg(feature = "schema-export")]
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
 
 /// Which env var triggered agent detection. Recorded in `akua whoami`
 /// output for introspection and in debug-level logs for post-hoc diagnosis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../sdk-types/"))]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub enum AgentSource {
     /// Generic `AGENT=<name>` variable (Goose, Amp, Codex, Cline, OpenCode).
     Agent,
@@ -47,6 +54,9 @@ impl AgentSource {
 /// `--json`, `--log=json`, `--no-color`, `--no-progress`, `--no-interactive`.
 /// Explicit user flags win over these defaults.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../sdk-types/"))]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct AgentContext {
     pub detected: bool,
 

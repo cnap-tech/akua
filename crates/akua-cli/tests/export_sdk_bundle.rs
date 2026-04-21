@@ -16,8 +16,9 @@
 use std::path::Path;
 
 use akua_cli::verbs::version::VersionOutput;
+use akua_cli::verbs::whoami::WhoamiOutput;
 use akua_core::cli_contract::error::Level;
-use akua_core::cli_contract::{ExitCode, StructuredError};
+use akua_core::cli_contract::{AgentContext, AgentSource, ExitCode, StructuredError};
 use schemars::generate::SchemaSettings;
 
 #[test]
@@ -30,7 +31,10 @@ fn export_json_schema_bundle() {
     generator.subschema_for::<StructuredError>();
     generator.subschema_for::<Level>();
     generator.subschema_for::<ExitCode>();
+    generator.subschema_for::<AgentSource>();
+    generator.subschema_for::<AgentContext>();
     generator.subschema_for::<VersionOutput>();
+    generator.subschema_for::<WhoamiOutput>();
 
     let defs = generator.take_definitions(true);
     let bundle = serde_json::json!({

@@ -6,14 +6,21 @@
 use std::io::Write;
 
 use akua_core::cli_contract::{AgentContext, ExitCode};
-use serde::Serialize;
+#[cfg(feature = "schema-export")]
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
 
 use crate::contract::{emit_output, Context};
 
 /// Whoami response shape. Part of the stability contract — new fields
 /// may be added (backward-compatible); existing field semantics never
 /// change.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../sdk-types/"))]
+#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct WhoamiOutput {
     /// Agent-context detection result per cli-contract §1.5.
     pub agent_context: AgentContext,
