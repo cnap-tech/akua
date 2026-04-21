@@ -16,10 +16,8 @@ const KUSTOMIZE_ENGINE_CWASM: &[u8] =
 
 const SPEC: EngineSpec = EngineSpec {
     name: "kustomize-engine",
-    malloc: "kustomize_malloc",
-    free: "kustomize_free",
+    prefix: "kustomize",
     entry: "kustomize_build",
-    result_len: "kustomize_result_len",
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -114,7 +112,7 @@ thread_local! {
 
 fn call_guest(input: &[u8]) -> Result<Vec<u8>, KustomizeEngineError> {
     SESSION.with(|slot| {
-        engine_host_wasm::thread_local_call(slot, KUSTOMIZE_ENGINE_CWASM, SPEC, input, |e| e)
+        engine_host_wasm::thread_local_call(slot, KUSTOMIZE_ENGINE_CWASM, SPEC, input)
             .map_err(KustomizeEngineError::from)
     })
 }

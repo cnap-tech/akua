@@ -79,20 +79,21 @@ pub fn precompile(wasm: &[u8]) -> Result<Vec<u8>, String> {
 
 // --- Engine spec -----------------------------------------------------------
 
-/// The export-name tuple + WASI argv[0] specific to one engine. Passed
-/// to [`Session::init`] by each plugin crate.
+/// Engine identity: the symbol prefix its wasip1 module exports its
+/// malloc/free/result_len functions under, plus the entry-point
+/// function name. By convention (matches the Go-side ABI shared by
+/// helm-engine-wasm + kustomize-engine-wasm), the three allocator
+/// exports are `<prefix>_malloc`, `<prefix>_free`, `<prefix>_result_len`.
+/// `name` doubles as the WASI argv[0] and as the diagnostic tag in
+/// error messages.
 #[derive(Debug, Clone, Copy)]
 pub struct EngineSpec {
-    /// Human-readable name used for error messages + `argv[0]`.
+    /// Human-readable name. Used for error messages + `argv[0]`.
     pub name: &'static str,
-    /// Export symbol of the allocator function: `<prefix>_malloc`.
-    pub malloc: &'static str,
-    /// Export symbol of the deallocator function: `<prefix>_free`.
-    pub free: &'static str,
+    /// Symbol prefix for allocator exports (`<prefix>_malloc` etc.).
+    pub prefix: &'static str,
     /// Export symbol of the entry-point function: `helm_render` / `kustomize_build` / etc.
     pub entry: &'static str,
-    /// Export symbol of the result-length probe: `<prefix>_result_len`.
-    pub result_len: &'static str,
 }
 
 // --- Persistent session ----------------------------------------------------
@@ -141,20 +142,24 @@ impl Session {
             init.call(&mut store, ()).map_err(wasm_err)?;
         }
 
+        let malloc_name = format!("{}_malloc", spec.prefix);
+        let free_name = format!("{}_free", spec.prefix);
+        let result_len_name = format!("{}_result_len", spec.prefix);
+
         let memory = instance
             .get_memory(&mut store, "memory")
             .ok_or_else(|| wasm_err(format!("{}.wasm missing `memory` export", spec.name)))?;
         let malloc = instance
-            .get_typed_func::<i32, i32>(&mut store, spec.malloc)
+            .get_typed_func::<i32, i32>(&mut store, &malloc_name)
             .map_err(wasm_err)?;
         let free = instance
-            .get_typed_func::<i32, ()>(&mut store, spec.free)
+            .get_typed_func::<i32, ()>(&mut store, &free_name)
             .map_err(wasm_err)?;
         let entry = instance
             .get_typed_func::<(i32, i32), i32>(&mut store, spec.entry)
             .map_err(wasm_err)?;
         let result_len = instance
-            .get_typed_func::<i32, i32>(&mut store, spec.result_len)
+            .get_typed_func::<i32, i32>(&mut store, &result_len_name)
             .map_err(wasm_err)?;
 
         Ok(Session {
@@ -196,27 +201,20 @@ impl Session {
 /// [`thread_local_call`] from the plugin entry-point.
 pub type SessionSlot = RefCell<Option<Session>>;
 
-/// Lazily initialize + invoke `SESSION` on the caller's thread. Moves
-/// the `cwasm` + `spec` borrow through the init branch only.
-pub fn thread_local_call<F>(
+/// Lazily initialize + invoke `SESSION` on the caller's thread.
+/// Plugin crates wrap the returned [`EngineHostError`] in their own
+/// typed error via `#[from]` at the call site.
+pub fn thread_local_call(
     slot: &SessionSlot,
     cwasm: &[u8],
     spec: EngineSpec,
     input: &[u8],
-    mut wrap_err: F,
-) -> Result<Vec<u8>, EngineHostError>
-where
-    F: FnMut(EngineHostError) -> EngineHostError,
-{
+) -> Result<Vec<u8>, EngineHostError> {
     let mut borrow = slot.borrow_mut();
     if borrow.is_none() {
-        *borrow = Some(Session::init(cwasm, spec).map_err(&mut wrap_err)?);
+        *borrow = Some(Session::init(cwasm, spec)?);
     }
-    borrow
-        .as_mut()
-        .expect("just initialized")
-        .call(input)
-        .map_err(wrap_err)
+    borrow.as_mut().expect("just initialized").call(input)
 }
 
 fn copy_in<T>(

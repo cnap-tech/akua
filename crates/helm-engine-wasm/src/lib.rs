@@ -22,10 +22,8 @@ const HELM_ENGINE_CWASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helm-
 
 const SPEC: EngineSpec = EngineSpec {
     name: "helm-engine",
-    malloc: "helm_malloc",
-    free: "helm_free",
+    prefix: "helm",
     entry: "helm_render",
-    result_len: "helm_result_len",
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -133,7 +131,7 @@ thread_local! {
 
 fn call_guest(input: &[u8]) -> Result<Vec<u8>, HelmEngineError> {
     SESSION.with(|slot| {
-        engine_host_wasm::thread_local_call(slot, HELM_ENGINE_CWASM, SPEC, input, |e| e)
+        engine_host_wasm::thread_local_call(slot, HELM_ENGINE_CWASM, SPEC, input)
             .map_err(HelmEngineError::from)
     })
 }
