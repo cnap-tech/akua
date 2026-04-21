@@ -85,9 +85,6 @@ pub enum PackageKError {
     #[error("rendered Package must set top-level `resources`; got no such key")]
     MissingResources,
 
-    #[error("rendered Package must set top-level `outputs`; got no such key")]
-    MissingOutputs,
-
     #[error("rendered Package must be a top-level mapping; got {got}")]
     TopLevelWrongShape { got: &'static str },
 
@@ -173,23 +170,27 @@ fn parse_rendered(yaml: &str) -> Result<RenderedPackage, PackageKError> {
         }
     };
 
-    let outputs_val = map
-        .get(Value::String("outputs".into()))
-        .ok_or(PackageKError::MissingOutputs)?;
-    let outputs_seq = match outputs_val {
-        Value::Sequence(s) => s,
-        other => {
+    // Omitting `outputs` is shorthand for the overwhelmingly common
+    // case: emit every resource as raw YAML into `--out`. Packages
+    // that want multiple targets, non-RawManifests kinds, or
+    // per-source routing still declare `outputs` explicitly.
+    let outputs = match map.get(Value::String("outputs".into())) {
+        None => vec![OutputSpec {
+            kind: "RawManifests".to_string(),
+            target: "./".to_string(),
+            name: None,
+            extras: Default::default(),
+        }],
+        Some(Value::Sequence(seq)) => seq
+            .iter()
+            .map(|entry| serde_yaml::from_value(entry.clone()))
+            .collect::<Result<Vec<OutputSpec>, _>>()?,
+        Some(other) => {
             return Err(PackageKError::OutputsWrongShape {
                 got: value_kind(other),
             });
         }
     };
-
-    let mut outputs = Vec::with_capacity(outputs_seq.len());
-    for entry in outputs_seq {
-        let spec: OutputSpec = serde_yaml::from_value(entry.clone())?;
-        outputs.push(spec);
-    }
 
     Ok(RenderedPackage { resources, outputs })
 }
@@ -503,8 +504,10 @@ outputs = [{ kind: "RawManifests", target: "./" }]
     }
 
     #[test]
-    fn render_missing_outputs_typed() {
-        let bad = r#"
+    fn render_defaults_outputs_when_omitted() {
+        // No `outputs` binding — should auto-default to a single
+        // RawManifests emit into the render-root.
+        let fixture = r#"
 schema Input:
     x: int = 0
 
@@ -512,13 +515,13 @@ input: Input = option("input") or Input {}
 
 resources = []
 "#;
-        let (_tmp, path) = write_fixture(bad);
+        let (_tmp, path) = write_fixture(fixture);
         let pkg = PackageK::load(&path).expect("load");
-        let err = pkg.render(&empty_inputs()).unwrap_err();
-        assert!(
-            matches!(err, PackageKError::MissingOutputs),
-            "expected MissingOutputs, got {err:?}"
-        );
+        let rendered = pkg.render(&empty_inputs()).expect("render");
+        assert_eq!(rendered.outputs.len(), 1);
+        assert_eq!(rendered.outputs[0].kind, "RawManifests");
+        assert_eq!(rendered.outputs[0].target, "./");
+        assert!(rendered.outputs[0].name.is_none());
     }
 
     #[test]

@@ -256,9 +256,18 @@ KCL `check:` blocks evaluate at render time against each resource; failures surf
 
 The `outputs` array declares target format(s). Each item has optional `name` for per-source routing (see §6).
 
+**Omitting `outputs` is equivalent to:**
+
+```python
+outputs = [{ kind: "RawManifests", target: "./" }]
+```
+
+— i.e. every resource emitted as raw YAML under `--out`. Declare `outputs`
+explicitly when you need multiple targets, a non-`RawManifests` kind, or
+per-source routing.
+
 ```python
 outputs = [
-    # Default — raw manifests committed to git
     {
         kind:   "RawManifests"
         target: "./"

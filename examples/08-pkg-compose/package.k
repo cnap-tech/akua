@@ -46,7 +46,4 @@ _backend = pkg.render(pkg.Render {
 })
 
 resources = _frontend + _backend
-
-outputs = [
-    { kind: "RawManifests", target: "./" }
-]
+# `outputs` omitted — defaults to `[{kind: "RawManifests", target: "./"}]`.

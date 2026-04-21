@@ -179,9 +179,10 @@ resources = [{
     data.replicas: str(input.replicas)
 }]
 
-outputs = [
-    { kind: "RawManifests", target: "./" }
-]
+# `outputs` is optional — omitted here means:
+#   outputs = [{ kind: "RawManifests", target: "./" }]
+# Declare it explicitly to route groups to different directories or
+# emit in other formats (HelmChart, ResourceGraphDefinition, OCIBundle).
 "#;
 
 const INPUTS_EXAMPLE: &str = r#"appName: hello
