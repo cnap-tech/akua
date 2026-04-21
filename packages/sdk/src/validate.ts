@@ -1,14 +1,7 @@
-// Runtime validation against the JSON Schema bundle shipped from Rust
-// (sdk-schemas/akua.json). Every SDK method that parses CLI stdout runs
-// the matching validator before handing back a value — contract drift
-// between the Rust source and the SDK's compile-time types surfaces as
-// a typed `AkuaContractError` at the parse boundary, not later as a
-// `NaN` or `undefined.field` ten call frames deep.
-//
-// Why ajv: research verdict ranked it as the fastest validator (~14M
-// ops/s vs Zod v4's ~2M), and we already emit JSON Schema from Rust —
-// no transform step needed. Consumers who prefer Zod can derive via
-// json-schema-to-zod; this module is the canonical validator.
+// Runtime validation against the JSON Schema bundle generated from Rust.
+// Every SDK method that parses CLI stdout runs the matching validator
+// before returning, so contract drift throws at the parse boundary
+// rather than surfacing later as undefined.field access.
 
 import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020.js';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
@@ -23,60 +16,48 @@ type SchemaBundle = {
 
 const bundle = akuaSchema as unknown as SchemaBundle;
 
-// Draft 2020-12 instance (matches the `$schema` in akua.json). `strict: false`
-// because schemars emits `format: "uint32"` etc. that ajv doesn't know natively.
+// The runtime-valid set of schema names, derived from the bundle.
+// Typos on `validateAs('VersionOuput', …)` now fail `tsc` instead of
+// throwing at runtime.
+export type SchemaName = keyof typeof akuaSchema.$defs & string;
+
+// schemars emits `format: "uint32"` etc. — the integer bounds are already
+// captured structurally, so we register them as no-op formats to silence
+// the "unknown format" warnings without losing any checking power.
 const ajv = new Ajv2020({ strict: false, allErrors: true });
-// Silence "unknown format" warnings for schemars' Rust-integer annotations.
-// Each is already captured structurally (`type: integer` + `minimum: 0`),
-// so declaring them as no-op formats loses no checking power.
 for (const f of ['uint8', 'uint16', 'uint32', 'uint64', 'int8', 'int16', 'int32', 'int64']) {
 	ajv.addFormat(f, true);
 }
-
-// Register the bundle once. Every per-type validator retrieved below is a
-// reference *into* this registered schema, so $refs resolve correctly and
-// we don't re-register the $id on every compile.
+// Register the bundle once so per-type `$ref` lookups resolve across types.
 ajv.addSchema(bundle);
 
 const cache = new Map<string, ValidateFunction>();
 
-/**
- * Fetch (and cache) a validator for a top-level type from the bundle.
- * Keyed by the same name used in Rust (`VersionOutput`, `StructuredError`,
- * `ExitCode`, etc.) — matches what ts-rs emits per-type and what schemars
- * puts in `$defs`.
- */
-function compile(name: string): ValidateFunction {
+function compile(name: SchemaName): ValidateFunction {
 	const cached = cache.get(name);
 	if (cached) return cached;
-
-	if (!bundle.$defs?.[name]) {
+	const validator = ajv.getSchema(`${bundle.$id}#/$defs/${name}`);
+	if (!validator) {
 		throw new Error(
 			`No schema named "${name}" in sdk-schemas/akua.json — regenerate via \`task sdk:gen\`?`,
 		);
-	}
-	const validator = ajv.getSchema(`${bundle.$id}#/$defs/${name}`);
-	if (!validator) {
-		throw new Error(`ajv failed to resolve $ref for "${name}"`);
 	}
 	cache.set(name, validator);
 	return validator;
 }
 
-/**
- * Thrown when the CLI emits JSON that doesn't match the compiled
- * contract — "we shipped @akua/sdk against contract v1 but the binary
- * we invoked is emitting a v2 shape." Distinct from `AkuaUserError` &
- * friends (which are the CLI *intentionally* reporting a problem).
- */
 export class AkuaContractError extends AkuaError {
-	readonly schemaName: string;
+	readonly schemaName: SchemaName;
 	readonly validationErrors: ReadonlyArray<object>;
 	readonly raw: unknown;
 
-	constructor(schemaName: string, validationErrors: ReadonlyArray<object>, raw: unknown) {
+	constructor(
+		schemaName: SchemaName,
+		validationErrors: ReadonlyArray<object>,
+		raw: unknown,
+	) {
 		super(
-			`akua --json output failed schema validation for ${schemaName}: ${JSON.stringify(validationErrors)}`,
+			`akua --json output failed ${schemaName} schema validation (${validationErrors.length} issue(s))`,
 			{
 				structured: {
 					level: 'error',
@@ -92,12 +73,7 @@ export class AkuaContractError extends AkuaError {
 	}
 }
 
-/**
- * Validate `value` against the named type from the bundle. Returns the
- * same reference typed as `T` on success; throws `AkuaContractError` on
- * drift. Used by every SDK method at the `JSON.parse(stdout)` boundary.
- */
-export function validateAs<T>(schemaName: string, value: unknown): T {
+export function validateAs<T>(schemaName: SchemaName, value: unknown): T {
 	const validate = compile(schemaName);
 	if (!validate(value)) {
 		throw new AkuaContractError(schemaName, validate.errors ?? [], value);
@@ -105,11 +81,9 @@ export function validateAs<T>(schemaName: string, value: unknown): T {
 	return value as T;
 }
 
-/**
- * Turn one ajv error into a Standard Schema issue. `instancePath` is a
- * JSON Pointer (`/outputs/0/name`); Standard Schema wants a path array
- * of `PropertyKey`s, so we split + coerce numeric segments.
- */
+// ajv's `instancePath` is a JSON Pointer (`/outputs/0/name`); Standard
+// Schema wants an array of `PropertyKey`s, with numeric segments as
+// numbers per its `PathSegment` spec.
 function ajvErrorToIssue(err: ErrorObject): StandardSchemaV1.Issue {
 	const segments = (err.instancePath || '')
 		.split('/')
@@ -119,18 +93,7 @@ function ajvErrorToIssue(err: ErrorObject): StandardSchemaV1.Issue {
 	return segments.length > 0 ? { message: msg, path: segments } : { message: msg };
 }
 
-/**
- * Build a StandardSchemaV1 adapter for a bundled type. Lets consumers
- * plug `@akua/sdk`'s types into any framework that accepts Standard
- * Schema — Hono validators, tRPC inputs, SvelteKit form() / remote(),
- * react-hook-form resolvers — without a Zod/Valibot dependency.
- *
- * Usage:
- *   import { standardSchemaFor } from '@akua/sdk';
- *   const VersionSchema = standardSchemaFor<VersionOutput>('VersionOutput');
- *   app.post('/version', validator(VersionSchema), ...);
- */
-export function standardSchemaFor<T>(schemaName: string): StandardSchemaV1<unknown, T> {
+export function standardSchemaFor<T>(schemaName: SchemaName): StandardSchemaV1<unknown, T> {
 	const validate = compile(schemaName);
 	return {
 		'~standard': {

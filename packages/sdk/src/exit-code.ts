@@ -1,6 +1,6 @@
-// Numeric exit code (what Node's `child.exitCode` gives us) ↔ the kebab-case
-// name Rust ships. Kept in lockstep with akua-core's `ExitCode::name` /
-// `ExitCode::from_code`.
+// Numeric exit code (from Node's `child.exitCode`) ↔ the kebab-case
+// name Rust ships. Index in BY_NUMBER = integer value in Rust (matches
+// akua-core::ExitCode::from_code).
 
 import type { ExitCode } from '../../../sdk-types/ExitCode.ts';
 
@@ -18,14 +18,4 @@ const BY_NUMBER: readonly ExitCode[] = [
 export function exitCodeFromNumber(n: number | null): ExitCode | undefined {
 	if (n == null || n < 0 || n >= BY_NUMBER.length) return undefined;
 	return BY_NUMBER[n];
-}
-
-/** Kebab-case → numeric, for completeness (inverse of [`exitCodeFromNumber`]). */
-export function exitCodeToNumber(name: ExitCode): number {
-	return BY_NUMBER.indexOf(name);
-}
-
-/** `true` when retrying with the same inputs might succeed — matches the Rust predicate. */
-export function isRetriable(code: ExitCode): boolean {
-	return code === 'rate-limited' || code === 'timeout';
 }

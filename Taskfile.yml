@@ -69,11 +69,6 @@ tasks:
     dir: packages/sdk
     cmds:
       - bun install --frozen-lockfile
-    sources:
-      - package.json
-      - bun.lock
-    generates:
-      - node_modules/.package-lock.json
 
   sdk:test:
     desc: Run @akua/sdk TS unit tests (bun — native TS, no transpile step)

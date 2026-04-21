@@ -5,21 +5,17 @@
 //! same fields are rendered as a human-readable block but the `code`
 //! remains machine-parseable.
 
-#[cfg(feature = "schema-export")]
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "ts-export")]
-use ts_rs::TS;
 
+use crate::contract_type;
+
+contract_type! {
 /// The canonical error shape. One struct; every verb reuses it.
 ///
 /// `code` is the stable, load-bearing identifier. `message` is the one-line
 /// summary. The rest are optional pointers — a file path, a field name, a
 /// suggestion, a docs URL.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "ts-export", derive(TS))]
-#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../sdk-types/"))]
-#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub struct StructuredError {
     /// Log level. Always `"error"` for hard failures; `"warn"` for
     /// recoverable issues emitted alongside a success exit.
@@ -61,16 +57,16 @@ pub struct StructuredError {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_actions: Vec<String>,
 }
+}
 
+contract_type! {
 /// Log severity. Almost always `Error`; `Warn` for recoverable issues.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-#[cfg_attr(feature = "ts-export", derive(TS))]
-#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../sdk-types/"))]
-#[cfg_attr(feature = "schema-export", derive(JsonSchema))]
 pub enum Level {
     Error,
     Warn,
+}
 }
 
 fn default_level() -> Level {

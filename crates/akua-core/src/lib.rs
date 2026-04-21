@@ -27,6 +27,28 @@
 
 #![allow(dead_code)]
 
+/// Apply the SDK-export derives to a contract type. Avoids hand-repeating
+/// three `#[cfg_attr]` attributes per struct/enum (and the `export_to`
+/// path, where a typo silently drops the type from the bundle).
+///
+/// Usage:
+/// ```ignore
+/// contract_type! {
+///     #[derive(Debug, Serialize, Deserialize)]
+///     pub struct Foo { ... }
+/// }
+/// ```
+#[macro_export]
+#[doc(hidden)]
+macro_rules! contract_type {
+    ($item:item) => {
+        #[cfg_attr(feature = "ts-export", derive(::ts_rs::TS))]
+        #[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../sdk-types/"))]
+        #[cfg_attr(feature = "schema-export", derive(::schemars::JsonSchema))]
+        $item
+    };
+}
+
 pub mod cli_contract;
 #[cfg(feature = "engine-kcl")]
 pub mod dir_diff;

@@ -1,11 +1,3 @@
-// Unit tests for the stderr → typed-error classifier. Run via `bun test`
-// (native TS, zero-config). Imports use `node:test` / `node:assert` so
-// the same file also runs under `node --test --experimental-strip-types`
-// — portable across runtimes.
-//
-// Exercises the contract in cli-contract.md §1.2 (StructuredError JSONL on
-// stderr) + §2 (typed exit codes). If either shape drifts, these break.
-
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
 
@@ -58,7 +50,7 @@ test('classifyCliError maps exit 3 → AkuaPolicyDenyError', () => {
 	assert.equal(err.exitCode, 'policy-deny');
 });
 
-test('classifyCliError maps exit 4 → AkuaRateLimitedError (retriable)', () => {
+test('classifyCliError maps exit 4 → AkuaRateLimitedError', () => {
 	const err = classifyCliError({
 		rawExitCode: 4,
 		stderr: '{"level":"error","code":"E_RATE_LIMITED","message":"slow down"}',
@@ -66,7 +58,7 @@ test('classifyCliError maps exit 4 → AkuaRateLimitedError (retriable)', () => 
 	assert.ok(err instanceof AkuaRateLimitedError);
 });
 
-test('classifyCliError maps exit 6 → AkuaTimeoutError (retriable)', () => {
+test('classifyCliError maps exit 6 → AkuaTimeoutError', () => {
 	const err = classifyCliError({
 		rawExitCode: 6,
 		stderr: '{"level":"error","code":"E_TIMEOUT","message":"exceeded --timeout"}',
@@ -76,14 +68,13 @@ test('classifyCliError maps exit 6 → AkuaTimeoutError (retriable)', () => {
 
 test('classifyCliError falls back to generic AkuaError for unknown exit codes', () => {
 	const err = classifyCliError({ rawExitCode: 99, stderr: '' });
-	// Unknown numeric → not one of the typed subclasses, but still AkuaError.
 	assert.ok(err instanceof AkuaError);
 	assert.equal(err instanceof AkuaUserError, false);
 	assert.equal(err.exitCode, undefined);
 	assert.equal(err.rawExitCode, 99);
 });
 
-test('classifyCliError without StructuredError still produces a sensible message', () => {
+test('classifyCliError without StructuredError falls back to a code-based message', () => {
 	const err = classifyCliError({ rawExitCode: 2, stderr: 'just some noise' });
 	assert.match(err.message, /exited with code 2/);
 	assert.equal(err.structured, undefined);
