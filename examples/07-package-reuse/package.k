@@ -8,6 +8,7 @@
 #   akua add
 #   akua render --inputs inputs.yaml
 
+import akua.ctx
 import akua.pkg                            # package-as-source engine callable
 import akua.ui as ui
 import packages.platform_base as base      # pinned via akua.toml / akua.lock
@@ -34,7 +35,7 @@ schema Input:
     check:
         len(extra_hostnames) < 10, "at most 10 extra hostnames"
 
-input: Input = option("input") or Input {}
+input: Input = ctx.input()
 
 # --- Base composition ---
 # `pkg.render(Package, inputs)` is the package-as-engine callable, parallel

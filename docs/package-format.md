@@ -13,7 +13,8 @@ Every Package is one KCL program with three typed regions:
 ```python
 # package.k
 
-# (1) imports — engines, schemas, reusable modules
+# (1) imports — engines, ambient context, schemas, reusable modules
+import akua.ctx
 import akua.helm
 import charts.cnpg    as cnpg
 import charts.webapp  as webapp
@@ -24,7 +25,7 @@ schema Input:
     hostname: str
     replicas: int = 3
 
-input: Input = option("input") or Input {}
+input: Input = ctx.input()
 
 # (3) body — source-engine calls + transforms + aggregation
 _pg  = helm.template(helm.Template { chart = cnpg.Chart,   values = ... })
@@ -75,12 +76,14 @@ Rules:
 - Must be named `Input`. The binding line is canonically:
 
   ```python
-  input: Input = option("input") or Input {}
+  import akua.ctx
+
+  input: Input = ctx.input()
   ```
 
-  `option("input")` reads the value the runtime provides (via KCL's `-D` flag or the equivalent in `ExecProgramArgs.args`). `or Input {}` falls back to schema defaults when nothing is supplied. This is the only non-obvious line in a Package — every Package uses it verbatim.
+  `ctx.input()` is a thin wrapper around KCL's `option("input")` that hides the plumbing string — a typo becomes a parse error instead of a silent pass-through. `input: Input = ...` triggers KCL's structural coercion: the returned dict is validated against the `Input` schema at this binding site, defaults fill in, `check:` blocks run.
 
-  The pattern is deliberate: with this binding the Package is **standalone-valid KCL** (runnable via `kcl package.k -D input='{"…"}'`), so `kcl fmt` / `kcl lint` / IDE LSPs all work on Packages without akua-specific preprocessing.
+  Under the hood `ctx.input()` is just `option("input") or {}`, so the Package remains **standalone-valid KCL** — `kcl fmt` / `kcl lint` / IDE LSPs all work once `import akua.ctx` resolves (akua materializes the stdlib at render time and exposes it to KCL via `ExecProgramArgs.external_pkgs`).
 - Fields use KCL's native type syntax: `str`, `int`, `float`, `bool`, `[T]`, `{str: T}`, unions (`"a" | "b" | "c"`), nested schemas.
 - Fields without defaults are required. Fields with defaults are optional.
 - Use KCL docstrings for field documentation — `akua` tooling surfaces them in autocomplete and generated docs.
@@ -350,13 +353,14 @@ The smallest possible Package:
 
 ```python
 # package.k
+import akua.ctx
 import akua.helm
 import charts.nginx as nginx
 
 schema Input:
     hostname: str
 
-input: Input = option("input") or Input {}
+input: Input = ctx.input()
 
 _nginx = helm.template(helm.Template {
     chart  = nginx.Chart

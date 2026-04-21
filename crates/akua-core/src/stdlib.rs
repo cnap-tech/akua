@@ -11,6 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+const CTX_K: &str = include_str!("../stdlib/akua/ctx.k");
 const HELM_K: &str = include_str!("../stdlib/akua/helm.k");
 const KUSTOMIZE_K: &str = include_str!("../stdlib/akua/kustomize.k");
 const PKG_K: &str = include_str!("../stdlib/akua/pkg.k");
@@ -45,6 +46,7 @@ pub fn stdlib_root() -> &'static Path {
         ));
         std::fs::create_dir_all(&dir).expect("mkdir akua stdlib tempdir");
         std::fs::write(dir.join("kcl.mod"), KCL_MOD).expect("write akua/kcl.mod");
+        std::fs::write(dir.join("ctx.k"), CTX_K).expect("write akua/ctx.k");
         std::fs::write(dir.join("helm.k"), HELM_K).expect("write akua/helm.k");
         std::fs::write(dir.join("kustomize.k"), KUSTOMIZE_K).expect("write akua/kustomize.k");
         std::fs::write(dir.join("pkg.k"), PKG_K).expect("write akua/pkg.k");

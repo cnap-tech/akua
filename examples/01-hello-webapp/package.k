@@ -7,6 +7,7 @@
 #   akua add                              # resolve deps → writes akua.lock
 #   akua render --inputs inputs.yaml      # render to ./rendered by default
 
+import akua.ctx
 import akua.helm
 import akua.ui as ui            # @ui decorator lives here
 import charts.nginx as nginx    # resolved from akua.toml
@@ -33,7 +34,7 @@ schema Input:
     check:
         replicas >= 1, "replicas must be at least 1"
 
-input: Input = option("input") or Input {}
+input: Input = ctx.input()
 
 # Consume the upstream nginx chart unchanged. Public schema ↔ chart values
 # wiring happens inline; no chart fork needed.

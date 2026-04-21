@@ -5,6 +5,7 @@
 # Same shape as 02-webapp-postgres but trimmed; see that example for the
 # full cross-source-wiring walkthrough.
 
+import akua.ctx
 import akua.helm
 import akua.ui as ui
 import charts.cnpg    as cnpg
@@ -38,7 +39,7 @@ schema DatabaseInput:
     @ui(order=1)
     user: str = "app"
 
-input: Input = option("input") or Input {}
+input: Input = ctx.input()
 
 _pg = helm.template(cnpg.Chart {
     values = cnpg.Values {

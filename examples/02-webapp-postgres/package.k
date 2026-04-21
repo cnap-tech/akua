@@ -13,6 +13,7 @@
 # Render:
 #   akua render --inputs inputs.yaml --out ./rendered
 
+import akua.ctx
 import akua.helm
 import charts.cnpg    as cnpg
 import charts.webapp  as webapp
@@ -27,7 +28,7 @@ schema Input:
         user: str = "app"
     }
 
-input: Input = option("input") or Input {}
+input: Input = ctx.input()
 
 # Postgres cluster. CloudNativePG's operator creates a Secret named
 # `${cluster.name}-app` with key `uri` — predictable by convention.

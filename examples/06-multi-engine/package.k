@@ -10,6 +10,7 @@
 #   akua add
 #   akua render --inputs inputs.yaml --out ./deploy
 
+import akua.ctx
 import akua.helm
 import akua.kustomize
 import akua.kro
@@ -27,7 +28,7 @@ schema Input:
     check:
         replicas >= 1, "replicas must be at least 1"
 
-input: Input = option("input") or Input {}
+input: Input = ctx.input()
 
 # --- 1. Helm source ---
 _app = helm.template(helm.Template {

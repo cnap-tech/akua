@@ -10,6 +10,7 @@
 # Produces two ConfigMaps: `config-frontend` and `config-backend`,
 # each with its own data payload from the outer's inputs.
 
+import akua.ctx
 import akua.pkg
 
 schema ComponentInput:
@@ -23,7 +24,7 @@ schema Input:
     frontend: ComponentInput = ComponentInput { name = "config-frontend" }
     backend:  ComponentInput = ComponentInput { name = "config-backend"  }
 
-input: Input = option("input") or Input {}
+input: Input = ctx.input()
 
 # Each call lands as a sentinel at eval time; the akua render
 # pipeline walks the resources list post-eval, expands each

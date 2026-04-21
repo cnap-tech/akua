@@ -1,3 +1,4 @@
+import akua.ctx
 import akua.helm
 import charts.nginx as nginx
 
@@ -12,7 +13,7 @@ schema Input:
     check:
         replicas >= 1, "replicas must be at least 1"
 
-input: Input = option("input") or Input {}
+input: Input = ctx.input()
 
 _app = helm.template(nginx.Chart {
     values = nginx.Values {

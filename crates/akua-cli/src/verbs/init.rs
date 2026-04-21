@@ -158,6 +158,8 @@ const PACKAGE_K: &str = r#"# Minimal Package.k — edit me.
 #
 # See docs/package-format.md for the full authoring reference.
 
+import akua.ctx
+
 schema Input:
     """Public inputs for this Package."""
 
@@ -170,7 +172,7 @@ schema Input:
     check:
         replicas >= 1, "replicas must be at least 1"
 
-input: Input = option("input") or Input {}
+input: Input = ctx.input()
 
 resources = [{
     apiVersion: "v1"

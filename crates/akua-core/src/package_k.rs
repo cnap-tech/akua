@@ -183,11 +183,16 @@ pub struct LintIssue {
 /// Parse a KCL file via kcl_lang and return any parse / load errors.
 /// Pure; no execution.
 pub fn lint_kcl(path: &Path) -> Result<Vec<LintIssue>, PackageKError> {
-    use kcl_lang::{ParseProgramArgs, API};
+    use kcl_lang::{ExternalPkg, ParseProgramArgs, API};
 
     let api = API::default();
     let args = ParseProgramArgs {
         paths: vec![path.to_string_lossy().into_owned()],
+        // Let `import akua.*` resolve during parse/lint, not only render.
+        external_pkgs: vec![ExternalPkg {
+            pkg_name: "akua".to_string(),
+            pkg_path: crate::stdlib::stdlib_root().to_string_lossy().into_owned(),
+        }],
         ..Default::default()
     };
     match api.parse_program(&args) {
@@ -244,11 +249,15 @@ pub struct OptionInfo {
 /// `path`. Parse-only — the program is not executed. Used by
 /// `akua inspect` to introspect a Package's input surface.
 pub fn list_options_kcl(path: &Path) -> Result<Vec<OptionInfo>, PackageKError> {
-    use kcl_lang::{ParseProgramArgs, API};
+    use kcl_lang::{ExternalPkg, ParseProgramArgs, API};
 
     let api = API::default();
     let args = ParseProgramArgs {
         paths: vec![path.to_string_lossy().into_owned()],
+        external_pkgs: vec![ExternalPkg {
+            pkg_name: "akua".to_string(),
+            pkg_path: crate::stdlib::stdlib_root().to_string_lossy().into_owned(),
+        }],
         ..Default::default()
     };
     match api.list_options(&args) {

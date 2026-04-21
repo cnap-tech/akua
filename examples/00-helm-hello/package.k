@@ -11,6 +11,7 @@
 # Inputs flow through KCL's `option()` mechanism; `inputs.example.yaml`
 # is auto-discovered when --inputs is omitted.
 
+import akua.ctx
 import akua.helm
 
 schema Input:
@@ -22,7 +23,7 @@ schema Input:
     replicas: int = 1
     """Replica count recorded in the ConfigMap."""
 
-input: Input = option("input") or Input {}
+input: Input = ctx.input()
 
 # helm.template returns a list of Kubernetes resources — a single
 # ConfigMap in this case. `*_manifests` splats the list into

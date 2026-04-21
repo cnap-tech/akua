@@ -467,10 +467,9 @@ akua inspect [flags]
 
 Each option carries `name`, `required`, and optionally `type`,
 `default`, `help` when the KCL source supplies them. `type` is
-currently empty for the canonical `input: Input = option("input") or
-Input {}` form — kcl_lang's `list_options` only reads a type arg
-passed directly to `option()`; full binding-context recovery arrives
-with AST walking.
+currently empty for the canonical `input: Input = ctx.input()` form —
+kcl_lang's `list_options` only reads a type arg passed directly to
+`option()`; full binding-context recovery arrives with AST walking.
 
 > **Planned expansion (🚧).** The target surface also audits a
 > *published* OCI package — signatures, SLSA attestation chain, chart

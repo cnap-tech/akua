@@ -40,11 +40,13 @@ Prebuilt binaries live on [GitHub Releases][releases]. Agent setup for Claude Co
 A Package.k is plain KCL with three regions — imports, schema, body:
 
 ```kcl
+import akua.ctx
+
 schema Input:
     appName: str
     replicas: int = 2
 
-input: Input = option("input") or Input {}
+input: Input = ctx.input()
 
 resources = [{
     apiVersion: "v1"

@@ -24,7 +24,7 @@ schema Render:
     Relative paths resolve against the calling Package's directory."""
 
     inputs: {str:} = {}
-    """Inputs forwarded to the inner Package's `option("input")`."""
+    """Inputs forwarded to the inner Package's `ctx.input()`."""
 
 # Render a nested Package.k and splice its `resources` list into the
 # caller's resources. The schema itself is passed through to the
