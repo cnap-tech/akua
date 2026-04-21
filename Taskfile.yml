@@ -77,22 +77,24 @@ tasks:
   # akua-core. Never shell-out — see CLAUDE.md invariant.
 
   build:helm-engine-wasm:
-    desc: Build the embedded Helm v4 template engine (Go → wasip1, stock helm; ~75 MB wasm)
+    desc: Build the embedded Helm v4 template engine (Go → wasip1, forked; ~20 MB wasm)
     dir: crates/helm-engine-wasm
     status:
       - test -f assets/helm-engine.wasm
     cmds:
+      - ./fork/apply.sh                          # clones helm@v4.1.4, applies client-go strip patch
       # -buildmode=c-shared is load-bearing: `go:wasmexport` functions only
       # reach the host linker's symbol table under that buildmode on wasip1.
       - cd go-src && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -ldflags='-s -w' -o ../assets/helm-engine.wasm .
       - ls -lh assets/helm-engine.wasm
 
-  build:helm-engine-wasm:forked:
-    desc: Build a forked helm-engine-wasm with client-go stripped (~20 MB wasm) — Phase 1b
+  build:helm-engine-wasm:stock:
+    desc: Build without the client-go strip patch (~75 MB wasm) — for cross-checking patch behaviour
     dir: crates/helm-engine-wasm
     cmds:
-      - echo "TODO (Phase 1b) — clone helm@v4.1.4 into third_party/, apply fork/helm-v4.1.4.patch, go build"
-      - exit 1
+      - cd go-src && go mod edit -dropreplace helm.sh/helm/v4 && go mod tidy
+      - cd go-src && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -ldflags='-s -w' -o ../assets/helm-engine.wasm .
+      - ls -lh assets/helm-engine.wasm
 
   build:kustomize-engine-wasm:
     desc: Build the embedded kustomize engine (Go → wasip1, stock kustomize; ~26 MB wasm)

@@ -50,6 +50,7 @@ dist/
 crates/helm-engine-wasm/assets/helm-engine.wasm
 crates/helm-engine-wasm/go-src/go.sum
 crates/helm-engine-wasm/go-src/crates/
+crates/helm-engine-wasm/third_party/
 crates/kustomize-engine-wasm/assets/kustomize-engine.wasm
 crates/kustomize-engine-wasm/go-src/go.sum
 crates/kustomize-engine-wasm/go-src/crates/

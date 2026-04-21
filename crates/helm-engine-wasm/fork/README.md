@@ -50,25 +50,21 @@ projected ~75 MB binary, sub-500ms render, no Cranelift at runtime.
 ## How to apply
 
 ```sh
-cd $(mktemp -d)
-git clone --depth 1 --branch v4.1.4 https://github.com/helm/helm.git helm-v4
-cp -r helm-v4 helm-fork
-cd helm-fork
-patch -p1 < /path/to/akua/crates/helm-engine-wasm/fork/helm-v4.1.4.patch
+task build:helm-engine-wasm          # runs fork/apply.sh + go build
 ```
 
-Then point `crates/helm-engine-wasm/go-src/go.mod` at the fork:
+`fork/apply.sh` is idempotent: clones helm@v4.1.4 into
+`third_party/helm-fork/` (gitignored), applies this patch, then
+rewrites `go-src/go.mod` to `replace helm.sh/helm/v4 =>
+../third_party/helm-fork`. The replace + go.sum mutations stay
+local to your working copy — only the pristine stock `go.mod` + the
+patch itself are checked in.
 
-```
-replace helm.sh/helm/v4 => /path/to/helm-fork
-```
-
-And rebuild:
+To build WITHOUT the fork (stock 75 MB helm, for cross-checking
+patch behaviour or upstream regression testing):
 
 ```sh
-cd crates/helm-engine-wasm/go-src
-GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared \
-  -o ../assets/helm-engine.wasm -ldflags='-s -w' .
+task build:helm-engine-wasm:stock
 ```
 
 ## Maintenance
