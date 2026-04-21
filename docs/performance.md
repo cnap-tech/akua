@@ -1,5 +1,12 @@
 # Performance
 
+> **Historical note.** Sections **3** (engine callable cost) and **4**
+> (end-to-end `akua render` CLI latency — helm/kustomize rows) measured
+> the shell-out Helm/kustomize backends, which were deleted in Phase 0
+> of [`docs/roadmap.md`](roadmap.md). akua no longer shells out, ever.
+> Numbers for the embedded WASM backends land when Phases 1 + 3 ship.
+> Pure-KCL + `pkg.render` numbers (sections 1, 2) are current and valid.
+
 Render-path benchmarks. Useful for:
 
 - Sanity-checking that akua's pipeline is fast enough for the signature experience (`akua dev` sub-100ms edit-to-render loops).

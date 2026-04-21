@@ -72,6 +72,9 @@ pub enum PackageKError {
 
     #[error("cycle detected while expanding pkg.render — `{path}` is already on the render stack")]
     Cycle { path: PathBuf },
+
+    #[error("plugin path escape: {0}")]
+    PathEscape(#[from] crate::kcl_plugin::PathError),
 }
 
 impl PackageK {

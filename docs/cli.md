@@ -270,7 +270,7 @@ akua render [path] [flags]
 | `--stdout` | print rendered manifests as multi-doc YAML to stdout instead of writing files |
 | `--dry-run` | render but don't write files |
 
-> **Engine callables.** `pkg.render(Render)` is callable today via `import akua.pkg` (pure KCL — no extra feature needed) for Package-of-Packages composition; see [`examples/08-pkg-compose`](../examples/08-pkg-compose). `helm.template(Template)` is callable today via `import akua.helm` when the binary is built with `--features akua-core/engine-helm-shell` (requires `helm` on PATH); see [`examples/00-helm-hello`](../examples/00-helm-hello). `kustomize.build(Build)` is callable today via `import akua.kustomize` with `--features akua-core/engine-kustomize-shell`; see [`examples/09-kustomize-hello`](../examples/09-kustomize-hello). Future transformation functions (`kro.rgd`, `crossplane.composition`) arrive in later Phase B increments.
+> **Engine callables.** `pkg.render(Render)` ships today — pure Rust, no external dependencies — for Package-of-Packages composition; see [`examples/08-pkg-compose`](../examples/08-pkg-compose). `helm.template(Template)` and `kustomize.build(Build)` are defined but return `E_ENGINE_NOT_AVAILABLE` while their embedded WASM backends are in progress (Phases 1 + 3 of [`docs/roadmap.md`](roadmap.md)). akua doesn't shell out to `helm` or `kustomize` binaries — every engine must run inside the wasmtime sandbox; see [`docs/security-model.md`](security-model.md).
 >
 > **One render output.** akua writes raw YAML manifests, one file per resource. Distribution shapes like Helm charts or OCI bundles are future `akua publish --as <format>` concerns — they wrap rendered manifests at distribution time, not as a Package-declared output.
 

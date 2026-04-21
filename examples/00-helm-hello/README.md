@@ -1,9 +1,17 @@
 # 00-helm-hello
 
+> **Status: temporarily broken.** The shell-out Helm backend was removed
+> in `e5b77dc` / Phase 0 of [`docs/roadmap.md`](../../docs/roadmap.md).
+> `helm.template` now returns `E_ENGINE_NOT_AVAILABLE` until the embedded
+> `helm-engine-wasm` restoration lands (Phase 1). See
+> [`docs/security-model.md`](../../docs/security-model.md) for why: akua
+> doesn't shell out to external binaries in the render path, ever.
+>
+> This Package's source stays intact as the target shape for the embedded
+> engine to satisfy. Rendering will resume once Phase 1 ships.
+
 The smallest Package that exercises akua's `helm.template` engine
-callable end-to-end. Unlike 01–07, **this one renders with the
-shipping binary** — provided the `engine-helm-shell` feature is on
-and `helm` is on PATH.
+callable end-to-end.
 
 ## What's here
 

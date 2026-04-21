@@ -16,33 +16,32 @@ Working examples of akua Packages, Apps, Environments, and Policies. Each direct
 
 | # | directory | what it shows | renders today? |
 |---|---|---|---|
-| 00 | [00-helm-hello/](00-helm-hello/) | simplest working example: `akua.helm.template` against a bundled chart, ConfigMap out | ✅ with `engine-helm-shell` |
-| 01 | [01-hello-webapp/](01-hello-webapp/) | simplest Package: one schema input, one Helm chart, docstrings + `@ui` decorators | ❌ uses higher-level `charts.*` stdlib (not yet shipped) |
-| 02 | [02-webapp-postgres/](02-webapp-postgres/) | cross-source wiring — a webapp consuming a CNPG-managed Postgres secret via convention; `test_package.k` | ❌ needs `charts.*` stdlib |
-| 03 | [03-multi-env-app/](03-multi-env-app/) | Package + App + Environment as typed KCL — the full workspace authoring shape | ❌ needs `charts.*` stdlib |
-| 04 | [04-policy-tier/](04-policy-tier/) | Rego tier + Kyverno compile-resolved import, with passing + failing fixtures; shows that policy composition is just Rego file layout — no akua-owned PolicySet kind | ❌ needs the policy engine |
-| 05 | [05-tests-and-golden/](05-tests-and-golden/) | `test_*.k` + `*_test.rego` + golden-fixture render snapshots — the three kinds of tests side by side | ❌ needs `charts.*` stdlib + test runner |
-| 06 | [06-multi-engine/](06-multi-engine/) | Helm + Kustomize + kro RGD + inline KCL resources in one Package, flattened into one raw-manifest render | ❌ needs the `kro.rgd` transformation |
-| 07 | [07-package-reuse/](07-package-reuse/) | one akua Package composing another via `pkg.render()` — nested `Input` schemas, OCI-pinned base, attestation-chain provenance | ❌ needs OCI fetch (path-based composition works — see 08) |
+| 00 | [00-helm-hello/](00-helm-hello/) | simplest Package exercising `helm.template` against a bundled chart | ⏳ waiting on `helm-engine-wasm` (roadmap Phase 1) |
+| 01 | [01-hello-webapp/](01-hello-webapp/) | simplest Package: one schema input, one Helm chart, docstrings + `@ui` decorators | ⏳ needs typed `charts.*` deps (roadmap Phase 2) + `helm-engine-wasm` |
+| 02 | [02-webapp-postgres/](02-webapp-postgres/) | cross-source wiring — a webapp consuming a CNPG-managed Postgres secret via convention; `test_package.k` | ⏳ Phases 1 + 2 |
+| 03 | [03-multi-env-app/](03-multi-env-app/) | Package + App + Environment as typed KCL — the full workspace authoring shape | ⏳ Phases 1 + 2 |
+| 04 | [04-policy-tier/](04-policy-tier/) | Rego tier + Kyverno compile-resolved import, with passing + failing fixtures; shows that policy composition is just Rego file layout — no akua-owned PolicySet kind | ⏳ needs the policy engine |
+| 05 | [05-tests-and-golden/](05-tests-and-golden/) | `test_*.k` + `*_test.rego` + golden-fixture render snapshots — the three kinds of tests side by side | ⏳ Phases 1 + 2 + test runner |
+| 06 | [06-multi-engine/](06-multi-engine/) | Helm + Kustomize + kro RGD + inline KCL resources in one Package, flattened into one raw-manifest render | ⏳ Phases 1 + 3 + `kro.rgd` transformation |
+| 07 | [07-package-reuse/](07-package-reuse/) | one akua Package composing another via `pkg.render()` — nested `Input` schemas, OCI-pinned base, attestation-chain provenance | ⏳ needs OCI fetch (path-based composition works — see 08) |
 | 08 | [08-pkg-compose/](08-pkg-compose/) | pure-KCL Package-of-Packages composition — outer calls `pkg.render("./shared", …)` twice, renders two ConfigMaps | ✅ |
-| 09 | [09-kustomize-hello/](09-kustomize-hello/) | smallest working `kustomize.build` example — overlay adds a namePrefix + labels to a base ConfigMap | ✅ with `engine-kustomize-shell` |
+| 09 | [09-kustomize-hello/](09-kustomize-hello/) | smallest `kustomize.build` example — overlay adds a namePrefix + labels to a base ConfigMap | ⏳ waiting on `kustomize-engine-wasm` (roadmap Phase 3) |
 
 What **does** run today:
 
 - Any pure-KCL Package (no engine imports). The `akua init` scaffold is a minimal working example.
-- `examples/00-helm-hello/` — exercises `helm.template` when built with the `engine-helm-shell` feature and a `helm` binary on PATH.
 - `examples/08-pkg-compose/` — pure-KCL Package-of-Packages composition via `pkg.render`.
-- `examples/09-kustomize-hello/` — exercises `kustomize.build` when built with the `engine-kustomize-shell` feature and a `kustomize` binary on PATH.
+
+Examples 00 and 09 previously relied on shell-outs to `helm` / `kustomize` binaries. Those paths were removed in Phase 0 — akua doesn't shell out from the render path, ever. Their Packages stay as the target shape for the embedded WASM engines (Phases 1 + 3 of [`docs/roadmap.md`](../docs/roadmap.md)).
 
 ---
 
 ## How to use
 
-Install akua with the helm engine opted in:
+Install akua:
 
 ```sh
-cargo install --git https://github.com/cnap-tech/akua akua-cli \
-    --features akua-core/engine-helm-shell
+cargo install --git https://github.com/cnap-tech/akua akua-cli
 ```
 
 Render the pure-KCL scaffold:

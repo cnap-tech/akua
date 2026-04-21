@@ -117,7 +117,7 @@ fn render_nested(
     inputs: &YamlValue,
 ) -> Result<Vec<YamlValue>, crate::package_k::PackageKError> {
     let raw = PathBuf::from(path_str);
-    let resolved = kcl_plugin::resolve_against_package(&raw);
+    let resolved = kcl_plugin::resolve_in_package(&raw)?;
     let target = resolve_package_file(&resolved);
 
     if kcl_plugin::is_rendering(&target) {

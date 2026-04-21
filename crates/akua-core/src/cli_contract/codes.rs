@@ -21,6 +21,13 @@ pub const E_INPUTS_MISSING: &str = "E_INPUTS_MISSING";
 pub const E_INPUTS_PARSE: &str = "E_INPUTS_PARSE";
 pub const E_RENDER_KCL: &str = "E_RENDER_KCL";
 pub const E_RENDER_YAML: &str = "E_RENDER_YAML";
+/// Package called an engine plugin whose WASM backend hasn't shipped
+/// yet (docs/roadmap.md tracks the blocked features). Shell-out is
+/// not an option — see CLAUDE.md "No shell-out, ever."
+pub const E_ENGINE_NOT_AVAILABLE: &str = "E_ENGINE_NOT_AVAILABLE";
+/// Package argument to an engine plugin resolved to a path outside
+/// the Package directory (traversal / symlink escape).
+pub const E_PATH_ESCAPE: &str = "E_PATH_ESCAPE";
 
 // ----- Init ----------------------------------------------------------------
 

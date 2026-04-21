@@ -100,28 +100,41 @@ pub fn unregister(method: &str) -> bool {
         .is_some()
 }
 
-/// Install every built-in engine callable whose crate feature is
-/// enabled. Runs exactly once per process — guarded by an internal
-/// `OnceLock` so repeat calls (e.g. every `package_k::render`
-/// invocation in an `akua dev` watch loop) don't contend the global
-/// registry's write-lock.
+/// Install every built-in engine callable. Runs exactly once per
+/// process — guarded by an internal `OnceLock` so repeat calls (e.g.
+/// every `package_k::render` invocation in an `akua dev` watch loop)
+/// don't contend the global registry's write-lock.
 ///
 /// Currently registers:
 ///
-/// - `pkg.render` — always (pure Rust).
-/// - `helm.template` — when `engine-helm-shell` is on.
-/// - `kustomize.build` — when `engine-kustomize-shell` is on.
+/// - `pkg.render` — pure Rust, always available.
+/// - `helm.template` — typed-error stub until `helm-engine-wasm` lands
+///   (see docs/roadmap.md Phase 1). Returns `E_ENGINE_NOT_AVAILABLE`.
+/// - `kustomize.build` — typed-error stub until `kustomize-engine-wasm`
+///   lands (see docs/roadmap.md Phase 3).
 ///
-/// Future (rgd.instantiate, kyverno.check) will plug in here as
-/// their feature flags and engines land.
+/// Per CLAUDE.md, these will never be served by a shell-out to an
+/// external binary. The only supported backend is a wasmtime-hosted
+/// wasip1 engine compiled from the upstream Go source.
 pub fn install_builtin_plugins() {
     static INSTALLED: OnceLock<()> = OnceLock::new();
     INSTALLED.get_or_init(|| {
         crate::pkg_render::install();
-        #[cfg(feature = "engine-helm-shell")]
-        crate::helm::install();
-        #[cfg(feature = "engine-kustomize-shell")]
-        crate::kustomize::install();
+        register_engine_stub("helm.template", "helm-engine-wasm (Phase 1)");
+        register_engine_stub("kustomize.build", "kustomize-engine-wasm (Phase 3)");
+    });
+}
+
+/// Register a typed-error stub for an engine callable whose WASM
+/// backend hasn't shipped yet. Packages that call the plugin get a
+/// clear error pointing at the roadmap, not a silent pass-through.
+fn register_engine_stub(plugin_name: &'static str, roadmap_ref: &'static str) {
+    register(plugin_name, move |_args, _kwargs| {
+        Err(format!(
+            "{plugin_name}: engine not available — waiting on {roadmap_ref}. \
+             akua ships only sandboxed wasmtime-hosted engines; shell-out is prohibited. \
+             See docs/security-model.md + docs/roadmap.md."
+        ))
     });
 }
 
@@ -191,32 +204,102 @@ pub fn is_rendering(package: &Path) -> bool {
     RENDER_STACK.with(|s| s.borrow().iter().any(|p| p == package))
 }
 
-/// Resolve `path` against [`current_package_dir`] when it's
-/// relative. Absolute paths pass through. When no render is active
-/// and `path` is relative, returns it unchanged — the caller should
-/// fall back to process cwd.
+/// Error from [`resolve_in_package`] when a plugin's user-supplied
+/// path escapes the Package directory. Surfaced to Packages as a
+/// parse error; to CLI callers with [`codes::E_PATH_ESCAPE`].
+#[derive(Debug, thiserror::Error)]
+pub enum PathError {
+    #[error("plugin path `{requested}` resolved to `{resolved}`, which escapes the Package directory `{package_dir}`")]
+    Escape {
+        requested: PathBuf,
+        resolved: PathBuf,
+        package_dir: PathBuf,
+    },
+
+    #[error("plugin path `{0}` is absolute; Package-relative paths only")]
+    AbsoluteDisallowed(PathBuf),
+
+    #[error("no render scope — plugin called outside `PackageK::render`")]
+    NoRenderScope,
+
+    #[error("i/o resolving `{path}`: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// Resolve a user-supplied plugin path against the current Package
+/// directory and assert the result stays inside it. Absolute paths are
+/// rejected (Packages can't reach outside their own tree); symlinks
+/// are followed via `canonicalize` so a crafted `./link → /etc`
+/// fails the under-dir check. Missing render scope is an error — every
+/// plugin handler runs inside [`RenderScope`] by construction.
 ///
-/// Leading `./` components on the input are stripped before joining
-/// so the returned path doesn't leak cosmetic noise into error
-/// messages and logs (the filesystem tolerates `dir/./file` but
-/// it's ugly in diagnostics).
-pub fn resolve_against_package(path: &Path) -> PathBuf {
+/// See docs/security-model.md for the full threat model.
+pub fn resolve_in_package(path: &Path) -> Result<PathBuf, PathError> {
     if path.is_absolute() {
-        return path.to_path_buf();
+        return Err(PathError::AbsoluteDisallowed(path.to_path_buf()));
     }
-    let trimmed: PathBuf = path
-        .components()
-        .filter(|c| !matches!(c, std::path::Component::CurDir))
-        .collect();
-    let clean = if trimmed.as_os_str().is_empty() {
-        path.to_path_buf()
-    } else {
-        trimmed
-    };
-    match current_package_dir() {
-        Some(dir) => dir.join(&clean),
-        None => clean,
+
+    let package_dir = current_package_dir().ok_or(PathError::NoRenderScope)?;
+    let pkg_canon = package_dir
+        .canonicalize()
+        .map_err(|e| PathError::Io {
+            path: package_dir.clone(),
+            source: e,
+        })?;
+
+    let joined = package_dir.join(path);
+    // Canonicalize resolves `..` + symlinks to a real path under the
+    // filesystem. If the target doesn't exist yet, walk up to the
+    // nearest ancestor that does and canonicalize that — plugins are
+    // allowed to pass paths to files they'll create.
+    let resolved = canonicalize_best_effort(&joined).map_err(|e| PathError::Io {
+        path: joined.clone(),
+        source: e,
+    })?;
+
+    if !resolved.starts_with(&pkg_canon) {
+        return Err(PathError::Escape {
+            requested: path.to_path_buf(),
+            resolved,
+            package_dir: pkg_canon,
+        });
     }
+    Ok(resolved)
+}
+
+/// Canonicalize `p` if it exists; otherwise canonicalize the closest
+/// existing ancestor and append the remaining components. Needed so
+/// path-traversal validation works for plugin paths that point at
+/// files the caller will create at render time.
+fn canonicalize_best_effort(p: &Path) -> std::io::Result<PathBuf> {
+    if let Ok(c) = std::fs::canonicalize(p) {
+        return Ok(c);
+    }
+    let mut cur = p.to_path_buf();
+    let mut tail = PathBuf::new();
+    while let Some(parent) = cur.parent() {
+        if let Some(name) = cur.file_name() {
+            tail = if tail.as_os_str().is_empty() {
+                PathBuf::from(name)
+            } else {
+                PathBuf::from(name).join(&tail)
+            };
+        }
+        if let Ok(canon) = std::fs::canonicalize(parent) {
+            return Ok(canon.join(tail));
+        }
+        cur = parent.to_path_buf();
+        if cur.as_os_str().is_empty() {
+            break;
+        }
+    }
+    // Fallback: no ancestor canonicalizes (empty / broken fs) — surface
+    // the first canonicalize error so the caller sees a useful message.
+    std::fs::canonicalize(p)
 }
 
 /// The single `extern "C-unwind"` dispatcher KCL calls. Parses the
@@ -427,29 +510,59 @@ mod tests {
     }
 
     #[test]
-    fn resolve_against_package_handles_absolute_relative_and_missing_scope() {
-        // No scope: relative paths pass through unchanged.
-        assert_eq!(
-            resolve_against_package(std::path::Path::new("chart")),
-            std::path::PathBuf::from("chart")
-        );
+    fn resolve_in_package_rejects_outside_scope_requests() {
+        use tempfile::TempDir;
 
-        let _scope = RenderScope::enter(std::path::Path::new("/tmp/ws/package.k"));
-        // Relative with a `./` prefix → joined to package dir, `.` stripped.
-        assert_eq!(
-            resolve_against_package(std::path::Path::new("./chart")),
-            std::path::PathBuf::from("/tmp/ws/chart")
-        );
-        // Relative without prefix also joins cleanly.
-        assert_eq!(
-            resolve_against_package(std::path::Path::new("deep/subchart")),
-            std::path::PathBuf::from("/tmp/ws/deep/subchart")
-        );
-        // Absolute passes through.
-        assert_eq!(
-            resolve_against_package(std::path::Path::new("/opt/charts/nginx")),
-            std::path::PathBuf::from("/opt/charts/nginx")
-        );
+        let tmp = TempDir::new().unwrap();
+        let pkg_file = tmp.path().join("package.k");
+        std::fs::write(&pkg_file, "").unwrap();
+
+        // No scope: rejected.
+        let err = resolve_in_package(std::path::Path::new("chart")).unwrap_err();
+        assert!(matches!(err, PathError::NoRenderScope));
+
+        let _scope = RenderScope::enter(&pkg_file);
+
+        // Relative under dir: OK. `canonicalize` resolves to the real
+        // path; we compare by `ends_with` since macOS /tmp is a symlink.
+        let chart = tmp.path().join("chart");
+        std::fs::create_dir(&chart).unwrap();
+        let ok = resolve_in_package(std::path::Path::new("./chart")).unwrap();
+        assert!(ok.ends_with("chart"));
+
+        // Parent traversal: rejected.
+        let err = resolve_in_package(std::path::Path::new("../outside")).unwrap_err();
+        assert!(matches!(err, PathError::Escape { .. }), "got: {err:?}");
+
+        // Absolute: rejected.
+        let err = resolve_in_package(std::path::Path::new("/etc/passwd")).unwrap_err();
+        assert!(matches!(err, PathError::AbsoluteDisallowed(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn resolve_in_package_rejects_symlink_escape() {
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        let pkg_dir = tmp.path().join("pkg");
+        std::fs::create_dir(&pkg_dir).unwrap();
+        let pkg_file = pkg_dir.join("package.k");
+        std::fs::write(&pkg_file, "").unwrap();
+
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+
+        // Plant a symlink `pkg/link → ../outside`.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, pkg_dir.join("link")).unwrap();
+
+        let _scope = RenderScope::enter(&pkg_file);
+
+        #[cfg(unix)]
+        {
+            let err = resolve_in_package(std::path::Path::new("./link")).unwrap_err();
+            assert!(matches!(err, PathError::Escape { .. }), "got: {err:?}");
+        }
     }
 
     #[test]

@@ -76,6 +76,12 @@ impl RenderError {
             RenderError::PackageK(PackageKError::InputJson(e)) => {
                 StructuredError::new(codes::E_INPUTS_PARSE, e.to_string()).with_default_docs()
             }
+            RenderError::PackageK(PackageKError::PathEscape(inner)) => StructuredError::new(
+                codes::E_PATH_ESCAPE,
+                inner.to_string(),
+            )
+            .with_suggestion("Plugin paths must resolve inside the Package directory — no absolute paths, no `..` escape, no symlink escape. See docs/security-model.md.")
+            .with_default_docs(),
             RenderError::PackageK(other) => {
                 StructuredError::new(codes::E_PACKAGE_PARSE, other.to_string()).with_default_docs()
             }
