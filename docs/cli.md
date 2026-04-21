@@ -439,44 +439,49 @@ akua pull <ref> [flags]
 
 ## `akua inspect` ✅
 
-Audit a package — schema, sources, attestation, structural diff.
+Report a `package.k`'s input surface — every `option()` call-site with
+its name, declared type, required flag, default, and help text.
+Parse-only: the program is not executed.
 
 ```
-akua inspect <ref> [flags]
+akua inspect [flags]
 ```
 
 ### Flags
 
 | flag | description |
 |---|---|
-| `--show=<schema\|sources\|manifests\|attestation\|all>` | what to display |
-| `--inputs=<file>` | render with these inputs to see resulting manifests |
+| `--package=<path>` | path to the `package.k` file (default `./package.k`) |
+
+### Exit codes
+
+0 success, 1 user error (missing file, parse failure), 2 system error.
 
 ### JSON output
 
 ```json
 {
-  "ref": "oci://pkg.akua.dev/payments-api:3.2",
-  "digest": "sha256:…",
-  "signed": true,
-  "signer": "cosign: chain terminates at github.com/cnap-tech/...",
-  "schema": {
-    "required": ["appName", "hostname"],
-    "optional": ["replicas", "database"],
-    "fields": 6
-  },
-  "sources": [
-    {"kind": "helm", "chart": "cnpg-cluster", "version": "0.20.0"},
-    {"kind": "helm", "chart": "webapp", "version": "2.1.0"}
-  ],
-  "outputs": ["raw-manifests", "rgd"],
-  "attestation": {
-    "slsa_level": 3,
-    "builder": "github.com/.../.github/workflows/release.yml",
-    "created_at": "2026-04-18T…"
-  }
+  "path": "./package.k",
+  "options": [
+    {
+      "name": "input",
+      "required": false
+    }
+  ]
 }
 ```
+
+Each option carries `name`, `required`, and optionally `type`,
+`default`, `help` when the KCL source supplies them. `type` is
+currently empty for the canonical `input: Input = option("input") or
+Input {}` form — kcl_lang's `list_options` only reads a type arg
+passed directly to `option()`; full binding-context recovery arrives
+with AST walking.
+
+> **Planned expansion (🚧).** The target surface also audits a
+> *published* OCI package — signatures, SLSA attestation chain, chart
+> sources, rendered-manifest counts — via `akua inspect <oci://…>`.
+> That depends on the OCI fetch pipeline (Phase B/C).
 
 ---
 
