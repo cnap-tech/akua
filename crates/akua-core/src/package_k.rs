@@ -241,6 +241,59 @@ pub fn lint_kcl(path: &Path) -> Result<Vec<LintIssue>, PackageKError> {
     }
 }
 
+/// A single `option()` call-site in a parsed Package, surfaced for
+/// inspection without executing the program. Mirrors kcl_lang's
+/// `OptionHelp` shape with idiomatic Rust optionals.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OptionInfo {
+    /// The option key (first argument to `option("…")`).
+    pub name: String,
+
+    /// The declared type of the binding receiving the option — e.g.
+    /// `"Input"` for `input: Input = option("input") or Input {}`.
+    /// Empty when the option is used without a type annotation.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub r#type: String,
+
+    pub required: bool,
+
+    /// Default value (literal form) when the option call includes one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default: Option<String>,
+
+    /// `help="…"` text attached to the option call, surfaced in docs
+    /// tooling; absent when the authoring site didn't provide any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
+}
+
+/// List every `option()` call-site declared in the KCL program at
+/// `path`. Parse-only — the program is not executed. Used by
+/// `akua inspect` to introspect a Package's input surface.
+pub fn list_options_kcl(path: &Path) -> Result<Vec<OptionInfo>, PackageKError> {
+    use kcl_lang::{ParseProgramArgs, API};
+
+    let api = API::default();
+    let args = ParseProgramArgs {
+        paths: vec![path.to_string_lossy().into_owned()],
+        ..Default::default()
+    };
+    match api.list_options(&args) {
+        Ok(result) => Ok(result
+            .options
+            .into_iter()
+            .map(|o| OptionInfo {
+                name: o.name,
+                r#type: o.r#type,
+                required: o.required,
+                default: (!o.default_value.is_empty()).then_some(o.default_value),
+                help: (!o.help.is_empty()).then_some(o.help),
+            })
+            .collect()),
+        Err(e) => Err(PackageKError::KclEval(e.to_string())),
+    }
+}
+
 /// Format a KCL source string via kcl_lang's formatter. Used by
 /// `akua fmt` — pure function, no filesystem access.
 pub fn format_kcl(source: &str) -> Result<String, PackageKError> {

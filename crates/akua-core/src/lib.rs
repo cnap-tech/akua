@@ -37,7 +37,8 @@ pub use mod_file::{
 pub use dir_diff::{diff as dir_diff, DirDiff, DirDiffError, FileChange};
 #[cfg(feature = "engine-kcl")]
 pub use package_k::{
-    format_kcl, lint_kcl, LintIssue, OutputSpec, PackageK, PackageKError, RenderedPackage,
+    format_kcl, lint_kcl, list_options_kcl, LintIssue, OptionInfo, OutputSpec, PackageK,
+    PackageKError, RenderedPackage,
 };
 #[cfg(feature = "engine-kcl")]
 pub use package_render::{

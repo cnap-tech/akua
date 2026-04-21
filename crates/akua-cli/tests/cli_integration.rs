@@ -216,6 +216,24 @@ fn lint_reports_ok_on_scaffold_and_fail_on_syntax_error() {
 }
 
 // ---------------------------------------------------------------------------
+// inspect
+// ---------------------------------------------------------------------------
+
+#[test]
+fn inspect_reports_input_option_from_scaffolded_package() {
+    let dir = tempdir();
+    run(dir.path(), &["init", "pkg"]);
+    let pkg = dir.path().join("pkg");
+
+    let out = run(&pkg, &["inspect", "--json"]);
+    assert_exit(&out, 0);
+    let parsed = stdout_json(&out);
+    let opts = parsed["options"].as_array().unwrap();
+    assert_eq!(opts.len(), 1);
+    assert_eq!(opts[0]["name"], "input");
+}
+
+// ---------------------------------------------------------------------------
 // check
 // ---------------------------------------------------------------------------
 
@@ -395,7 +413,7 @@ fn help_lists_all_twelve_verbs() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     for verb in [
         "init", "whoami", "version", "verify", "render", "fmt", "lint", "check", "diff", "add",
-        "remove", "tree",
+        "remove", "tree", "inspect",
     ] {
         assert!(stdout.contains(verb), "help missing verb `{verb}`\n{stdout}");
     }

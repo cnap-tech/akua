@@ -11,8 +11,8 @@ use clap::{ArgGroup, Args, Parser, Subcommand};
 use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::{
     add as add_verb, check as check_verb, diff as diff_verb, fmt as fmt_verb, init as init_verb,
-    lint as lint_verb, remove as remove_verb, render as render_verb, tree as tree_verb,
-    verify as verify_verb, version as version_verb, whoami as whoami_verb,
+    inspect as inspect_verb, lint as lint_verb, remove as remove_verb, render as render_verb,
+    tree as tree_verb, verify as verify_verb, version as version_verb, whoami as whoami_verb,
 };
 use akua_core::cli_contract::{AgentContext, ExitCode, StructuredError};
 
@@ -167,6 +167,15 @@ enum Commands {
         package: PathBuf,
     },
 
+    /// Report a `package.k`'s input surface (options) without executing.
+    Inspect {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        #[arg(long, default_value = "./package.k")]
+        package: PathBuf,
+    },
+
     /// Parse-only check of a `package.k` (KCL syntax + imports).
     Lint {
         #[command(flatten)]
@@ -242,6 +251,7 @@ fn dispatch(command: Commands) -> ExitCode {
             check,
             stdout,
         } => run_fmt(&args, &package, check, stdout),
+        Commands::Inspect { args, package } => run_inspect(&args, &package),
         Commands::Lint { args, package } => run_lint(&args, &package),
         Commands::Check {
             args,
@@ -360,6 +370,18 @@ fn run_check(args: &UniversalArgs, workspace: &std::path::Path, package: &std::p
     };
     let mut stdout = io::stdout().lock();
     match check_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
+    }
+}
+
+fn run_inspect(args: &UniversalArgs, package: &std::path::Path) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = inspect_verb::InspectArgs {
+        package_path: package,
+    };
+    let mut stdout = io::stdout().lock();
+    match inspect_verb::run(&ctx, &verb_args, &mut stdout) {
         Ok(code) => code,
         Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
@@ -609,6 +631,17 @@ mod tests {
                 assert_eq!(after, PathBuf::from("./after"));
             }
             _ => panic!("expected diff"),
+        }
+    }
+
+    #[test]
+    fn parses_inspect_with_package_override() {
+        let cli = Cli::parse_from(["akua", "inspect", "--package", "foo.k"]);
+        match cli.command {
+            Commands::Inspect { package, .. } => {
+                assert_eq!(package, PathBuf::from("foo.k"));
+            }
+            _ => panic!("expected inspect"),
         }
     }
 

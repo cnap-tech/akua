@@ -9,6 +9,7 @@ pub mod check;
 pub mod diff;
 pub mod fmt;
 pub mod init;
+pub mod inspect;
 pub mod lint;
 pub mod remove;
 pub mod render;
