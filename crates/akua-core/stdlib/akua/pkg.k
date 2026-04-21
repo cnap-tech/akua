@@ -27,7 +27,8 @@ schema Render:
     """Inputs forwarded to the inner Package's `option("input")`."""
 
 # Render a nested Package.k and splice its `resources` list into the
-# caller's resources.
+# caller's resources. The schema itself is passed through to the
+# plugin, which reads fields by name.
 render = lambda opts: Render -> [{str:}] {
-    _pkg.render(opts.path, opts.inputs)
+    _pkg.render(opts)
 }

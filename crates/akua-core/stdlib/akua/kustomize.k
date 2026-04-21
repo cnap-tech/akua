@@ -23,7 +23,8 @@ schema Build:
     resolve against the calling Package's directory."""
 
 # Render a kustomize overlay directory into a list of Kubernetes resources.
-# Splat with `*` into `resources`.
+# Splat with `*` into `resources`. The schema itself is passed through
+# to the plugin, which reads fields by name.
 build = lambda opts: Build -> [{str:}] {
-    _kustomize.build(opts.path)
+    _kustomize.build(opts)
 }

@@ -1,4 +1,4 @@
-//! `pkg.render(path, inputs) -> sentinel` — recursive Package composition.
+//! `pkg.render({ path, inputs }) -> sentinel` — recursive Package composition.
 //!
 //! # Architecture: post-eval expansion
 //!
@@ -55,14 +55,22 @@ fn err(msg: impl std::fmt::Display) -> String {
 /// to [`expand_sentinels`].
 pub fn install() {
     kcl_plugin::register(PLUGIN_NAME, |args, _kwargs| {
+        // Callers pass a single `pkg.Render` schema instance.
         let arr = args
             .as_array()
             .ok_or_else(|| err("expected positional args as JSON array"))?;
-        let path_str = arr
+        let opts = arr
             .first()
+            .and_then(serde_json::Value::as_object)
+            .ok_or_else(|| err("arg 0 must be a pkg.Render options object"))?;
+        let path_str = opts
+            .get("path")
             .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| err("arg 0 (package path) must be a string"))?;
-        let inputs = arr.get(1).cloned().unwrap_or(serde_json::Value::Null);
+            .ok_or_else(|| err("options.path must be a string"))?;
+        let inputs = opts
+            .get("inputs")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
 
         // Emit a list (pkg.render's KCL-side contract is "returns
         // [resource]") with one sentinel in it. expand_sentinels
@@ -185,7 +193,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
             r#"
 import kcl_plugin.pkg
 
-_nested = pkg.render("./inner.k", { name = "from-outer" })
+_nested = pkg.render({ path = "./inner.k", inputs = { name = "from-outer" } })
 
 resources = _nested
 outputs = [{ kind: "RawManifests", target: "./" }]
@@ -215,7 +223,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
             r#"
 import kcl_plugin.pkg
 
-_self = pkg.render("./cyclic.k", {})
+_self = pkg.render({ path = "./cyclic.k" })
 
 resources = _self
 outputs = [{ kind: "RawManifests", target: "./" }]
@@ -243,7 +251,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
 import kcl_plugin.pkg
 
 # Directory, not a file — pkg.render appends package.k.
-_rs = pkg.render("./nested", {})
+_rs = pkg.render({ path = "./nested" })
 
 resources = _rs
 outputs = [{ kind: "RawManifests", target: "./" }]
@@ -272,7 +280,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
             r#"
 import kcl_plugin.pkg
 
-resources = pkg.render("./deep.k", { name = "deep-from-middle" })
+resources = pkg.render({ path = "./deep.k", inputs = { name = "deep-from-middle" } })
 outputs = [{ kind: "RawManifests", target: "./" }]
 "#,
         );
@@ -282,7 +290,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
             r#"
 import kcl_plugin.pkg
 
-resources = pkg.render("./middle.k", {})
+resources = pkg.render({ path = "./middle.k" })
 outputs = [{ kind: "RawManifests", target: "./" }]
 "#,
         );

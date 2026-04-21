@@ -38,13 +38,18 @@ fn err(msg: impl std::fmt::Display) -> String {
 /// Idempotent — re-registering replaces the prior handler.
 pub fn install() {
     kcl_plugin::register(PLUGIN_NAME, |args, _kwargs| {
+        // Callers pass a single `kustomize.Build` schema instance.
         let arr = args
             .as_array()
             .ok_or_else(|| err("expected positional args as JSON array"))?;
-        let path = arr
+        let opts = arr
             .first()
+            .and_then(Value::as_object)
+            .ok_or_else(|| err("arg 0 must be a kustomize.Build options object"))?;
+        let path = opts
+            .get("path")
             .and_then(Value::as_str)
-            .ok_or_else(|| err("arg 0 (path) must be a string"))?;
+            .ok_or_else(|| err("options.path must be a string"))?;
 
         let resolved = kcl_plugin::resolve_against_package(&PathBuf::from(path));
         let rendered = build(&resolved)?;
@@ -219,7 +224,7 @@ metadata:
         install();
 
         let tmp = TempDir::new().unwrap();
-        let args = serde_json::json!([tmp.path().to_string_lossy()]);
+        let args = serde_json::json!([{ "path": tmp.path().to_string_lossy() }]);
         let kwargs = serde_json::json!({});
         let method = std::ffi::CString::new("kcl_plugin.kustomize.build").unwrap();
         let args_c = std::ffi::CString::new(args.to_string()).unwrap();

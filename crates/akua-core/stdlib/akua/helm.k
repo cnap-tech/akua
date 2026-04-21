@@ -34,7 +34,8 @@ schema Template:
     """Kubernetes namespace the release targets. DNS-1123 label rules."""
 
 # Render a Helm chart into a list of Kubernetes resources. Returns the
-# dicts helm produced — splat with `*` into `resources`.
+# dicts helm produced — splat with `*` into `resources`. The schema
+# itself is passed through to the plugin, which reads fields by name.
 template = lambda opts: Template -> [{str:}] {
-    _helm.template(opts.chart, opts.values, opts.release, opts.namespace)
+    _helm.template(opts)
 }

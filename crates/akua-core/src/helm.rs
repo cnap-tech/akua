@@ -9,17 +9,24 @@
 //!
 //! ## Plugin contract
 //!
-//! KCL side:
+//! KCL side (preferred — via the `akua.helm` stdlib wrapper):
 //!
 //! ```kcl
-//! import kcl_plugin.helm
-//! _manifests = helm.template(chart_path, values, release_name, release_namespace)
+//! import akua.helm
+//! _manifests = helm.template(helm.Template {
+//!     chart     = "./chart"
+//!     values    = { replicas = 3 }
+//!     release   = "myapp"
+//!     namespace = "prod"
+//! })
 //! ```
 //!
-//! - `chart_path: str` — filesystem path to a chart directory or `.tgz`.
+//! The plugin receives a single JSON object in `args[0]`, with fields:
+//!
+//! - `chart: str` — filesystem path to a chart directory or `.tgz`.
 //! - `values: {str:}` — arbitrary values tree, serialized to YAML.
-//! - `release_name: str` — optional; default `"release"`.
-//! - `release_namespace: str` — optional; default `"default"`.
+//! - `release: str` — optional; default `"release"`.
+//! - `namespace: str` — optional; default `"default"`.
 //!
 //! Returns `[dict]` — the list of Kubernetes resources helm produced.
 
@@ -48,23 +55,31 @@ fn err(msg: impl std::fmt::Display) -> String {
 /// Idempotent — re-registering replaces the prior handler.
 pub fn install() {
     kcl_plugin::register(PLUGIN_NAME, |args, _kwargs| {
+        // Callers pass a single `helm.Template` schema instance; KCL
+        // serializes it as one JSON object in `args[0]`. See
+        // `stdlib/akua/helm.k` for the schema + field defaults.
         let arr = args
             .as_array()
             .ok_or_else(|| err("expected positional args as JSON array"))?;
-        let chart_path = arr
+        let opts = arr
             .first()
+            .and_then(Value::as_object)
+            .ok_or_else(|| err("arg 0 must be a helm.Template options object"))?;
+
+        let chart_path = opts
+            .get("chart")
             .and_then(Value::as_str)
-            .ok_or_else(|| err("arg 0 (chart_path) must be a string"))?;
+            .ok_or_else(|| err("options.chart must be a string"))?;
         // A null/missing `values` becomes `{}` rather than serialized
         // `null` — chart templates that deref `.Values.x` without a
         // default would otherwise error on `<nil>.x`.
         let empty = Value::Object(serde_json::Map::new());
-        let values_ref = arr
-            .get(1)
+        let values_ref = opts
+            .get("values")
             .filter(|v| !v.is_null())
             .unwrap_or(&empty);
-        let release_name = arr.get(2).and_then(Value::as_str).unwrap_or("release");
-        let release_ns = arr.get(3).and_then(Value::as_str).unwrap_or("default");
+        let release_name = opts.get("release").and_then(Value::as_str).unwrap_or("release");
+        let release_ns = opts.get("namespace").and_then(Value::as_str).unwrap_or("default");
 
         validate_release_name(release_name)?;
         validate_namespace(release_ns)?;
@@ -301,7 +316,12 @@ data:
         // routes through our handler under the `helm.template` name.
         install();
 
-        let args = serde_json::json!(["chart-path", {}, "--evil", "default"]);
+        let args = serde_json::json!([{
+            "chart": "chart-path",
+            "values": {},
+            "release": "--evil",
+            "namespace": "default",
+        }]);
         let kwargs = serde_json::json!({});
         let method = std::ffi::CString::new("kcl_plugin.helm.template").unwrap();
         let args_c = std::ffi::CString::new(args.to_string()).unwrap();
