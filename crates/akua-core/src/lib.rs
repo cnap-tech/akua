@@ -21,6 +21,8 @@ pub mod dir_diff;
 pub mod helm;
 pub(crate) mod hex;
 #[cfg(feature = "engine-kcl")]
+pub(crate) mod yaml_multidoc;
+#[cfg(feature = "engine-kcl")]
 pub mod kcl_plugin;
 pub mod lock_file;
 pub mod mod_file;

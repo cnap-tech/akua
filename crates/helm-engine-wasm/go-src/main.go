@@ -23,9 +23,10 @@
 //	  "error": ""
 //	}
 //
-// No Extism — plain wasmtime host. Full WASI permitted (Go's runtime +
-// klog init chain need it). Since we ship this wasm ourselves inside the
-// akua binary, there's no untrusted-plugin threat model to guard against.
+// No Extism — plain wasmtime host. The Go runtime + klog init chain need
+// more WASI surface than Extism's deny-all exposes. The sandbox posture
+// is enforced one layer up: wasmtime host grants no preopens, no network,
+// dummy argv only. See `../src/lib.rs` docstring.
 
 package main
 
@@ -163,29 +164,6 @@ func parseValues(yamlStr string) (map[string]any, error) {
 		return nil, err
 	}
 	return out, nil
-}
-
-func buildReleaseValues(r releaseInfo) map[string]any {
-	if r.Name == "" {
-		r.Name = "release"
-	}
-	if r.Namespace == "" {
-		r.Namespace = "default"
-	}
-	if r.Revision == 0 {
-		r.Revision = 1
-	}
-	if r.Service == "" {
-		r.Service = "Helm"
-	}
-	return map[string]any{
-		"Name":      r.Name,
-		"Namespace": r.Namespace,
-		"Revision":  r.Revision,
-		"Service":   r.Service,
-		"IsInstall": true,
-		"IsUpgrade": false,
-	}
 }
 
 func readBytes(ptr int32, length int32) []byte {

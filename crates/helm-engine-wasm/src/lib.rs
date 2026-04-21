@@ -4,22 +4,30 @@
 //! via [`wasmtime`]. The compiled `.wasm` is embedded via `include_bytes!` so
 //! the akua binary is self-contained — no external download, no `helm` CLI.
 //!
-//! ## Why raw wasmtime (not Extism)
+//! ## Sandbox posture
 //!
-//! Helm's dep tree (k8s.io/klog, client-go, etc.) has package `init()`
-//! chains that need more WASI capabilities than Extism's deny-all sandbox
-//! grants. Since we ship this wasm ourselves — not a third-party plugin —
-//! the sandbox threat model doesn't apply. Raw wasmtime with stock WASI
-//! works immediately, zero config.
+//! Per CLAUDE.md ("Sandboxed by default. No shell-out, ever."), the engine
+//! runs inside a wasmtime WASI context with:
+//!
+//! - No preopened filesystem — chart bytes travel over the WASM linear-memory
+//!   boundary, not as a host path.
+//! - No network (`wasip1` has no socket syscalls; the engine can't reach
+//!   the cluster or pull charts from a registry).
+//! - Dummy `argv` only (`["helm-engine"]`) — Go's klog init chain reads
+//!   `os.Args[0]` unconditionally and crashes on empty argv.
+//!
+//! Extism was considered and rejected: Go's init chain (klog, k8s, sprig)
+//! needs more WASI surface than Extism's deny-all exposes. We enforce the
+//! sandbox one layer up via explicit `WasiCtxBuilder` settings instead.
 //!
 //! ## Why 70+ MB wasm
 //!
 //! Go's linker can't prune types referenced by a package's public API even
 //! if no function that uses them is called. `pkg/engine.New(*rest.Config)`
 //! and `pkg/chart/common.DefaultCapabilities = makeDefaultCapabilities()`
-//! drag `k8s.io/client-go` transitively. A fork with the `rest.Config`
-//! path stripped produces a ~15 MB wasm — see crate README "Option 2".
-//! Not done yet; bundled path gives zero maintenance burden.
+//! drag `k8s.io/client-go` transitively. Phase 1b (see `fork/`) applies a
+//! ~100-line patch that strips the `rest.Config` path, shrinking the wasm
+//! to ~20 MB. Not applied by default yet.
 
 use std::path::Path;
 use std::sync::OnceLock;
@@ -29,10 +37,9 @@ use wasmtime::{Config, Engine, Linker, Memory, Module, Store, TypedFunc};
 use wasmtime_wasi::p1::{self, WasiP1Ctx};
 use wasmtime_wasi::WasiCtxBuilder;
 
-// Cranelift-compiling the 75 MB Go→wasip1 Helm engine takes ~6-8s cold.
-// build.rs precompiles it to a native-code `.cwasm` artifact that's
-// `Module::deserialize`d here — a memcpy + fixup, not a compile. Ready
-// in single-digit milliseconds.
+// Embedded at compile time via build.rs, which precompiles `.wasm` → `.cwasm`
+// (native-code fixup rather than Cranelift compile) to keep cold start in
+// milliseconds instead of the ~6-8s a full compile would cost on this module.
 const HELM_ENGINE_CWASM: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.cwasm"));
 

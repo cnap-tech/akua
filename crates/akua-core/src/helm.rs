@@ -70,20 +70,14 @@ pub fn install() {
         )
         .map_err(|e| err(format!("helm engine: {e}")))?;
 
-        // Convert each manifest YAML to parsed resource(s); a manifest
-        // may contain multiple `---`-separated documents.
+        // Each helm manifest may contain multiple `---`-separated docs
+        // (one chart file → N resources). Parse each through the shared
+        // multi-doc YAML helper so empty separator docs drop cleanly
+        // and errors attribute to `helm.template:` prefix.
         let mut resources = Vec::new();
         for yaml in manifests.values() {
-            for doc in serde_yaml::Deserializer::from_str(yaml) {
-                let v = serde_yaml::Value::deserialize(doc)
-                    .map_err(|e| err(format!("parsing helm output YAML: {e}")))?;
-                if is_empty_doc(&v) {
-                    continue;
-                }
-                let json = serde_json::to_value(&v)
-                    .map_err(|e| err(format!("yaml→json: {e}")))?;
-                resources.push(json);
-            }
+            let docs = crate::yaml_multidoc::parse(yaml.as_bytes(), PLUGIN_NAME)?;
+            resources.extend(docs);
         }
         Ok(Value::Array(resources))
     });
@@ -145,17 +139,6 @@ fn chart_dir_name(path: &Path) -> String {
         .unwrap_or("chart")
         .to_string()
 }
-
-fn is_empty_doc(v: &serde_yaml::Value) -> bool {
-    match v {
-        serde_yaml::Value::Null => true,
-        serde_yaml::Value::Mapping(m) => m.is_empty(),
-        _ => false,
-    }
-}
-
-// Trait alias for easy local import in the closure.
-use serde::Deserialize;
 
 #[cfg(test)]
 mod tests {
