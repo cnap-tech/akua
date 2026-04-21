@@ -65,10 +65,10 @@ tasks:
       - git diff --exit-code -- sdk-types sdk-schemas
 
   sdk:test:
-    desc: Run @akua/sdk TS unit tests
+    desc: Run @akua/sdk TS unit tests (bun — native TS, no transpile step)
     dir: packages/sdk
     cmds:
-      - node --test --experimental-strip-types src/*.test.ts
+      - bun test
 
   release:local:
     desc: Build the release binary locally

@@ -1,5 +1,7 @@
-// Unit tests for the stderr → typed-error classifier. Uses Node's
-// built-in test runner (no vitest/jest dep) — `node --test src/errors.test.ts`.
+// Unit tests for the stderr → typed-error classifier. Run via `bun test`
+// (native TS, zero-config). Imports use `node:test` / `node:assert` so
+// the same file also runs under `node --test --experimental-strip-types`
+// — portable across runtimes.
 //
 // Exercises the contract in cli-contract.md §1.2 (StructuredError JSONL on
 // stderr) + §2 (typed exit codes). If either shape drifts, these break.
