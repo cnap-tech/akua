@@ -125,6 +125,10 @@ impl PackageK {
     /// Execute the Package against the given inputs, returning the
     /// typed resource + output lists.
     pub fn render(&self, inputs: &Value) -> Result<RenderedPackage, PackageKError> {
+        // Register every engine callable whose feature flag is on.
+        // Idempotent per invocation — safe to call every render.
+        crate::kcl_plugin::install_builtin_plugins();
+
         let json = serde_json::to_string(inputs)?;
         let yaml = eval_kcl(&self.path, &self.source, &json)?;
         parse_rendered(&yaml)

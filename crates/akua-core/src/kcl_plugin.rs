@@ -78,6 +78,26 @@ pub fn unregister(method: &str) -> bool {
         .is_some()
 }
 
+/// Install every built-in engine callable whose crate feature is
+/// enabled. Runs exactly once per process — guarded by an internal
+/// `OnceLock` so repeat calls (e.g. every `package_k::render`
+/// invocation in an `akua dev` watch loop) don't contend the global
+/// registry's write-lock.
+///
+/// Currently registers:
+///
+/// - `helm.template` — when `engine-helm-shell` is on.
+///
+/// Future (kustomize.build, rgd.instantiate, pkg.render) will plug
+/// in here as their feature flags and engines land.
+pub fn install_builtin_plugins() {
+    static INSTALLED: OnceLock<()> = OnceLock::new();
+    INSTALLED.get_or_init(|| {
+        #[cfg(feature = "engine-helm-shell")]
+        crate::helm::install();
+    });
+}
+
 /// The address of [`dispatch`] as a `u64`, suitable for the
 /// `KclServiceImpl.plugin_agent` field. `0` disables plugins; any
 /// non-zero value is treated as a function pointer by the KCL
