@@ -74,36 +74,8 @@ pub enum TreeError {
 impl TreeError {
     pub fn to_structured(&self) -> StructuredError {
         match self {
-            TreeError::Manifest(ManifestLoadError::Missing { path }) => {
-                StructuredError::new(codes::E_MANIFEST_MISSING, "akua.toml not found")
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
-            }
-            TreeError::Manifest(ManifestLoadError::Io { path, source }) => {
-                StructuredError::new(codes::E_IO, source.to_string())
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
-            }
-            TreeError::Manifest(ManifestLoadError::Parse { path, source }) => {
-                StructuredError::new(codes::E_MANIFEST_PARSE, source.to_string())
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
-            }
-            TreeError::Lock(LockLoadError::Missing { path }) => {
-                StructuredError::new(codes::E_LOCK_MISSING, "akua.lock not found")
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
-            }
-            TreeError::Lock(LockLoadError::Io { path, source }) => {
-                StructuredError::new(codes::E_IO, source.to_string())
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
-            }
-            TreeError::Lock(LockLoadError::Parse { path, source }) => {
-                StructuredError::new(codes::E_LOCK_PARSE, source.to_string())
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
-            }
+            TreeError::Manifest(e) => e.to_structured(),
+            TreeError::Lock(e) => e.to_structured(),
             TreeError::StdoutWrite(e) => {
                 StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
             }
@@ -112,9 +84,9 @@ impl TreeError {
 
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            TreeError::Manifest(ManifestLoadError::Io { .. })
-            | TreeError::Lock(LockLoadError::Io { .. })
-            | TreeError::StdoutWrite(_) => ExitCode::SystemError,
+            TreeError::Manifest(e) if e.is_system() => ExitCode::SystemError,
+            TreeError::Lock(e) if e.is_system() => ExitCode::SystemError,
+            TreeError::StdoutWrite(_) => ExitCode::SystemError,
             _ => ExitCode::UserError,
         }
     }

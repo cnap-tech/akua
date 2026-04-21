@@ -83,21 +83,13 @@ pub enum AddError {
 impl AddError {
     pub fn to_structured(&self) -> StructuredError {
         match self {
-            AddError::Load(ManifestLoadError::Missing { path }) => {
-                StructuredError::new(codes::E_MANIFEST_MISSING, "akua.toml not found")
-                    .with_path(path.display().to_string())
-                    .with_suggestion("run `akua init` first")
-                    .with_default_docs()
-            }
-            AddError::Load(ManifestLoadError::Io { path, source }) => {
-                StructuredError::new(codes::E_IO, source.to_string())
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
-            }
-            AddError::Load(ManifestLoadError::Parse { path, source }) => {
-                StructuredError::new(codes::E_MANIFEST_PARSE, source.to_string())
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
+            AddError::Load(e) => {
+                let base = e.to_structured();
+                if matches!(e, ManifestLoadError::Missing { .. }) {
+                    base.with_suggestion("run `akua init` first")
+                } else {
+                    base
+                }
             }
             AddError::Exists { .. } => {
                 StructuredError::new(codes::E_ADD_DEP_EXISTS, self.to_string())
@@ -118,9 +110,8 @@ impl AddError {
 
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            AddError::Load(ManifestLoadError::Io { .. })
-            | AddError::Io { .. }
-            | AddError::StdoutWrite(_) => ExitCode::SystemError,
+            AddError::Load(e) if e.is_system() => ExitCode::SystemError,
+            AddError::Io { .. } | AddError::StdoutWrite(_) => ExitCode::SystemError,
             _ => ExitCode::UserError,
         }
     }

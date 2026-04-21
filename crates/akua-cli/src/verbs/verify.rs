@@ -77,37 +77,23 @@ pub enum VerifyError {
 impl VerifyError {
     pub fn to_structured(&self) -> StructuredError {
         match self {
-            VerifyError::Manifest(ManifestLoadError::Missing { path }) => {
-                StructuredError::new(codes::E_MANIFEST_MISSING, "akua.toml not found")
-                    .with_path(path.display().to_string())
-                    .with_suggestion("run `akua init` or check the working directory")
-                    .with_default_docs()
+            VerifyError::Manifest(e) => {
+                let base = e.to_structured();
+                if matches!(e, ManifestLoadError::Missing { .. }) {
+                    base.with_suggestion("run `akua init` or check the working directory")
+                } else {
+                    base
+                }
             }
-            VerifyError::Manifest(ManifestLoadError::Io { path, source }) => {
-                StructuredError::new(codes::E_IO, source.to_string())
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
-            }
-            VerifyError::Manifest(ManifestLoadError::Parse { path, source }) => {
-                StructuredError::new(codes::E_MANIFEST_PARSE, source.to_string())
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
-            }
-            VerifyError::Lock(LockLoadError::Missing { path }) => {
-                StructuredError::new(codes::E_LOCK_MISSING, "akua.lock not found")
-                    .with_path(path.display().to_string())
-                    .with_suggestion("run `akua add` to resolve deps and generate the lockfile")
-                    .with_default_docs()
-            }
-            VerifyError::Lock(LockLoadError::Io { path, source }) => {
-                StructuredError::new(codes::E_IO, source.to_string())
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
-            }
-            VerifyError::Lock(LockLoadError::Parse { path, source }) => {
-                StructuredError::new(codes::E_LOCK_PARSE, source.to_string())
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
+            VerifyError::Lock(e) => {
+                let base = e.to_structured();
+                if matches!(e, LockLoadError::Missing { .. }) {
+                    base.with_suggestion(
+                        "run `akua add` to resolve deps and generate the lockfile",
+                    )
+                } else {
+                    base
+                }
             }
             VerifyError::StdoutWrite(e) => {
                 StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
@@ -117,9 +103,9 @@ impl VerifyError {
 
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            VerifyError::Manifest(ManifestLoadError::Io { .. })
-            | VerifyError::Lock(LockLoadError::Io { .. })
-            | VerifyError::StdoutWrite(_) => ExitCode::SystemError,
+            VerifyError::Manifest(e) if e.is_system() => ExitCode::SystemError,
+            VerifyError::Lock(e) if e.is_system() => ExitCode::SystemError,
+            VerifyError::StdoutWrite(_) => ExitCode::SystemError,
             _ => ExitCode::UserError,
         }
     }

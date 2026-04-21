@@ -152,6 +152,39 @@ pub enum ManifestLoadError {
     },
 }
 
+impl ManifestLoadError {
+    /// Map to a [`StructuredError`] with the right CLI-contract code,
+    /// the file path, and the default docs URL. Callers layer on their
+    /// own `.with_suggestion(...)` where the UX differs by verb.
+    pub fn to_structured(&self) -> crate::cli_contract::StructuredError {
+        use crate::cli_contract::{codes, StructuredError};
+        match self {
+            ManifestLoadError::Missing { path } => {
+                StructuredError::new(codes::E_MANIFEST_MISSING, "akua.toml not found")
+                    .with_path(path.display().to_string())
+                    .with_default_docs()
+            }
+            ManifestLoadError::Io { path, source } => {
+                StructuredError::new(codes::E_IO, source.to_string())
+                    .with_path(path.display().to_string())
+                    .with_default_docs()
+            }
+            ManifestLoadError::Parse { path, source } => {
+                StructuredError::new(codes::E_MANIFEST_PARSE, source.to_string())
+                    .with_path(path.display().to_string())
+                    .with_default_docs()
+            }
+        }
+    }
+
+    /// `true` when the underlying cause is a system-side I/O failure
+    /// (disk gone, permission denied) rather than a user mistake.
+    /// Callers route this to [`crate::ExitCode::SystemError`].
+    pub fn is_system(&self) -> bool {
+        matches!(self, ManifestLoadError::Io { .. })
+    }
+}
+
 impl AkuaManifest {
     /// Parse an `akua.toml` from a string.
     pub fn parse(s: &str) -> Result<Self, ManifestError> {

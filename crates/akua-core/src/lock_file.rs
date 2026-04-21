@@ -127,6 +127,37 @@ pub enum LockLoadError {
     },
 }
 
+impl LockLoadError {
+    /// Map to a [`StructuredError`] with the right CLI-contract code,
+    /// the file path, and the default docs URL. Callers layer on their
+    /// own `.with_suggestion(...)` where the UX differs by verb.
+    pub fn to_structured(&self) -> crate::cli_contract::StructuredError {
+        use crate::cli_contract::{codes, StructuredError};
+        match self {
+            LockLoadError::Missing { path } => {
+                StructuredError::new(codes::E_LOCK_MISSING, "akua.lock not found")
+                    .with_path(path.display().to_string())
+                    .with_default_docs()
+            }
+            LockLoadError::Io { path, source } => {
+                StructuredError::new(codes::E_IO, source.to_string())
+                    .with_path(path.display().to_string())
+                    .with_default_docs()
+            }
+            LockLoadError::Parse { path, source } => {
+                StructuredError::new(codes::E_LOCK_PARSE, source.to_string())
+                    .with_path(path.display().to_string())
+                    .with_default_docs()
+            }
+        }
+    }
+
+    /// `true` when the underlying cause is a system-side I/O failure.
+    pub fn is_system(&self) -> bool {
+        matches!(self, LockLoadError::Io { .. })
+    }
+}
+
 impl AkuaLock {
     /// Parse an `akua.lock` from a string. Performs format-version,
     /// alphabetical-order, and digest-prefix checks.

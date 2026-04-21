@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
-use akua_core::{lint_kcl, AkuaLock, AkuaManifest, LintIssue, LockLoadError, ManifestLoadError};
+use akua_core::{lint_kcl, AkuaLock, AkuaManifest, LintIssue};
 use serde::Serialize;
 
 use crate::contract::{emit_output, Context};
@@ -110,38 +110,23 @@ fn resolve_package_path(workspace: &Path, package: &Path) -> PathBuf {
 fn check_manifest(workspace: &Path) -> CheckResult {
     match AkuaManifest::load(workspace) {
         Ok(_) => ok("manifest"),
-        Err(e) => fail("manifest", manifest_error_message(&e)),
-    }
-}
-
-fn manifest_error_message(e: &ManifestLoadError) -> String {
-    match e {
-        ManifestLoadError::Missing { path } => {
-            format!("akua.toml not found at {}", path.display())
-        }
-        ManifestLoadError::Io { path, source } => {
-            format!("i/o at {}: {source}", path.display())
-        }
-        ManifestLoadError::Parse { path, source } => {
-            format!("parse error at {}: {source}", path.display())
-        }
+        Err(e) => fail("manifest", flatten(&e.to_structured())),
     }
 }
 
 fn check_lockfile(workspace: &Path) -> CheckResult {
     match AkuaLock::load(workspace) {
         Ok(_) => ok("lockfile"),
-        Err(e) => fail("lockfile", lockfile_error_message(&e)),
+        Err(e) => fail("lockfile", flatten(&e.to_structured())),
     }
 }
 
-fn lockfile_error_message(e: &LockLoadError) -> String {
-    match e {
-        LockLoadError::Missing { path } => format!("akua.lock not found at {}", path.display()),
-        LockLoadError::Io { path, source } => format!("i/o at {}: {source}", path.display()),
-        LockLoadError::Parse { path, source } => {
-            format!("parse error at {}: {source}", path.display())
-        }
+/// Render a [`StructuredError`] into a single line suitable for
+/// per-step display inside a `CheckResult.error`.
+fn flatten(s: &StructuredError) -> String {
+    match &s.path {
+        Some(p) => format!("{}: {} ({p})", s.code, s.message),
+        None => format!("{}: {}", s.code, s.message),
     }
 }
 

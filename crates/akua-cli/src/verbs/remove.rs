@@ -56,21 +56,7 @@ pub enum RemoveError {
 impl RemoveError {
     pub fn to_structured(&self) -> StructuredError {
         match self {
-            RemoveError::Load(ManifestLoadError::Missing { path }) => {
-                StructuredError::new(codes::E_MANIFEST_MISSING, "akua.toml not found")
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
-            }
-            RemoveError::Load(ManifestLoadError::Io { path, source }) => {
-                StructuredError::new(codes::E_IO, source.to_string())
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
-            }
-            RemoveError::Load(ManifestLoadError::Parse { path, source }) => {
-                StructuredError::new(codes::E_MANIFEST_PARSE, source.to_string())
-                    .with_path(path.display().to_string())
-                    .with_default_docs()
-            }
+            RemoveError::Load(e) => e.to_structured(),
             RemoveError::Serialize(e) => {
                 StructuredError::new(codes::E_MANIFEST_PARSE, e.to_string()).with_default_docs()
             }
@@ -92,9 +78,8 @@ impl RemoveError {
 
     pub fn exit_code(&self) -> ExitCode {
         match self {
-            RemoveError::Load(ManifestLoadError::Io { .. })
-            | RemoveError::Io { .. }
-            | RemoveError::StdoutWrite(_) => ExitCode::SystemError,
+            RemoveError::Load(e) if e.is_system() => ExitCode::SystemError,
+            RemoveError::Io { .. } | RemoveError::StdoutWrite(_) => ExitCode::SystemError,
             _ => ExitCode::UserError,
         }
     }
