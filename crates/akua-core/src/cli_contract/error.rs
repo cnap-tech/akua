@@ -6,6 +6,8 @@
 //! remains machine-parseable.
 
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "ts-export")]
+use ts_rs::TS;
 
 /// The canonical error shape. One struct; every verb reuses it.
 ///
@@ -13,6 +15,8 @@ use serde::{Deserialize, Serialize};
 /// summary. The rest are optional pointers — a file path, a field name, a
 /// suggestion, a docs URL.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../sdk-types/"))]
 pub struct StructuredError {
     /// Log level. Always `"error"` for hard failures; `"warn"` for
     /// recoverable issues emitted alongside a success exit.
@@ -58,6 +62,8 @@ pub struct StructuredError {
 /// Log severity. Almost always `Error`; `Warn` for recoverable issues.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "ts-export", derive(TS))]
+#[cfg_attr(feature = "ts-export", ts(export, export_to = "../../../sdk-types/"))]
 pub enum Level {
     Error,
     Warn,

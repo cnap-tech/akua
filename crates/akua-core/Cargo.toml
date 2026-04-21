@@ -17,6 +17,10 @@ engine-kcl = ["dep:kcl-lang", "dep:sha2"]
 # not yet reintroduced). Requires `engine-kcl` because it plugs into
 # the KCL plugin bridge.
 engine-helm-shell = ["engine-kcl"]
+# Emit TypeScript type definitions from serde types. Off by default;
+# enable only when regenerating @akua/sdk type bindings:
+# `cargo test -p akua-core --features ts-export export_bindings`.
+ts-export = ["dep:ts-rs"]
 
 [dependencies]
 serde = { workspace = true }
@@ -24,6 +28,7 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
+ts-rs = { version = "11", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 kcl-lang = { git = "https://github.com/kcl-lang/lib", optional = true }
