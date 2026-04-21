@@ -129,6 +129,13 @@ impl PackageK {
         // Idempotent per invocation — safe to call every render.
         crate::kcl_plugin::install_builtin_plugins();
 
+        // Push self onto the render stack so plugin handlers can
+        // resolve user-supplied relative paths (helm chart dirs,
+        // nested package refs) against this Package's directory.
+        // Dropped on return — nested renders (pkg.render) stack
+        // naturally.
+        let _scope = crate::kcl_plugin::RenderScope::enter(&self.path);
+
         let json = serde_json::to_string(inputs)?;
         let yaml = eval_kcl(&self.path, &self.source, &json)?;
         parse_rendered(&yaml)

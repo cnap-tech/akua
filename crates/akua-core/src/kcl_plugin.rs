@@ -35,9 +35,11 @@
 //! `akua render` invocation is fine; long-lived `akua dev` watchers
 //! should re-exec periodically or use a subprocess render.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::{c_char, CStr, CString};
 use std::panic::AssertUnwindSafe;
+use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 
 use serde_json::Value;
@@ -104,6 +106,92 @@ pub fn install_builtin_plugins() {
 /// evaluator.
 pub fn plugin_agent_ptr() -> u64 {
     dispatch as *const () as usize as u64
+}
+
+thread_local! {
+    /// Stack of `package.k` paths currently being rendered on this
+    /// thread. `PackageK::render` pushes on entry and pops on exit
+    /// via [`RenderScope`]. Plugin handlers read the top to resolve
+    /// user-supplied relative paths (helm chart dirs, nested
+    /// package refs) against the Package that called them instead
+    /// of against the process cwd.
+    static RENDER_STACK: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+}
+
+/// RAII guard that pushes `package` onto the render stack on
+/// construction and pops it on drop. Must be held for the duration
+/// of the KCL evaluation — once dropped, the Package is no longer
+/// reachable via [`current_package_dir`] or [`is_rendering`].
+#[must_use = "holding the guard is how the package stays on the render stack"]
+pub struct RenderScope {
+    // Marker only; the push/pop bookkeeping lives on the thread-local.
+    _private: (),
+}
+
+impl RenderScope {
+    /// Push `package` onto the current-thread render stack.
+    pub fn enter(package: &Path) -> Self {
+        RENDER_STACK.with(|s| s.borrow_mut().push(package.to_path_buf()));
+        Self { _private: () }
+    }
+}
+
+impl Drop for RenderScope {
+    fn drop(&mut self) {
+        RENDER_STACK.with(|s| {
+            s.borrow_mut().pop();
+        });
+    }
+}
+
+/// Parent directory of the top-of-stack Package.k. Plugin handlers
+/// should resolve relative user-supplied paths against this so
+/// `helm.template("./chart", ...)` Just Works regardless of which
+/// directory the caller ran `akua render` from.
+///
+/// Returns `None` when no render is active (plugin called outside a
+/// `PackageK::render` scope — rare, mostly tests).
+pub fn current_package_dir() -> Option<PathBuf> {
+    RENDER_STACK.with(|s| {
+        s.borrow()
+            .last()
+            .and_then(|p| p.parent().map(Path::to_path_buf))
+    })
+}
+
+/// `true` if `package` is already on the render stack. Used by
+/// recursive plugins (`pkg.render`) to reject cycles before they
+/// cause infinite recursion.
+pub fn is_rendering(package: &Path) -> bool {
+    RENDER_STACK.with(|s| s.borrow().iter().any(|p| p == package))
+}
+
+/// Resolve `path` against [`current_package_dir`] when it's
+/// relative. Absolute paths pass through. When no render is active
+/// and `path` is relative, returns it unchanged — the caller should
+/// fall back to process cwd.
+///
+/// Leading `./` components on the input are stripped before joining
+/// so the returned path doesn't leak cosmetic noise into error
+/// messages and logs (the filesystem tolerates `dir/./file` but
+/// it's ugly in diagnostics).
+pub fn resolve_against_package(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    let trimmed: PathBuf = path
+        .components()
+        .filter(|c| !matches!(c, std::path::Component::CurDir))
+        .collect();
+    let clean = if trimmed.as_os_str().is_empty() {
+        path.to_path_buf()
+    } else {
+        trimmed
+    };
+    match current_package_dir() {
+        Some(dir) => dir.join(&clean),
+        None => clean,
+    }
 }
 
 /// The single `extern "C-unwind"` dispatcher KCL calls. Parses the
@@ -269,6 +357,109 @@ mod tests {
         let parsed: Value = parse_leaked_cstring(out);
         assert_eq!(parsed["__kcl_PanicInfo__"], "kaboom");
         unregister("test_fixture.boom");
+    }
+
+    #[test]
+    fn render_scope_exposes_package_dir_and_pops_on_drop() {
+        assert!(current_package_dir().is_none());
+        let pkg = std::path::Path::new("/tmp/ws/package.k");
+        {
+            let _scope = RenderScope::enter(pkg);
+            assert_eq!(
+                current_package_dir().as_deref(),
+                Some(std::path::Path::new("/tmp/ws"))
+            );
+            assert!(is_rendering(pkg));
+        }
+        assert!(current_package_dir().is_none());
+        assert!(!is_rendering(pkg));
+    }
+
+    #[test]
+    fn render_scopes_nest() {
+        let outer = std::path::Path::new("/tmp/outer/package.k");
+        let inner = std::path::Path::new("/tmp/outer/nested/package.k");
+        let _o = RenderScope::enter(outer);
+        assert_eq!(
+            current_package_dir().as_deref(),
+            Some(std::path::Path::new("/tmp/outer"))
+        );
+        {
+            let _i = RenderScope::enter(inner);
+            assert_eq!(
+                current_package_dir().as_deref(),
+                Some(std::path::Path::new("/tmp/outer/nested"))
+            );
+            assert!(is_rendering(outer));
+            assert!(is_rendering(inner));
+        }
+        // Inner popped; outer still active.
+        assert_eq!(
+            current_package_dir().as_deref(),
+            Some(std::path::Path::new("/tmp/outer"))
+        );
+        assert!(!is_rendering(inner));
+    }
+
+    #[test]
+    fn resolve_against_package_handles_absolute_relative_and_missing_scope() {
+        // No scope: relative paths pass through unchanged.
+        assert_eq!(
+            resolve_against_package(std::path::Path::new("chart")),
+            std::path::PathBuf::from("chart")
+        );
+
+        let _scope = RenderScope::enter(std::path::Path::new("/tmp/ws/package.k"));
+        // Relative with a `./` prefix → joined to package dir, `.` stripped.
+        assert_eq!(
+            resolve_against_package(std::path::Path::new("./chart")),
+            std::path::PathBuf::from("/tmp/ws/chart")
+        );
+        // Relative without prefix also joins cleanly.
+        assert_eq!(
+            resolve_against_package(std::path::Path::new("deep/subchart")),
+            std::path::PathBuf::from("/tmp/ws/deep/subchart")
+        );
+        // Absolute passes through.
+        assert_eq!(
+            resolve_against_package(std::path::Path::new("/opt/charts/nginx")),
+            std::path::PathBuf::from("/opt/charts/nginx")
+        );
+    }
+
+    #[test]
+    fn is_rendering_detects_self_reentry() {
+        let pkg = std::path::Path::new("/tmp/a/package.k");
+        assert!(!is_rendering(pkg));
+        let _outer = RenderScope::enter(pkg);
+        assert!(is_rendering(pkg));
+        {
+            let _inner = RenderScope::enter(pkg);
+            // Doubly pushed — cycle detection at the outer call site
+            // should reject before this happens; the thread-local
+            // tolerates it but `is_rendering` stays true either way.
+            assert!(is_rendering(pkg));
+        }
+        assert!(is_rendering(pkg), "outer scope still active");
+    }
+
+    #[test]
+    fn render_stack_is_thread_local() {
+        let pkg = std::path::Path::new("/tmp/outer/package.k");
+        let _scope = RenderScope::enter(pkg);
+        assert!(is_rendering(pkg));
+
+        // A child thread sees an empty stack — the parent's scope
+        // doesn't leak across thread boundaries.
+        let child_seen = std::thread::spawn(|| {
+            let empty = current_package_dir().is_none();
+            let not_rendering = !is_rendering(std::path::Path::new("/tmp/outer/package.k"));
+            (empty, not_rendering)
+        })
+        .join()
+        .expect("child thread");
+        assert!(child_seen.0, "child saw a non-empty render stack");
+        assert!(child_seen.1, "child thought /tmp/outer was rendering");
     }
 
     #[test]

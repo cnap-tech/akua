@@ -16,22 +16,25 @@ and `helm` is on PATH.
 
 ## Render
 
-> **Relative chart path.** `package.k` passes `"./chart"` to
-> `helm.template`, which the current shell-out engine resolves
-> against the **process cwd** — run from this directory, not the
-> workspace root. A follow-up will anchor relative chart paths to
-> the Package.k's own location.
+`package.k` passes `"./chart"` to `helm.template`; akua resolves that
+against the Package.k's directory, so `akua render` works from any
+cwd — point `--package` at this directory:
 
-From this directory:
+```sh
+cargo run -q --features engine-helm-shell -p akua-cli -- \
+    render --package examples/00-helm-hello/package.k --out ./deploy
+```
+
+Or from inside this directory:
 
 ```sh
 cargo run -q --features engine-helm-shell -p akua-cli -- render --out ./deploy
 ```
 
-Or, once a release binary ships with the feature built in:
+Once a release binary ships with the feature built in:
 
 ```sh
-akua render --out ./deploy
+akua render --package examples/00-helm-hello/package.k --out ./deploy
 ```
 
 The rendered `ConfigMap` lands at `./deploy/000-configmap-hello-greeting.yaml`.

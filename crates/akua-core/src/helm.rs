@@ -69,12 +69,13 @@ pub fn install() {
         validate_release_name(release_name)?;
         validate_namespace(release_ns)?;
 
-        let rendered = template(
-            &PathBuf::from(chart_path),
-            values_ref,
-            release_name,
-            release_ns,
-        )?;
+        // Relative chart paths anchor to the calling Package.k's
+        // directory (via the thread-local render scope), not the
+        // process cwd. Lets `akua render examples/00-helm-hello`
+        // work from anywhere.
+        let resolved_chart = kcl_plugin::resolve_against_package(&PathBuf::from(chart_path));
+
+        let rendered = template(&resolved_chart, values_ref, release_name, release_ns)?;
         Ok(Value::Array(rendered))
     });
 }
