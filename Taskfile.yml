@@ -84,6 +84,13 @@ tasks:
     cmds:
       - bun test
 
+  sdk:e2e:
+    desc: End-to-end — build akua, then run @akua/sdk against the real binary
+    deps: [sdk:install]
+    cmds:
+      - cargo build -p akua-cli
+      - cd packages/sdk && AKUA_E2E=1 bun test src/e2e.test.ts
+
   release:local:
     desc: Build the release binary locally
     cmds:

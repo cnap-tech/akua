@@ -33,11 +33,19 @@
 ///
 /// Usage:
 /// ```ignore
-/// contract_type! {
+/// akua_core::contract_type! {
 ///     #[derive(Debug, Serialize, Deserialize)]
 ///     pub struct Foo { ... }
 /// }
 /// ```
+///
+/// Workspace-internal by intent: `akua-cli` already consumes it for
+/// verbs that define their own response types (e.g. `VersionOutput`).
+/// External consumers shouldn't need it — they're not writing to
+/// `sdk-types/` or the bundle. `#[macro_export]` is the only mechanism
+/// that makes the macro reachable across crates in the same workspace,
+/// so it's public by mechanism; `#[doc(hidden)]` keeps it out of the
+/// rendered API docs.
 #[macro_export]
 #[doc(hidden)]
 macro_rules! contract_type {
