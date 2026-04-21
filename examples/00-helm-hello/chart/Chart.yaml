@@ -1,0 +1,4 @@
+apiVersion: v2
+name: hello
+description: Minimal Helm chart exercised by akua's helm.template plugin.
+version: 0.1.0

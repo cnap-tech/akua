@@ -272,6 +272,8 @@ akua render [path] [flags]
 | `--dry-run` | render but don't write files |
 
 > **Shipped today vs planned.** The verb executes the Package's KCL + the `RawManifests` output emitter. Other output kinds (`HelmChart`, `ResourceGraphDefinition`, `Crossplane`, `OCIBundle`) return `E_RENDER_UNSUPPORTED_KIND` until their engine callables land (Phase B). Multi-document workspace discovery (`akua render` with no path + `--filter`), render-time policy verdicts, and SLSA attestation files are future surface.
+>
+> **Engine callables.** `helm.template(chart, values, release, namespace)` is callable today via `import kcl_plugin.helm` when the binary is built with `--features akua-core/engine-helm-shell` (requires `helm` on PATH). `kustomize.build`, `rgd.instantiate`, and `pkg.render` arrive in later Phase B increments.
 
 ### Exit codes
 

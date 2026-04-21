@@ -2,7 +2,13 @@
 
 Working examples of akua Packages, Apps, Environments, and Policies. Each directory is a standalone example you can copy, edit, and render locally.
 
-> **Status, as of today.** Examples 01–07 are *aspirational* — they illustrate the full target authoring shape, but most exercise engine callables (`helm.template()`, `rgd.instantiate()`, `kustomize.build()`) and policy primitives that aren't wired into the binary yet. Only packages with no engine imports render cleanly today. See the table below.
+> **Status, as of today.** Example 00 renders end-to-end through
+> the shipping binary (with `--features engine-helm-shell` + `helm` on
+> PATH). Examples 01–07 are *aspirational* — they illustrate the full
+> target authoring shape but exercise surfaces that aren't wired
+> yet: the `akua.helm` / `charts.*` KCL stdlib (users write
+> `import kcl_plugin.helm` directly today), kro RGD support,
+> kustomize support, the policy engine, and `pkg.render()`.
 
 ---
 
@@ -10,7 +16,8 @@ Working examples of akua Packages, Apps, Environments, and Policies. Each direct
 
 | # | directory | what it shows | renders today? |
 |---|---|---|---|
-| 01 | [01-hello-webapp/](01-hello-webapp/) | simplest Package: one schema input, one Helm chart, docstrings + `@ui` decorators | ❌ needs `helm.template()` |
+| 00 | [00-helm-hello/](00-helm-hello/) | simplest **working** example: `kcl_plugin.helm.template` against a bundled chart, ConfigMap out | ✅ with `engine-helm-shell` |
+| 01 | [01-hello-webapp/](01-hello-webapp/) | simplest Package: one schema input, one Helm chart, docstrings + `@ui` decorators | ❌ uses `akua.helm` stdlib (not yet shipped) |
 | 02 | [02-webapp-postgres/](02-webapp-postgres/) | cross-source wiring — a webapp consuming a CNPG-managed Postgres secret via convention; `test_package.k` | ❌ needs `helm.template()` |
 | 03 | [03-multi-env-app/](03-multi-env-app/) | Package + App + Environment as typed KCL — the full workspace authoring shape | ❌ needs `helm.template()` |
 | 04 | [04-policy-tier/](04-policy-tier/) | Rego tier + Kyverno compile-resolved import, with passing + failing fixtures; shows that policy composition is just Rego file layout — no akua-owned PolicySet kind | ❌ needs the policy engine |
@@ -18,27 +25,38 @@ Working examples of akua Packages, Apps, Environments, and Policies. Each direct
 | 06 | [06-multi-engine/](06-multi-engine/) | Helm + Kustomize + kro RGD + inline KCL resources in one Package, with per-source output routing | ❌ needs all three engine callables |
 | 07 | [07-package-reuse/](07-package-reuse/) | one akua Package composing another via `pkg.render()` — nested `Input` schemas, OCI-pinned base, attestation-chain provenance | ❌ needs `pkg.render()` + OCI fetch |
 
-What **does** run today: any pure-KCL Package (no engine imports). The `akua init` scaffold is a minimal working example — `akua init my-pkg && cd my-pkg && akua render --inputs inputs.example.yaml --out ./deploy` renders a `ConfigMap` end-to-end.
+What **does** run today:
+
+- Any pure-KCL Package (no engine imports). The `akua init` scaffold is a minimal working example.
+- `examples/00-helm-hello/` — exercises `helm.template` when built with the `engine-helm-shell` feature and a `helm` binary on PATH.
 
 ---
 
 ## How to use
 
-Install akua:
+Install akua with the helm engine opted in:
 
 ```sh
-cargo install --git https://github.com/cnap-tech/akua akua-cli
+cargo install --git https://github.com/cnap-tech/akua akua-cli \
+    --features akua-core/engine-helm-shell
 ```
 
-Render the scaffold (works today):
+Render the pure-KCL scaffold:
 
 ```sh
 akua init my-pkg && cd my-pkg
-akua render --inputs inputs.example.yaml --out ./deploy
+akua render --out ./deploy
+```
+
+Render the helm-backed example:
+
+```sh
+cd examples/00-helm-hello
+akua render --out ./deploy
 ls deploy/
 ```
 
-Once engine callables land (Phase B):
+Once the `akua.helm` / `charts.*` KCL stdlib ships (Phase B follow-up):
 
 ```sh
 cd examples/02-webapp-postgres

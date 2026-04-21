@@ -1,0 +1,10 @@
+apiVersion: v1
+data:
+  greeting: hello from the example
+  replicas: '3'
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/name: hello
+  name: hello-greeting
+  namespace: default

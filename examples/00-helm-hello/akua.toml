@@ -1,0 +1,6 @@
+[package]
+name    = "00-helm-hello"
+version = "0.1.0"
+edition = "akua.dev/v1alpha1"
+
+[dependencies]
