@@ -14,6 +14,7 @@
 //! - No network (`wasip1` has no socket syscalls).
 //! - Dummy `argv` only.
 
+use std::cell::RefCell;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -142,46 +143,78 @@ fn tar_dir(dir: &Path, name_in_archive: &str) -> Result<Vec<u8>, KustomizeEngine
     Ok(gz.finish()?)
 }
 
-fn call_wasm(input: &[u8]) -> Result<Vec<u8>, KustomizeEngineError> {
-    let (engine, module) = compiled_engine()?;
+/// Persistent wasmtime Instance for the life of the thread. See
+/// `crates/helm-engine-wasm/src/lib.rs::Session` for the rationale —
+/// amortizes `_initialize` (Go runtime + kustomize package inits)
+/// across multiple `kustomize.build` calls inside one akua render.
+struct Session {
+    store: Store<WasiP1Ctx>,
+    memory: Memory,
+    malloc: TypedFunc<i32, i32>,
+    free: TypedFunc<i32, ()>,
+    build: TypedFunc<(i32, i32), i32>,
+    result_len: TypedFunc<i32, i32>,
+}
 
-    let wasi = WasiCtxBuilder::new().arg("kustomize-engine").build_p1();
-    let mut store = Store::new(engine, wasi);
-    let mut linker: Linker<WasiP1Ctx> = Linker::new(engine);
-    p1::add_to_linker_sync(&mut linker, |s: &mut WasiP1Ctx| s).map_err(wasm_err)?;
-
-    let instance = linker.instantiate(&mut store, module).map_err(wasm_err)?;
-    if let Ok(init) = instance.get_typed_func::<(), ()>(&mut store, "_initialize") {
-        init.call(&mut store, ()).map_err(wasm_err)?;
+impl Session {
+    fn init() -> Result<Self, KustomizeEngineError> {
+        let (engine, module) = compiled_engine()?;
+        let wasi = WasiCtxBuilder::new().arg("kustomize-engine").build_p1();
+        let mut store = Store::new(engine, wasi);
+        let mut linker: Linker<WasiP1Ctx> = Linker::new(engine);
+        p1::add_to_linker_sync(&mut linker, |s: &mut WasiP1Ctx| s).map_err(wasm_err)?;
+        let instance = linker.instantiate(&mut store, module).map_err(wasm_err)?;
+        if let Ok(init) = instance.get_typed_func::<(), ()>(&mut store, "_initialize") {
+            init.call(&mut store, ()).map_err(wasm_err)?;
+        }
+        let memory = instance
+            .get_memory(&mut store, "memory")
+            .ok_or_else(|| wasm_err("kustomize-engine.wasm missing `memory` export".to_string()))?;
+        let malloc = instance
+            .get_typed_func::<i32, i32>(&mut store, "kustomize_malloc")
+            .map_err(wasm_err)?;
+        let free = instance
+            .get_typed_func::<i32, ()>(&mut store, "kustomize_free")
+            .map_err(wasm_err)?;
+        let build = instance
+            .get_typed_func::<(i32, i32), i32>(&mut store, "kustomize_build")
+            .map_err(wasm_err)?;
+        let result_len = instance
+            .get_typed_func::<i32, i32>(&mut store, "kustomize_result_len")
+            .map_err(wasm_err)?;
+        Ok(Session { store, memory, malloc, free, build, result_len })
     }
 
-    let memory = instance
-        .get_memory(&mut store, "memory")
-        .ok_or_else(|| wasm_err("kustomize-engine.wasm missing `memory` export".to_string()))?;
-    let malloc = instance
-        .get_typed_func::<i32, i32>(&mut store, "kustomize_malloc")
-        .map_err(wasm_err)?;
-    let free = instance
-        .get_typed_func::<i32, ()>(&mut store, "kustomize_free")
-        .map_err(wasm_err)?;
-    let build_fn = instance
-        .get_typed_func::<(i32, i32), i32>(&mut store, "kustomize_build")
-        .map_err(wasm_err)?;
-    let result_len = instance
-        .get_typed_func::<i32, i32>(&mut store, "kustomize_result_len")
-        .map_err(wasm_err)?;
+    fn call(&mut self, input: &[u8]) -> Result<Vec<u8>, KustomizeEngineError> {
+        let input_ptr = copy_in(&mut self.store, &self.malloc, self.memory, input)
+            .map_err(wasm_err)?;
+        let result_ptr = self
+            .build
+            .call(&mut self.store, (input_ptr, input.len() as i32))
+            .map_err(wasm_err)?;
+        let len = self
+            .result_len
+            .call(&mut self.store, result_ptr)
+            .map_err(wasm_err)?;
+        let bytes = copy_out(&self.store, self.memory, result_ptr, len).map_err(wasm_err)?;
+        let _ = self.free.call(&mut self.store, input_ptr);
+        let _ = self.free.call(&mut self.store, result_ptr);
+        Ok(bytes)
+    }
+}
 
-    let input_ptr = copy_in(&mut store, &malloc, memory, input).map_err(wasm_err)?;
-    let result_ptr = build_fn
-        .call(&mut store, (input_ptr, input.len() as i32))
-        .map_err(wasm_err)?;
-    let len = result_len.call(&mut store, result_ptr).map_err(wasm_err)?;
-    let bytes = copy_out(&store, memory, result_ptr, len).map_err(wasm_err)?;
+thread_local! {
+    static SESSION: RefCell<Option<Session>> = const { RefCell::new(None) };
+}
 
-    let _ = free.call(&mut store, input_ptr);
-    let _ = free.call(&mut store, result_ptr);
-
-    Ok(bytes)
+fn call_wasm(input: &[u8]) -> Result<Vec<u8>, KustomizeEngineError> {
+    SESSION.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        if borrow.is_none() {
+            *borrow = Some(Session::init()?);
+        }
+        borrow.as_mut().expect("just initialized").call(input)
+    })
 }
 
 fn copy_in<T>(

@@ -102,8 +102,8 @@ What it measures: full user-visible time — binary startup + arg parse + Packag
 |---|---:|---|
 | `examples/08-pkg-compose/shared/` (pure KCL, 1 resource) | **7.8 ms** | — |
 | `examples/08-pkg-compose/` (outer + `pkg.render` composition) | **10.8 ms** | 2× `pkg.render` sentinels |
-| `examples/09-kustomize-hello/` (kustomize-engine-wasm) | **75.9 ms** | 1× `kustomize.build` |
-| `examples/00-helm-hello/` (helm-engine-wasm) | **119.4 ms** | 1× `helm.template` |
+| `examples/09-kustomize-hello/` (kustomize-engine-wasm) | **76.3 ms** | 1× `kustomize.build` |
+| `examples/00-helm-hello/` (helm-engine-wasm, forked) | **57.4 ms** | 1× `helm.template` |
 
 **Takeaway:** binary startup + Package load is ~7 ms; each WASM-engine call adds **~60-110 ms** of per-invocation cost (module `Module::deserialize` fixup + Go runtime init chain + render). Linear in engine-call count.
 
@@ -120,12 +120,17 @@ The cost is dominated by one-time-per-render startup, not render work itself:
 
 The per-invocation ~60-110 ms sits mostly in Go's package `init()` chains running every call. Three mitigation paths, all open follow-ups:
 
-### 5.1 Persistent engine state across renders
+### 5.1 Persistent engine state across renders ✅ shipped
 
-Today each `helm.template` call in a Package instantiates a fresh wasm `Store`. Two approaches to reuse:
+**Shipped** (thread-local `Session` in both helm-engine-wasm and
+kustomize-engine-wasm). One `Store` + `Instance` + typed-function
+lookups per thread, reused across every plugin call for the life of
+the process. `_initialize` (Go runtime + package init chain) runs
+exactly once.
 
-- **Single Store per `akua render` invocation** — amortizes across multiple engine calls *within* one render. A Package calling `helm.template` three times would pay init cost once, ~40 ms instead of ~200 ms.
-- **Persistent Engine across invocations in `akua dev` / `akua serve`** — single long-lived process already loads the Engine once and instantiates per request. Biggest single win for the dev-loop budget.
+Next wins along this axis (not shipped):
+
+- **Persistent Engine across invocations in `akua dev` / `akua serve`** — single long-lived process. Today each `akua render` is a fresh process and pays the init once. A long-lived process pays it once total.
 
 ### 5.2 Pooling allocator
 
@@ -145,13 +150,18 @@ Wasmtime's `Module::serialize` on a post-`_initialize` instance would let us ski
 |---|---:|:---:|
 | Pure KCL, ≤ 500 resources | 7-20 ms | ✅ |
 | Pure KCL + `pkg.render` composition | 10-15 ms | ✅ |
-| Mixed with one `kustomize.build` | 75-90 ms | ✅ (just) |
-| Mixed with one `helm.template` | 115-130 ms | ❌ (first call; subsequent amortize) |
-| Mixed with 5× `helm.template` | ~500 ms | ❌ |
+| Mixed with one `kustomize.build` | 75-90 ms | ✅ |
+| Mixed with one `helm.template` | 55-65 ms | ✅ |
+| Mixed with 5× `helm.template` | ~70-90 ms* | ✅ |
 
-Packages calling helm.template miss the budget on a cold render today. Fixing this is section 5.1 work — amortize init across calls within one render + persistent Engine in `akua dev`.
+*Session reuse (§5.1) means the init cost is paid once per process.
+A Package with N helm.template calls pays roughly (init_once + N ×
+render_work) instead of N × (init + render_work).
 
-Phase 1b (helm fork to strip client-go) shrinks the wasm from 75 MB → 20 MB, which also cuts `Module::deserialize` time roughly linearly — ~3 ms instead of ~10 ms. Smaller win than 5.1 but free once the fork patch applies cleanly.
+Combined effect of Phase 1b (forked helm: 75 MB → 20 MB wasm, faster
+deserialize) + §5.1 session reuse cut the single-helm case from
+~120 ms to **~57 ms** — inside the 100 ms budget. `akua dev`
+persistent-process will drive it lower still.
 
 ---
 

@@ -29,6 +29,7 @@
 //! ~100-line patch that strips the `rest.Config` path, shrinking the wasm
 //! to ~20 MB. Not applied by default yet.
 
+use std::cell::RefCell;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -170,55 +171,105 @@ fn tar_chart_dir(chart_dir: &Path, chart_name: &str) -> Result<Vec<u8>, HelmEngi
     Ok(gz.finish()?)
 }
 
-fn call_wasm(input: &[u8]) -> Result<Vec<u8>, HelmEngineError> {
-    let (engine, module) = compiled_engine()?;
+/// A persistent wasmtime Instance with pre-looked-up typed-function
+/// handles. Built once per thread via `SESSION`; every subsequent
+/// `helm.template` call inside the same akua process reuses it, so
+/// we pay Go's ~60 ms `_initialize` chain (klog, sprig, helm package
+/// inits) exactly once instead of per invocation. See
+/// `docs/performance.md §5.1`.
+///
+/// Thread-local because wasmtime `Store<T>` is `!Sync` — single-threaded
+/// callers in `akua render` are the norm. Multi-threaded hosts (future
+/// `akua serve` worker pool) will get one session per worker thread;
+/// instances don't share, matching wasmtime's recommended pattern.
+struct Session {
+    store: Store<WasiP1Ctx>,
+    memory: Memory,
+    malloc: TypedFunc<i32, i32>,
+    free: TypedFunc<i32, ()>,
+    render: TypedFunc<(i32, i32), i32>,
+    result_len: TypedFunc<i32, i32>,
+}
 
-    // klog's init() reads os.Args[0] unconditionally — an empty argv crashes
-    // Go's runtime with index-out-of-range. We provide a dummy arg and nothing
-    // else from the host.
-    let wasi = WasiCtxBuilder::new().arg("helm-engine").build_p1();
-    let mut store = Store::new(engine, wasi);
-    let mut linker: Linker<WasiP1Ctx> = Linker::new(engine);
-    p1::add_to_linker_sync(&mut linker, |s: &mut WasiP1Ctx| s).map_err(wasm_err)?;
+impl Session {
+    fn init() -> Result<Self, HelmEngineError> {
+        let (engine, module) = compiled_engine()?;
 
-    let instance = linker.instantiate(&mut store, module).map_err(wasm_err)?;
-    // Reactor module: `_initialize` runs Go runtime + package init() chains
-    // without exiting. Exports are callable after.
-    if let Ok(init) = instance.get_typed_func::<(), ()>(&mut store, "_initialize") {
-        init.call(&mut store, ()).map_err(wasm_err)?;
+        // klog's init() reads os.Args[0] unconditionally — an empty argv
+        // crashes Go's runtime with index-out-of-range. Dummy arg + no
+        // preopens + no inherited env + no network (wasip1 has none).
+        let wasi = WasiCtxBuilder::new().arg("helm-engine").build_p1();
+        let mut store = Store::new(engine, wasi);
+        let mut linker: Linker<WasiP1Ctx> = Linker::new(engine);
+        p1::add_to_linker_sync(&mut linker, |s: &mut WasiP1Ctx| s).map_err(wasm_err)?;
+
+        let instance = linker.instantiate(&mut store, module).map_err(wasm_err)?;
+        // Reactor module: `_initialize` runs Go runtime + package init()
+        // chains. Exports callable after. Runs once per session.
+        if let Ok(init) = instance.get_typed_func::<(), ()>(&mut store, "_initialize") {
+            init.call(&mut store, ()).map_err(wasm_err)?;
+        }
+
+        let memory = instance
+            .get_memory(&mut store, "memory")
+            .ok_or_else(|| wasm_err("helm-engine.wasm missing `memory` export".to_string()))?;
+        let malloc = instance
+            .get_typed_func::<i32, i32>(&mut store, "helm_malloc")
+            .map_err(wasm_err)?;
+        let free = instance
+            .get_typed_func::<i32, ()>(&mut store, "helm_free")
+            .map_err(wasm_err)?;
+        let render = instance
+            .get_typed_func::<(i32, i32), i32>(&mut store, "helm_render")
+            .map_err(wasm_err)?;
+        let result_len = instance
+            .get_typed_func::<i32, i32>(&mut store, "helm_result_len")
+            .map_err(wasm_err)?;
+
+        Ok(Session {
+            store,
+            memory,
+            malloc,
+            free,
+            render,
+            result_len,
+        })
     }
 
-    let memory = instance
-        .get_memory(&mut store, "memory")
-        .ok_or_else(|| wasm_err("helm-engine.wasm missing `memory` export".to_string()))?;
-    let malloc = instance
-        .get_typed_func::<i32, i32>(&mut store, "helm_malloc")
-        .map_err(wasm_err)?;
-    let free = instance
-        .get_typed_func::<i32, ()>(&mut store, "helm_free")
-        .map_err(wasm_err)?;
-    let render_fn = instance
-        .get_typed_func::<(i32, i32), i32>(&mut store, "helm_render")
-        .map_err(wasm_err)?;
-    let result_len = instance
-        .get_typed_func::<i32, i32>(&mut store, "helm_result_len")
-        .map_err(wasm_err)?;
+    fn call(&mut self, input: &[u8]) -> Result<Vec<u8>, HelmEngineError> {
+        let input_ptr = copy_in(&mut self.store, &self.malloc, self.memory, input)
+            .map_err(wasm_err)?;
+        let result_ptr = self
+            .render
+            .call(&mut self.store, (input_ptr, input.len() as i32))
+            .map_err(wasm_err)?;
+        let len = self
+            .result_len
+            .call(&mut self.store, result_ptr)
+            .map_err(wasm_err)?;
+        let bytes = copy_out(&self.store, self.memory, result_ptr, len).map_err(wasm_err)?;
 
-    // Copy input into wasm memory
-    let input_ptr = copy_in(&mut store, &malloc, memory, input).map_err(wasm_err)?;
+        // Best-effort: guest re-uses freed pointers on the next alloc, so a
+        // dropped free here only costs a bit of linear-memory fragmentation.
+        let _ = self.free.call(&mut self.store, input_ptr);
+        let _ = self.free.call(&mut self.store, result_ptr);
 
-    // Call render
-    let result_ptr = render_fn
-        .call(&mut store, (input_ptr, input.len() as i32))
-        .map_err(wasm_err)?;
-    let len = result_len.call(&mut store, result_ptr).map_err(wasm_err)?;
-    let bytes = copy_out(&store, memory, result_ptr, len).map_err(wasm_err)?;
+        Ok(bytes)
+    }
+}
 
-    // Best-effort cleanup — even if this fails, the wasm instance is dropped.
-    let _ = free.call(&mut store, input_ptr);
-    let _ = free.call(&mut store, result_ptr);
+thread_local! {
+    static SESSION: RefCell<Option<Session>> = const { RefCell::new(None) };
+}
 
-    Ok(bytes)
+fn call_wasm(input: &[u8]) -> Result<Vec<u8>, HelmEngineError> {
+    SESSION.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        if borrow.is_none() {
+            *borrow = Some(Session::init()?);
+        }
+        borrow.as_mut().expect("just initialized").call(input)
+    })
 }
 
 fn copy_in<T>(
