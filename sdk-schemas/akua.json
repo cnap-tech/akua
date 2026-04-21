@@ -1,0 +1,83 @@
+{
+  "$defs": {
+    "Level": {
+      "description": "Log severity. Almost always `Error`; `Warn` for recoverable issues.",
+      "enum": [
+        "error",
+        "warn"
+      ],
+      "type": "string"
+    },
+    "StructuredError": {
+      "description": "The canonical error shape. One struct; every verb reuses it.\n\n`code` is the stable, load-bearing identifier. `message` is the one-line\nsummary. The rest are optional pointers — a file path, a field name, a\nsuggestion, a docs URL.",
+      "properties": {
+        "code": {
+          "description": "Stable, machine-readable identifier (SHOUTY_SNAKE_CASE).\nExample: `E_SCHEMA_INVALID`, `E_OCI_DIGEST_MISMATCH`.",
+          "type": "string"
+        },
+        "docs": {
+          "description": "URL to the error's documentation page. Convention:\n`https://akua.dev/errors/<CODE>`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "field": {
+          "description": "Dotted field path inside `path` when the error is field-specific.\nExample: `spec.replicas`, `metadata.labels.team`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "level": {
+          "$ref": "#/$defs/Level",
+          "default": "error",
+          "description": "Log level. Always `\"error\"` for hard failures; `\"warn\"` for\nrecoverable issues emitted alongside a success exit."
+        },
+        "line": {
+          "description": "1-based line number in `path` when applicable.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "message": {
+          "description": "Human-readable one-line summary.",
+          "type": "string"
+        },
+        "next_actions": {
+          "description": "Machine-executable recovery steps. Agents can use these to fix\nthe error programmatically. Each entry is a complete command.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "description": "File path, OCI ref, or resource identifier the error refers to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "suggestion": {
+          "description": "Actionable suggestion — a one-liner the caller can apply.\nAbsent when there's no generic fix.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://akua.dev/schemas/v1/akua.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Machine-readable shape of every type akua emits under `--json`. Bind any validator (ajv, Zod, pydantic, gojsonschema, ...) against this.",
+  "title": "akua CLI contract"
+}

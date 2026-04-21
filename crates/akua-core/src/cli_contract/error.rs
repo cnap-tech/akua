@@ -271,37 +271,41 @@ mod tests {
 }
 
 // ---------------------------------------------------------------------------
-// JSON Schema export
+// JSON Schema export — one bundled document
 //
-// ts-rs (feature = "ts-export") auto-generates its own `export_bindings_*`
-// tests via the derive macro. schemars has no equivalent, so we roll a
-// per-type test that writes `sdk-schemas/<Name>.json` on demand. Same
-// pattern, same trigger: `cargo test --features schema-export`.
+// ts-rs (feature = "ts-export") emits per-type `.ts` files because TS imports
+// are per-file. schemars emits **one** document with every type in `$defs`
+// and cross-references via `$ref` — the standard JSON Schema bundle shape,
+// matching how `schemas/v1/akua.json` will ship in the release artifact.
+//
+// Trigger: `cargo test -p akua-core --features schema-export export_json_schema_bundle`.
 // ---------------------------------------------------------------------------
 
 #[cfg(all(test, feature = "schema-export"))]
-mod json_schema_export {
-    use super::*;
-    use std::path::{Path, PathBuf};
+#[test]
+fn export_json_schema_bundle() {
+    use schemars::generate::SchemaSettings;
+    use std::path::Path;
 
-    fn out_dir() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sdk-schemas")
-    }
+    let mut generator = SchemaSettings::draft2020_12().into_generator();
+    // Register every type that belongs in the bundle. Nested types discovered
+    // during walk (e.g. `StructuredError.level: Level`) land in `$defs`
+    // automatically — listing them here is only for top-level discoverability.
+    generator.subschema_for::<StructuredError>();
+    generator.subschema_for::<Level>();
 
-    fn write_schema(name: &str, schema: schemars::Schema) {
-        let dir = out_dir();
-        std::fs::create_dir_all(&dir).expect("create sdk-schemas dir");
-        let json = serde_json::to_string_pretty(&schema).expect("schema -> json");
-        std::fs::write(dir.join(format!("{name}.json")), json).expect("write schema file");
-    }
+    let defs = generator.take_definitions(true);
+    let bundle = serde_json::json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://akua.dev/schemas/v1/akua.json",
+        "title": "akua CLI contract",
+        "description": "Machine-readable shape of every type akua emits under `--json`. \
+                        Bind any validator (ajv, Zod, pydantic, gojsonschema, ...) against this.",
+        "$defs": defs,
+    });
 
-    #[test]
-    fn export_json_schema_structured_error() {
-        write_schema("StructuredError", schemars::schema_for!(StructuredError));
-    }
-
-    #[test]
-    fn export_json_schema_level() {
-        write_schema("Level", schemars::schema_for!(Level));
-    }
+    let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../sdk-schemas/akua.json");
+    std::fs::create_dir_all(out.parent().expect("has parent")).expect("create sdk-schemas");
+    let json = serde_json::to_string_pretty(&bundle).expect("bundle -> json");
+    std::fs::write(&out, json).expect("write bundle");
 }
