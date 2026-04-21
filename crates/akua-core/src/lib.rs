@@ -32,6 +32,8 @@ pub mod package_render;
 pub mod pkg_render;
 
 pub use cli_contract::{AgentContext, AgentSource, ExitCode, StructuredError};
+#[cfg(feature = "engine-kcl")]
+pub use dir_diff::{diff as dir_diff, DirDiff, DirDiffError, FileChange};
 pub use lock_file::{
     AkuaLock, LockError, LockLoadError, LockedPackage, Replaced, CURRENT_VERSION as LOCK_VERSION,
 };
@@ -39,8 +41,6 @@ pub use mod_file::{
     AkuaManifest, DependencySource, ManifestError, ManifestLoadError, PackageSection, Replace,
     WorkspaceSection,
 };
-#[cfg(feature = "engine-kcl")]
-pub use dir_diff::{diff as dir_diff, DirDiff, DirDiffError, FileChange};
 #[cfg(feature = "engine-kcl")]
 pub use package_k::{
     format_kcl, lint_kcl, list_options_kcl, LintIssue, OptionInfo, OutputSpec, PackageK,

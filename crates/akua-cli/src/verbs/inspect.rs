@@ -165,7 +165,9 @@ outputs = [{ kind: "RawManifests", target: "./" }]
         let mut stdout = Vec::new();
         let code = run(
             &Context::human(),
-            &InspectArgs { package_path: &path },
+            &InspectArgs {
+                package_path: &path,
+            },
             &mut stdout,
         )
         .expect("run");
@@ -180,7 +182,9 @@ outputs = [{ kind: "RawManifests", target: "./" }]
         let mut stdout = Vec::new();
         run(
             &Context::json(),
-            &InspectArgs { package_path: &path },
+            &InspectArgs {
+                package_path: &path,
+            },
             &mut stdout,
         )
         .expect("run");
@@ -195,7 +199,10 @@ outputs = [{ kind: "RawManifests", target: "./" }]
         // reads a type arg passed directly to `option()`. The field
         // stays on the output shape so the contract is forward-
         // compatible with richer type recovery later.
-        assert_eq!(opts[0].get("type").and_then(|t| t.as_str()).unwrap_or(""), "");
+        assert_eq!(
+            opts[0].get("type").and_then(|t| t.as_str()).unwrap_or(""),
+            ""
+        );
     }
 
     #[test]
@@ -204,7 +211,9 @@ outputs = [{ kind: "RawManifests", target: "./" }]
         let mut stdout = Vec::new();
         run(
             &Context::json(),
-            &InspectArgs { package_path: &path },
+            &InspectArgs {
+                package_path: &path,
+            },
             &mut stdout,
         )
         .expect("run");
@@ -219,7 +228,9 @@ outputs = [{ kind: "RawManifests", target: "./" }]
         let missing = tmp.path().join("nope.k");
         let err = run(
             &Context::human(),
-            &InspectArgs { package_path: &missing },
+            &InspectArgs {
+                package_path: &missing,
+            },
             &mut Vec::new(),
         )
         .unwrap_err();

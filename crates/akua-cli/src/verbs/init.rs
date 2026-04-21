@@ -141,7 +141,12 @@ fn absolute(p: &Path) -> PathBuf {
 }
 
 fn write_text<W: Write>(writer: &mut W, output: &InitOutput) -> std::io::Result<()> {
-    writeln!(writer, "scaffolded {} at {}", output.name, output.path.display())?;
+    writeln!(
+        writer,
+        "scaffolded {} at {}",
+        output.name,
+        output.path.display()
+    )?;
     for file in &output.files {
         writeln!(writer, "  + {file}")?;
     }
@@ -300,12 +305,10 @@ mod tests {
         let manifest = akua_core::AkuaManifest::parse(&toml).expect("akua.toml parses");
         assert_eq!(manifest.package.name, "smoke");
 
-        let loaded =
-            akua_core::PackageK::load(&pkg.join("package.k")).expect("package.k loads");
-        let inputs = serde_yaml::from_str(
-            &fs::read_to_string(pkg.join("inputs.example.yaml")).unwrap(),
-        )
-        .expect("inputs.yaml parses");
+        let loaded = akua_core::PackageK::load(&pkg.join("package.k")).expect("package.k loads");
+        let inputs =
+            serde_yaml::from_str(&fs::read_to_string(pkg.join("inputs.example.yaml")).unwrap())
+                .expect("inputs.yaml parses");
         let rendered = loaded.render(&inputs).expect("renders");
         assert_eq!(rendered.resources.len(), 1);
         assert_eq!(rendered.outputs[0].kind, "RawManifests");

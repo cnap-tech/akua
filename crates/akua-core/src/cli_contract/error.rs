@@ -5,9 +5,9 @@
 //! same fields are rendered as a human-readable block but the `code`
 //! remains machine-parseable.
 
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "schema-export")]
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 
@@ -269,4 +269,3 @@ mod tests {
         assert_eq!(err.next_actions, vec!["step 1", "step 2", "step 3"]);
     }
 }
-

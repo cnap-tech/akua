@@ -64,8 +64,20 @@ tasks:
       - task: sdk:gen
       - git diff --exit-code -- sdk-types sdk-schemas
 
+  sdk:install:
+    desc: Install @akua/sdk deps (bun)
+    dir: packages/sdk
+    cmds:
+      - bun install --frozen-lockfile
+    sources:
+      - package.json
+      - bun.lock
+    generates:
+      - node_modules/.package-lock.json
+
   sdk:test:
     desc: Run @akua/sdk TS unit tests (bun — native TS, no transpile step)
+    deps: [sdk:install]
     dir: packages/sdk
     cmds:
       - bun test

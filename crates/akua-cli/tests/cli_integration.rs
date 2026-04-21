@@ -102,7 +102,11 @@ fn init_scaffolds_three_files_and_reports_them() {
 #[test]
 fn init_without_force_refuses_to_clobber() {
     let dir = tempdir();
-    run(dir.path(), &["init", "pkg"]).status.success().then_some(()).unwrap();
+    run(dir.path(), &["init", "pkg"])
+        .status
+        .success()
+        .then_some(())
+        .unwrap();
     // Second run — same target — should fail with exit 1 (UserError).
     let out = run(dir.path(), &["init", "pkg"]);
     assert_exit(&out, 1);
@@ -140,7 +144,10 @@ fn init_then_render_produces_deterministic_manifests() {
         .starts_with("sha256:"));
 
     // The sole ConfigMap landed on disk under the scaffolded name.
-    assert!(app.join("deploy").join("000-configmap-hello.yaml").is_file());
+    assert!(app
+        .join("deploy")
+        .join("000-configmap-hello.yaml")
+        .is_file());
 }
 
 #[test]
@@ -430,7 +437,10 @@ fn help_lists_all_twelve_verbs() {
         "init", "whoami", "version", "verify", "render", "fmt", "lint", "check", "diff", "add",
         "remove", "tree", "inspect",
     ] {
-        assert!(stdout.contains(verb), "help missing verb `{verb}`\n{stdout}");
+        assert!(
+            stdout.contains(verb),
+            "help missing verb `{verb}`\n{stdout}"
+        );
     }
 }
 
@@ -441,4 +451,3 @@ fn unknown_verb_exits_clap_error_code() {
     // clap emits exit code 2 for usage errors.
     assert_eq!(out.status.code(), Some(2));
 }
-

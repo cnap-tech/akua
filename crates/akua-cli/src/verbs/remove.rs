@@ -102,10 +102,7 @@ pub fn run<W: Write>(
     if removed {
         let serialized = manifest.to_toml()?;
         let path = args.workspace.join("akua.toml");
-        std::fs::write(&path, serialized).map_err(|e| RemoveError::Io {
-            path,
-            source: e,
-        })?;
+        std::fs::write(&path, serialized).map_err(|e| RemoveError::Io { path, source: e })?;
     }
 
     let output = RemoveOutput {
@@ -174,8 +171,7 @@ webapp = { oci = "oci://ghcr.io/acme/webapp", version = "1.0.0" }
     #[test]
     fn missing_dep_errors_by_default() {
         let ws = workspace(MANIFEST_WITH_DEP);
-        let err = run(&Context::human(), &args(ws.path(), "nope"), &mut Vec::new())
-            .unwrap_err();
+        let err = run(&Context::human(), &args(ws.path(), "nope"), &mut Vec::new()).unwrap_err();
         assert!(matches!(err, RemoveError::NotFound { .. }));
         assert_eq!(err.to_structured().code, codes::E_REMOVE_NOT_FOUND);
     }
@@ -203,8 +199,7 @@ webapp = { oci = "oci://ghcr.io/acme/webapp", version = "1.0.0" }
     #[test]
     fn missing_manifest_surfaces_typed_error() {
         let tmp = TempDir::new().unwrap();
-        let err = run(&Context::human(), &args(tmp.path(), "x"), &mut Vec::new())
-            .unwrap_err();
+        let err = run(&Context::human(), &args(tmp.path(), "x"), &mut Vec::new()).unwrap_err();
         assert_eq!(err.to_structured().code, codes::E_MANIFEST_MISSING);
     }
 }

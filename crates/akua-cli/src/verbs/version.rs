@@ -6,9 +6,9 @@
 use std::io::Write;
 
 use akua_core::cli_contract::ExitCode;
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "schema-export")]
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 

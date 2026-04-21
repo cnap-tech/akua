@@ -16,8 +16,8 @@
 use std::path::Path;
 
 use akua_cli::verbs::version::VersionOutput;
-use akua_core::cli_contract::{ExitCode, StructuredError};
 use akua_core::cli_contract::error::Level;
+use akua_core::cli_contract::{ExitCode, StructuredError};
 use schemars::generate::SchemaSettings;
 
 #[test]

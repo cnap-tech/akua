@@ -5,9 +5,9 @@
 
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
 #[cfg(feature = "schema-export")]
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "ts-export")]
 use ts_rs::TS;
 

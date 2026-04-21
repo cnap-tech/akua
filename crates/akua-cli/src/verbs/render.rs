@@ -589,8 +589,7 @@ outputs = [{ kind: "ResourceGraphDefinition", target: "./" }]
         fs::write(tmp.path().join("inputs.yaml"), ":::: not yaml ::::").unwrap();
         fs::write(tmp.path().join("inputs.example.yaml"), "replicas: 5\n").unwrap();
 
-        let err = run(&Context::human(), &args(&pkg, tmp.path()), &mut Vec::new())
-            .unwrap_err();
+        let err = run(&Context::human(), &args(&pkg, tmp.path()), &mut Vec::new()).unwrap_err();
         assert_eq!(err.to_structured().code, codes::E_INPUTS_PARSE);
     }
 

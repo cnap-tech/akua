@@ -258,7 +258,11 @@ fn dispatch(command: Commands) -> ExitCode {
             workspace,
             package,
         } => run_check(&args, &workspace, &package),
-        Commands::Diff { args, before, after } => run_diff(&args, &before, &after),
+        Commands::Diff {
+            args,
+            before,
+            after,
+        } => run_diff(&args, &before, &after),
         Commands::Remove {
             args,
             name,
@@ -278,8 +282,16 @@ fn dispatch(command: Commands) -> ExitCode {
             force,
             workspace,
         } => run_add(
-            &args, &name, oci.as_deref(), git.as_deref(), path.as_deref(),
-            version.as_deref(), tag.as_deref(), rev.as_deref(), force, &workspace,
+            &args,
+            &name,
+            oci.as_deref(),
+            git.as_deref(),
+            path.as_deref(),
+            version.as_deref(),
+            tag.as_deref(),
+            rev.as_deref(),
+            force,
+            &workspace,
         ),
     }
 }
@@ -362,7 +374,11 @@ fn run_diff(args: &UniversalArgs, before: &std::path::Path, after: &std::path::P
     }
 }
 
-fn run_check(args: &UniversalArgs, workspace: &std::path::Path, package: &std::path::Path) -> ExitCode {
+fn run_check(
+    args: &UniversalArgs,
+    workspace: &std::path::Path,
+    package: &std::path::Path,
+) -> ExitCode {
     let ctx = resolve_ctx(args);
     let verb_args = check_verb::CheckArgs {
         workspace,
@@ -459,7 +475,12 @@ fn run_verify(args: &UniversalArgs, workspace: &std::path::Path) -> ExitCode {
     }
 }
 
-fn run_fmt(args: &UniversalArgs, package: &std::path::Path, check: bool, stdout_mode: bool) -> ExitCode {
+fn run_fmt(
+    args: &UniversalArgs,
+    package: &std::path::Path,
+    check: bool,
+    stdout_mode: bool,
+) -> ExitCode {
     let ctx = resolve_ctx(args);
     let verb_args = fmt_verb::FmtArgs {
         package_path: package,
@@ -595,7 +616,11 @@ mod tests {
         ]);
         match cli.command {
             Commands::Add {
-                name, oci, version, force, ..
+                name,
+                oci,
+                version,
+                force,
+                ..
             } => {
                 assert_eq!(name, "cnpg");
                 assert_eq!(oci.as_deref(), Some("oci://ghcr.io/x/y"));
@@ -608,17 +633,18 @@ mod tests {
 
     #[test]
     fn add_requires_a_source_flag() {
-        let err = Cli::try_parse_from(["akua", "add", "x"]).err().expect("should fail");
+        let err = Cli::try_parse_from(["akua", "add", "x"])
+            .err()
+            .expect("should fail");
         assert!(err.to_string().contains("required"));
     }
 
     #[test]
     fn add_rejects_two_sources_at_once() {
-        let err = Cli::try_parse_from([
-            "akua", "add", "x", "--oci", "oci://a", "--git", "https://b",
-        ])
-        .err()
-        .expect("should fail");
+        let err =
+            Cli::try_parse_from(["akua", "add", "x", "--oci", "oci://a", "--git", "https://b"])
+                .err()
+                .expect("should fail");
         assert!(err.to_string().contains("cannot be used"));
     }
 

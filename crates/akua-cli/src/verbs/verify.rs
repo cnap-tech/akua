@@ -88,9 +88,7 @@ impl VerifyError {
             VerifyError::Lock(e) => {
                 let base = e.to_structured();
                 if matches!(e, LockLoadError::Missing { .. }) {
-                    base.with_suggestion(
-                        "run `akua add` to resolve deps and generate the lockfile",
-                    )
+                    base.with_suggestion("run `akua add` to resolve deps and generate the lockfile")
                 } else {
                     base
                 }

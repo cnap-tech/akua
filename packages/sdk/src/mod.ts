@@ -14,8 +14,10 @@ import { execFile } from 'node:child_process';
 import type { VersionOutput } from '../../../sdk-types/VersionOutput.ts';
 
 import { AkuaTransportError, classifyCliError } from './errors.ts';
+import { validateAs } from './validate.ts';
 
 export * from './errors.ts';
+export { AkuaContractError, validateAs } from './validate.ts';
 export type { VersionOutput };
 export type { ExitCode } from '../../../sdk-types/ExitCode.ts';
 export type { StructuredError, Level } from '../../../sdk-types/StructuredError.ts';
@@ -45,7 +47,7 @@ export class Akua {
 
 	async version(): Promise<VersionOutput> {
 		const { stdout } = await this.runJson(['version', '--json']);
-		return JSON.parse(stdout) as VersionOutput;
+		return validateAs<VersionOutput>('VersionOutput', JSON.parse(stdout));
 	}
 
 	// ---- internals ----

@@ -153,8 +153,7 @@ pub fn run<W: Write>(
         replaced: already,
     };
 
-    emit_output(stdout, ctx, &output, |w| write_text(w, &output))
-        .map_err(AddError::StdoutWrite)?;
+    emit_output(stdout, ctx, &output, |w| write_text(w, &output)).map_err(AddError::StdoutWrite)?;
 
     Ok(ExitCode::Success)
 }
@@ -267,11 +266,19 @@ edition = "akua.dev/v1alpha1"
         let ws = workspace();
         let a = AddArgs {
             tag: Some("v0.5.0"),
-            ..args(ws.path(), "tooling", AddSource::Git("https://github.com/x/y"))
+            ..args(
+                ws.path(),
+                "tooling",
+                AddSource::Git("https://github.com/x/y"),
+            )
         };
         run(&Context::human(), &a, &mut Vec::new()).expect("run");
 
-        let dep = AkuaManifest::load(ws.path()).unwrap().dependencies.remove("tooling").unwrap();
+        let dep = AkuaManifest::load(ws.path())
+            .unwrap()
+            .dependencies
+            .remove("tooling")
+            .unwrap();
         assert_eq!(dep.git.as_deref(), Some("https://github.com/x/y"));
         assert_eq!(dep.tag.as_deref(), Some("v0.5.0"));
         assert!(dep.oci.is_none());
@@ -283,7 +290,11 @@ edition = "akua.dev/v1alpha1"
         let a = args(ws.path(), "local", AddSource::Path("../sibling"));
         run(&Context::human(), &a, &mut Vec::new()).expect("run");
 
-        let dep = AkuaManifest::load(ws.path()).unwrap().dependencies.remove("local").unwrap();
+        let dep = AkuaManifest::load(ws.path())
+            .unwrap()
+            .dependencies
+            .remove("local")
+            .unwrap();
         assert_eq!(dep.path.as_deref(), Some("../sibling"));
     }
 
@@ -326,7 +337,11 @@ edition = "akua.dev/v1alpha1"
         let parsed: serde_json::Value =
             serde_json::from_str(String::from_utf8(stdout).unwrap().trim()).unwrap();
         assert_eq!(parsed["replaced"], true);
-        let dep = AkuaManifest::load(ws.path()).unwrap().dependencies.remove("cnpg").unwrap();
+        let dep = AkuaManifest::load(ws.path())
+            .unwrap()
+            .dependencies
+            .remove("cnpg")
+            .unwrap();
         assert_eq!(dep.oci.as_deref(), Some("oci://b"));
         assert_eq!(dep.version.as_deref(), Some("2.0.0"));
     }

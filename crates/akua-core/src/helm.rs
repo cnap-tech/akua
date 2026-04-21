@@ -59,10 +59,7 @@ pub fn install() {
         // `null` — chart templates that deref `.Values.x` without a
         // default would otherwise error on `<nil>.x`.
         let empty = Value::Object(serde_json::Map::new());
-        let values_ref = arr
-            .get(1)
-            .filter(|v| !v.is_null())
-            .unwrap_or(&empty);
+        let values_ref = arr.get(1).filter(|v| !v.is_null()).unwrap_or(&empty);
         let release_name = arr.get(2).and_then(Value::as_str).unwrap_or("release");
         let release_ns = arr.get(3).and_then(Value::as_str).unwrap_or("default");
 
@@ -121,9 +118,7 @@ fn validate_namespace(ns: &str) -> Result<(), String> {
     }
     for c in &chars {
         if !ok_edge(*c) && *c != '-' {
-            return Err(err(format!(
-                "namespace `{ns}` may contain only [a-z0-9-]"
-            )));
+            return Err(err(format!("namespace `{ns}` may contain only [a-z0-9-]")));
         }
     }
     Ok(())
@@ -190,8 +185,8 @@ fn parse_multi_doc(bytes: &[u8]) -> Result<Vec<Value>, String> {
 
     let mut out = Vec::new();
     for doc in serde_yaml::Deserializer::from_str(text) {
-        let value = Value::deserialize(doc)
-            .map_err(|e| err(format!("parsing output as YAML: {e}")))?;
+        let value =
+            Value::deserialize(doc).map_err(|e| err(format!("parsing output as YAML: {e}")))?;
         if is_empty_doc(&value) {
             continue;
         }
@@ -311,7 +306,9 @@ data:
         };
         let owned = unsafe { std::ffi::CString::from_raw(out_ptr as *mut std::os::raw::c_char) };
         let parsed: Value = serde_json::from_slice(owned.as_bytes()).unwrap();
-        let panic_msg = parsed["__kcl_PanicInfo__"].as_str().expect("panic envelope");
+        let panic_msg = parsed["__kcl_PanicInfo__"]
+            .as_str()
+            .expect("panic envelope");
         assert!(panic_msg.contains("release name"), "got: {panic_msg}");
     }
 

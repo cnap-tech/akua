@@ -134,7 +134,11 @@ fn write_text<W: Write>(writer: &mut W, output: &LintOutput) -> std::io::Result<
         } else {
             format!("  at {location}")
         };
-        writeln!(writer, "  [{}] {}: {}{}", issue.level, issue.code, issue.message, prefix)?;
+        writeln!(
+            writer,
+            "  [{}] {}: {}{}",
+            issue.level, issue.code, issue.message, prefix
+        )?;
     }
     Ok(())
 }
@@ -178,7 +182,9 @@ outputs = [{ kind: "RawManifests", target: "./" }]
         let mut stdout = Vec::new();
         let code = run(&Context::human(), &args(&path), &mut stdout).expect("run");
         assert_eq!(code, ExitCode::Success);
-        assert!(String::from_utf8(stdout).unwrap().contains("ok: no lint issues"));
+        assert!(String::from_utf8(stdout)
+            .unwrap()
+            .contains("ok: no lint issues"));
     }
 
     #[test]

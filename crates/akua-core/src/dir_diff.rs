@@ -169,10 +169,7 @@ fn walk(
         path: cursor.to_path_buf(),
         source,
     })?;
-    let mut children: Vec<_> = entries
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .collect();
+    let mut children: Vec<_> = entries.filter_map(|e| e.ok()).map(|e| e.path()).collect();
     children.sort();
 
     for path in children {
@@ -187,12 +184,7 @@ fn walk(
                 .strip_prefix(root)
                 .expect("walk stays under root")
                 .to_path_buf();
-            files.insert(
-                rel,
-                FileMeta {
-                    size: meta.len(),
-                },
-            );
+            files.insert(rel, FileMeta { size: meta.len() });
         } else {
             // Symlinks, sockets, fifos — record and move on.
             let rel = path

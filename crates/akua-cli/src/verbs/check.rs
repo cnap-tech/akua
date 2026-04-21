@@ -85,7 +85,11 @@ pub fn run<W: Write>(
     let pkg_path = resolve_package_path(args.workspace, args.package_path);
     checks.push(check_package(&pkg_path));
 
-    let status = if checks.iter().all(|c| c.ok) { "ok" } else { "fail" };
+    let status = if checks.iter().all(|c| c.ok) {
+        "ok"
+    } else {
+        "fail"
+    };
 
     let output = CheckOutput { status, checks };
 
@@ -292,8 +296,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
         fs::write(ws.path().join("package.k"), "schema X:\n  !!!\n").unwrap();
         let ctx = Context::json();
         let mut stdout = Vec::new();
-        let code = run(&ctx, &args(ws.path(), Path::new("package.k")), &mut stdout)
-            .expect("run");
+        let code = run(&ctx, &args(ws.path(), Path::new("package.k")), &mut stdout).expect("run");
         assert_eq!(code, ExitCode::UserError);
         let parsed: serde_json::Value =
             serde_json::from_str(String::from_utf8(stdout).unwrap().trim()).unwrap();

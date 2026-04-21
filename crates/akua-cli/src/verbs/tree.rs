@@ -168,7 +168,11 @@ fn write_text<W: Write>(writer: &mut W, output: &TreeOutput) -> std::io::Result<
             .unwrap_or_default();
         let lock_marker = match &dep.locked {
             Some(l) => {
-                let sig_marker = if l.signature.is_some() { "✓signed" } else { "unsigned" };
+                let sig_marker = if l.signature.is_some() {
+                    "✓signed"
+                } else {
+                    "unsigned"
+                };
                 format!(" [locked {} ({})]", short_digest(&l.digest), sig_marker)
             }
             None => String::new(),
@@ -238,14 +242,25 @@ signature = "cosign:sigstore:cnpg"
     fn lists_declared_deps_without_lockfile() {
         let ws = workspace(MANIFEST, None);
         let mut stdout = Vec::new();
-        run(&json_ctx(), &TreeArgs { workspace: ws.path() }, &mut stdout).expect("run");
+        run(
+            &json_ctx(),
+            &TreeArgs {
+                workspace: ws.path(),
+            },
+            &mut stdout,
+        )
+        .expect("run");
         let parsed: serde_json::Value =
             serde_json::from_str(String::from_utf8(stdout).unwrap().trim()).unwrap();
         assert_eq!(parsed["package"]["name"], "demo");
         let deps = parsed["dependencies"].as_array().unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.iter().any(|d| d["name"] == "cnpg" && d["source"] == "oci"));
-        assert!(deps.iter().any(|d| d["name"] == "local" && d["source"] == "path"));
+        assert!(deps
+            .iter()
+            .any(|d| d["name"] == "cnpg" && d["source"] == "oci"));
+        assert!(deps
+            .iter()
+            .any(|d| d["name"] == "local" && d["source"] == "path"));
         // No lockfile → no `locked` field.
         assert!(deps[0].get("locked").is_none() || deps[0]["locked"].is_null());
     }
@@ -254,7 +269,14 @@ signature = "cosign:sigstore:cnpg"
     fn joins_lockfile_rows_when_present() {
         let ws = workspace(MANIFEST, Some(LOCK));
         let mut stdout = Vec::new();
-        run(&json_ctx(), &TreeArgs { workspace: ws.path() }, &mut stdout).expect("run");
+        run(
+            &json_ctx(),
+            &TreeArgs {
+                workspace: ws.path(),
+            },
+            &mut stdout,
+        )
+        .expect("run");
         let parsed: serde_json::Value =
             serde_json::from_str(String::from_utf8(stdout).unwrap().trim()).unwrap();
         let cnpg = parsed["dependencies"]
@@ -263,7 +285,10 @@ signature = "cosign:sigstore:cnpg"
             .iter()
             .find(|d| d["name"] == "cnpg")
             .expect("cnpg present");
-        assert!(cnpg["locked"]["digest"].as_str().unwrap().starts_with("sha256:"));
+        assert!(cnpg["locked"]["digest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:"));
         assert_eq!(cnpg["locked"]["signature"], "cosign:sigstore:cnpg");
 
         // `local` isn't in the lockfile → no `locked` block.
@@ -288,9 +313,17 @@ edition = "akua.dev/v1alpha1"
 "#;
         let ws = workspace(manifest, None);
         let mut stdout = Vec::new();
-        run(&Context::human(), &TreeArgs { workspace: ws.path() }, &mut stdout)
-            .expect("run");
-        assert!(String::from_utf8(stdout).unwrap().contains("(no dependencies)"));
+        run(
+            &Context::human(),
+            &TreeArgs {
+                workspace: ws.path(),
+            },
+            &mut stdout,
+        )
+        .expect("run");
+        assert!(String::from_utf8(stdout)
+            .unwrap()
+            .contains("(no dependencies)"));
     }
 
     #[test]
@@ -298,7 +331,9 @@ edition = "akua.dev/v1alpha1"
         let tmp = TempDir::new().unwrap();
         let err = run(
             &Context::human(),
-            &TreeArgs { workspace: tmp.path() },
+            &TreeArgs {
+                workspace: tmp.path(),
+            },
             &mut Vec::new(),
         )
         .unwrap_err();
