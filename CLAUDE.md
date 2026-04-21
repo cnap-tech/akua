@@ -61,13 +61,15 @@ Violations of these are architectural bugs:
 
 **Signed + attested by default.** `akua publish` emits cosign signature + SLSA v1 predicate unless the caller explicitly opts out. Consumers verify by default on pull.
 
+**Sandboxed by default. No shell-out, ever.** Every render executes inside a wasmtime WASI sandbox with memory / CPU / wall-clock caps and capability-model filesystem preopens. Untrusted Packages are safe to render on shared hosts. The render path **must not** spawn subprocesses, must not call `$PATH` binaries, must not grant ambient filesystem or network access. Engines (helm, kustomize, kro, etc.) are Go-source wrappers compiled to `wasm32-wasip1`, hosted inside akua's own wasmtime — not shell-outs. There is no `--unsafe-host` escape hatch: if the engine isn't WASM-ready, the feature doesn't ship. Benchmarks confirm this is viable (`docs/performance.md` — 2× overhead vs native, sub-100ms for typical Packages). See [docs/security-model.md](docs/security-model.md).
+
 **`akua render` ≠ `akua export`.** `render` executes the Package's program (invokes engines, produces deploy-ready manifests). `export` converts a canonical artifact to a format view (JSON Schema, OpenAPI, YAML, Rego bundle). They are different verbs for different jobs.
 
 ## Architecture discipline
 
 - **Substrate, not content.** We do not curate a package catalog. Upstream projects publish their own signed packages; akua provides signing + distribution + diff + audit infrastructure. Same logic for policy: Rego is a host, not a DSL we own.
 - **External engines as compile-resolved imports or callable functions.** `helm.template(...)`, `rgd.instantiate(...)`, `kustomize.build(...)` are KCL callables. Kyverno / CEL / foreign Rego are `import data.…` in Rego, resolved via `akua.toml`. Never runtime string lookups like `kyverno.check({bundle: "oci://..."})`.
-- **Embedded by default.** KCL, Helm, OPA, Regal, Kustomize, kro offline instantiator, CEL, Kyverno-to-Rego converter are all bundled into the akua binary via wasmtime (Rust engines linked directly). `$PATH` never required. Shell-out available as escape hatch via `--engine=shell`.
+- **Embedded via wasmtime only.** KCL, Helm, OPA, Regal, Kustomize, kro offline instantiator, CEL, Kyverno-to-Rego converter all ship as wasip1 modules hosted inside akua's wasmtime. `$PATH` never required, never consulted. There is no shell-out fallback — "embedded by default" means "embedded only," because the sandbox invariant above forbids subprocess execution in the render path.
 - **Compose with the ecosystem, don't replace it.** ArgoCD, Flux, kro, Helm release lifecycle, kubectl, Crossplane are first-class consumers of akua output. We target their formats (`RawManifests`, `HelmChart`, `ResourceGraphDefinition`, `Crossplane`, `OCIBundle`). We don't ask customers to switch reconcilers.
 
 ## The one akua-specified shape

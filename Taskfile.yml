@@ -1,6 +1,13 @@
 version: "3"
 
 # Akua dev tasks. Run `task --list` to see available tasks.
+#
+# Invariant: every render runs in a wasmtime WASI sandbox. No shell-out.
+# See CLAUDE.md + docs/security-model.md.
+
+vars:
+  HELM_ENGINE_WASM: crates/helm-engine-wasm/assets/helm-engine.wasm
+  KUSTOMIZE_ENGINE_WASM: crates/kustomize-engine-wasm/assets/kustomize-engine.wasm
 
 tasks:
   default:
@@ -8,8 +15,10 @@ tasks:
     cmds:
       - task --list
 
+  # ---- Build / test / check ------------------------------------------------
+
   build:
-    desc: Build the Rust workspace
+    desc: Build the Rust workspace (no wasm engines — sandbox-only features)
     cmds:
       - cargo build --workspace
 
@@ -46,6 +55,8 @@ tasks:
       - task: lint
       - task: test
 
+  # ---- Release builds ------------------------------------------------------
+
   release:local:
     desc: Build the release binary locally
     cmds:
@@ -61,7 +72,53 @@ tasks:
       - '{{.CARGO}} build --release -p akua-cli --target {{.TARGET}}'
       - ls -lh target/{{.TARGET}}/release/akua
 
+  # ---- Embedded engines (wasip1; built by Go toolchain, hosted by wasmtime)
+  # Each engine is a Go program compiled to `wasm32-wasip1` and embedded in
+  # akua-core. Never shell-out — see CLAUDE.md invariant.
+
+  build:helm-engine-wasm:
+    desc: Build the embedded Helm v4 template engine (Go → wasip1)
+    dir: crates/helm-engine-wasm
+    status:
+      - test -f {{.HELM_ENGINE_WASM}}
+    cmds:
+      - ./fork/apply.sh                    # clones helm@v4.x, applies client-go strip patch
+      - cd go-src && GOOS=wasip1 GOARCH=wasm go build -ldflags='-s -w' -o ../assets/helm-engine.wasm .
+      - ls -lh ../{{.HELM_ENGINE_WASM}}
+
+  build:kustomize-engine-wasm:
+    desc: Build the embedded kustomize engine (Go → wasip1) — Phase 3
+    dir: crates/kustomize-engine-wasm
+    status:
+      - test -f {{.KUSTOMIZE_ENGINE_WASM}}
+    cmds:
+      - echo "TODO (Phase 3 of docs/roadmap.md) — not yet implemented"
+      - exit 1
+
+  build:engines:
+    desc: Build every embedded engine
+    cmds:
+      - task: build:helm-engine-wasm
+      - task: build:kustomize-engine-wasm
+
+  # ---- Sandbox test harness (Phase 4+) -------------------------------------
+
+  test:sandbox:
+    desc: Run the wasmtime-hosted render worker against the examples
+    deps:
+      - build:engines
+    cmds:
+      - echo "TODO (Phase 4 of docs/roadmap.md) — not yet implemented"
+      - exit 1
+
+  # ---- Clean ---------------------------------------------------------------
+
   clean:
     desc: Remove Rust target/
     cmds:
       - cargo clean
+
+  clean:engines:
+    desc: Remove embedded engine artifacts
+    cmds:
+      - rm -f {{.HELM_ENGINE_WASM}} {{.KUSTOMIZE_ENGINE_WASM}}
