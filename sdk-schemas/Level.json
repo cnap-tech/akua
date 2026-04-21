@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Level",
+  "description": "Log severity. Almost always `Error`; `Warn` for recoverable issues.",
+  "type": "string",
+  "enum": [
+    "error",
+    "warn"
+  ]
+}

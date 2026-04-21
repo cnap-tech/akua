@@ -21,6 +21,12 @@ engine-helm-shell = ["engine-kcl"]
 # enable only when regenerating @akua/sdk type bindings:
 # `cargo test -p akua-core --features ts-export export_bindings`.
 ts-export = ["dep:ts-rs"]
+# Emit JSON Schema documents from serde types — the polyglot contract
+# any language can bind to (ajv/Zod in TS, pydantic in Python,
+# gojsonschema in Go, etc.). Off by default; enable to regenerate
+# the schema bundle:
+# `cargo test -p akua-core --features schema-export export_json_schema`.
+schema-export = ["dep:schemars"]
 
 [dependencies]
 serde = { workspace = true }
@@ -29,6 +35,7 @@ serde_yaml = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
 ts-rs = { version = "11", optional = true }
+schemars = { version = "1", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 kcl-lang = { git = "https://github.com/kcl-lang/lib", optional = true }
