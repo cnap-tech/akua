@@ -1,14 +1,11 @@
 # 09-kustomize-hello
 
-> **Status: temporarily broken.** The shell-out kustomize backend was
-> removed in `e5b77dc` / Phase 0 of [`docs/roadmap.md`](../../docs/roadmap.md).
-> `kustomize.build` now returns `E_ENGINE_NOT_AVAILABLE` until the
-> embedded `kustomize-engine-wasm` lands (Phase 3). See
-> [`docs/security-model.md`](../../docs/security-model.md) — akua
-> doesn't shell out to external binaries in the render path, ever.
->
-> This Package's source stays intact as the target shape for the embedded
-> engine to satisfy. Rendering will resume once Phase 3 ships.
+> **Renders end-to-end** via the embedded `kustomize-engine-wasm`. No
+> `kustomize` binary on `$PATH` needed or consulted. Kustomize runs
+> inside a wasmtime WASI sandbox against an in-memory filesystem
+> unpacked from a tar.gz sent over the WASM ABI. See
+> [`docs/security-model.md`](../../docs/security-model.md) +
+> [`docs/roadmap.md`](../../docs/roadmap.md) Phase 3.
 
 Smallest Package that exercises akua's `kustomize.build` engine
 callable end-to-end.
@@ -25,8 +22,8 @@ callable end-to-end.
 ## Render
 
 ```sh
-cargo run -q --features engine-kustomize-shell -p akua-cli -- \
-    render --package examples/09-kustomize-hello/package.k --out ./rendered
+task build:kustomize-engine-wasm          # once per machine
+akua render --package examples/09-kustomize-hello/package.k --out ./rendered
 ```
 
 The rendered `ConfigMap` lands at

@@ -95,13 +95,13 @@ tasks:
       - exit 1
 
   build:kustomize-engine-wasm:
-    desc: Build the embedded kustomize engine (Go → wasip1) — Phase 3
+    desc: Build the embedded kustomize engine (Go → wasip1, stock kustomize; ~26 MB wasm)
     dir: crates/kustomize-engine-wasm
     status:
-      - test -f {{.KUSTOMIZE_ENGINE_WASM}}
+      - test -f assets/kustomize-engine.wasm
     cmds:
-      - echo "TODO (Phase 3 of docs/roadmap.md) — not yet implemented"
-      - exit 1
+      - cd go-src && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -ldflags='-s -w' -o ../assets/kustomize-engine.wasm .
+      - ls -lh assets/kustomize-engine.wasm
 
   build:engines:
     desc: Build every embedded engine

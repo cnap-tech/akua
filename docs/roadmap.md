@@ -89,16 +89,21 @@ Spec-to-code convergence. [docs/package-format.md §2](package-format.md) and [d
 
 ---
 
-## Phase 3 — `kustomize-engine-wasm` (1-2 weeks)
+## Phase 3 — `kustomize-engine-wasm` (SHIPPED — 2026-04-21)
 
-Same pattern as Phase 1, different upstream. `sigs.k8s.io/kustomize/kustomize/v5` Go → wasm32-wasip1.
+Same pattern as Phase 1, different upstream. `sigs.k8s.io/kustomize/api` +
+`sigs.k8s.io/kustomize/kyaml` Go → `wasm32-wasip1`. Tar.gz sent over
+linear memory; guest unpacks into `filesys.MakeFsInMemory()` so there
+are no host-side preopens to grant.
 
-- [ ] `crates/kustomize-engine-wasm/` scaffold + `go-src/` wrapper
-- [ ] Wasmtime host exposes `kustomize.build` plugin over the embedded engine
-- [ ] Example 09-kustomize-hello renders via embedded engine
-- [ ] Taskfile target `build:kustomize-engine-wasm`
+- [x] `crates/kustomize-engine-wasm/` scaffold — Cargo.toml, build.rs, src/lib.rs, go-src/main.go
+- [x] Wasmtime host in `src/lib.rs` exposes `render_dir` / `render_tar` API
+- [x] `crates/akua-core/src/kustomize.rs` plugin handler — same `akua.kustomize.Build` schema, swaps in behind `engine-kustomize` feature (default-on)
+- [x] `examples/09-kustomize-hello` renders end-to-end — **verified with `PATH=/nonexistent`**; byte-identical sha256 to prior shell-out render
+- [x] Taskfile target `build:kustomize-engine-wasm` (26 MB stock wasm)
+- [x] Integration test `tests/examples_kustomize_hello.rs` restored
 
-**Exit gate:** `examples/09-kustomize-hello` renders without `kustomize` on PATH.
+**Exit gate:** ✅ `examples/09-kustomize-hello` renders in a sandbox. `kustomize` on PATH never consulted.
 
 ---
 

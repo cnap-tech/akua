@@ -25,15 +25,14 @@ Working examples of akua Packages, Apps, Environments, and Policies. Each direct
 | 06 | [06-multi-engine/](06-multi-engine/) | Helm + Kustomize + kro RGD + inline KCL resources in one Package, flattened into one raw-manifest render | ⏳ Phases 1 + 3 + `kro.rgd` transformation |
 | 07 | [07-package-reuse/](07-package-reuse/) | one akua Package composing another via `pkg.render()` — nested `Input` schemas, OCI-pinned base, attestation-chain provenance | ⏳ needs OCI fetch (path-based composition works — see 08) |
 | 08 | [08-pkg-compose/](08-pkg-compose/) | pure-KCL Package-of-Packages composition — outer calls `pkg.render("./shared", …)` twice, renders two ConfigMaps | ✅ |
-| 09 | [09-kustomize-hello/](09-kustomize-hello/) | smallest `kustomize.build` example — overlay adds a namePrefix + labels to a base ConfigMap | ⏳ waiting on `kustomize-engine-wasm` (roadmap Phase 3) |
+| 09 | [09-kustomize-hello/](09-kustomize-hello/) | smallest `kustomize.build` example — overlay adds a namePrefix + labels to a base ConfigMap | ✅ via embedded `kustomize-engine-wasm` |
 
 What **does** run today:
 
 - Any pure-KCL Package (no engine imports). The `akua init` scaffold is a minimal working example.
 - `examples/00-helm-hello/` — embedded WASM Helm engine. Requires `task build:helm-engine-wasm` once.
 - `examples/08-pkg-compose/` — pure-KCL Package-of-Packages composition via `pkg.render`.
-
-Example 09 used to shell out to `kustomize`. That path was removed in Phase 0 — akua doesn't shell out from the render path, ever. The Package stays as the target shape for the embedded kustomize WASM engine (Phase 3 of [`docs/roadmap.md`](../docs/roadmap.md)).
+- `examples/09-kustomize-hello/` — embedded WASM kustomize engine. Requires `task build:kustomize-engine-wasm` once.
 
 ---
 
