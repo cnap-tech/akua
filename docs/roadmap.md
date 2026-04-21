@@ -64,11 +64,10 @@ Research recommendation: revive akua's deleted fork, not vendor kclipper. Prior 
 - [x] Wasmtime host in `crates/helm-engine-wasm/src/lib.rs` — loads `.cwasm`, renders via `pkg/engine.Render`
 - [x] Plugin handler `crates/akua-core/src/helm.rs` — same `akua.helm.Template` schema, swaps in behind `engine-helm` feature
 - [x] `examples/00-helm-hello` renders end-to-end via the embedded engine — **verified with `PATH=/nonexistent`**; byte-identical sha256 to prior shell-out render
-- [ ] Benchmark: confirm warm render stays under the 100ms dev-loop budget (deferred to Phase 1c)
-- [ ] Phase 1b: apply `fork/helm-v4.1.4.patch` to strip client-go (75 MB → 20 MB)
-- [ ] Phase 1c: update `docs/performance.md` with embedded-engine numbers
+- [x] Phase 1c: benchmark refreshed in `docs/performance.md` with embedded-engine numbers. Found: ~120 ms per cold `helm.template` call (3× slower than shell-out) due to `Module::deserialize` + Go runtime init per invocation. Three mitigations documented in §5; amortization work tracked under Phase 4 (persistent Engine in dev/serve).
+- [ ] Phase 1b: apply `fork/helm-v4.1.4.patch` to strip client-go (75 MB → 20 MB). Cuts deserialize by ~70%.
 
-**Exit gate:** ✅ `examples/00-helm-hello` renders in a sandbox. `helm` on PATH never consulted. Phase 1a complete; 1b + 1c are size + bench follow-ups.
+**Exit gate:** ✅ `examples/00-helm-hello` renders in a sandbox. `helm` on PATH never consulted. Phase 1a + 1c done; 1b is the size follow-up.
 
 ---
 
