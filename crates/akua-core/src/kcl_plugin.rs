@@ -90,8 +90,9 @@ pub fn unregister(method: &str) -> bool {
 ///
 /// - `pkg.render` — always (pure Rust).
 /// - `helm.template` — when `engine-helm-shell` is on.
+/// - `kustomize.build` — when `engine-kustomize-shell` is on.
 ///
-/// Future (kustomize.build, rgd.instantiate) will plug in here as
+/// Future (rgd.instantiate, kyverno.check) will plug in here as
 /// their feature flags and engines land.
 pub fn install_builtin_plugins() {
     static INSTALLED: OnceLock<()> = OnceLock::new();
@@ -99,6 +100,8 @@ pub fn install_builtin_plugins() {
         crate::pkg_render::install();
         #[cfg(feature = "engine-helm-shell")]
         crate::helm::install();
+        #[cfg(feature = "engine-kustomize-shell")]
+        crate::kustomize::install();
     });
 }
 

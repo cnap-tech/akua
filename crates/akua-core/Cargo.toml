@@ -17,6 +17,10 @@ engine-kcl = ["dep:kcl-lang", "dep:sha2"]
 # not yet reintroduced). Requires `engine-kcl` because it plugs into
 # the KCL plugin bridge.
 engine-helm-shell = ["engine-kcl"]
+# Kustomize rendering via shell-out to the `kustomize` binary on PATH.
+# Same transitional-MVP posture as engine-helm-shell; will be replaced
+# by an embedded engine registered under the same plugin name.
+engine-kustomize-shell = ["engine-kcl"]
 
 [dependencies]
 serde = { workspace = true }

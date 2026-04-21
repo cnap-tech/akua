@@ -5,7 +5,7 @@
 #
 # Render:
 #
-#   akua render --package examples/08-pkg-compose/package.k --out ./deploy
+#   akua render --package examples/08-pkg-compose/package.k --out ./rendered
 #
 # Produces two ConfigMaps: `config-frontend` and `config-backend`,
 # each with its own data payload from the outer's inputs.

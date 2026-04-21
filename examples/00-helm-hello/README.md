@@ -22,22 +22,24 @@ cwd — point `--package` at this directory:
 
 ```sh
 cargo run -q --features engine-helm-shell -p akua-cli -- \
-    render --package examples/00-helm-hello/package.k --out ./deploy
+    render --package examples/00-helm-hello/package.k --out ./rendered
 ```
 
 Or from inside this directory:
 
 ```sh
-cargo run -q --features engine-helm-shell -p akua-cli -- render --out ./deploy
+cargo run -q --features engine-helm-shell -p akua-cli -- render --out ./rendered
 ```
 
 Once a release binary ships with the feature built in:
 
 ```sh
-akua render --package examples/00-helm-hello/package.k --out ./deploy
+akua render --package examples/00-helm-hello/package.k --out ./rendered
 ```
 
-The rendered `ConfigMap` lands at `./deploy/000-configmap-hello-greeting.yaml`.
+The rendered `ConfigMap` lands at `./rendered/000-configmap-hello-greeting.yaml`
+— already checked in alongside the example so you can eyeball the
+output without running anything.
 
 ## What's happening
 

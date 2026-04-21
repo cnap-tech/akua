@@ -6,7 +6,7 @@
 #
 # Render:
 #
-#   akua render --out ./deploy
+#   akua render --out ./rendered
 #
 # Inputs flow through KCL's `option()` mechanism; `inputs.example.yaml`
 # is auto-discovered when --inputs is omitted.

@@ -1,0 +1,8 @@
+apiVersion: v1
+data:
+  greeting: hello from kustomize base
+kind: ConfigMap
+metadata:
+  labels:
+    env: prod
+  name: prod-hello

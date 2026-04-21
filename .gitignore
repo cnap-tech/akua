@@ -3,7 +3,8 @@ target/
 **/*.rs.bk
 Cargo.lock.bak
 
-# Rendered output — users regenerate these locally.
+# Ad-hoc render scratchpads — users regenerate these locally.
+# `examples/*/rendered/` is checked in as reference output; `deploy/` is not.
 **/deploy/
 
 # Node

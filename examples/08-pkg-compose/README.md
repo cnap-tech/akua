@@ -16,19 +16,19 @@ the results. Renders end-to-end today (pure KCL; no helm needed).
 ## Render
 
 ```sh
-cargo run -q -p akua-cli -- render --package examples/08-pkg-compose/package.k --out ./deploy
+cargo run -q -p akua-cli -- render --package examples/08-pkg-compose/package.k --out ./rendered
 ```
 
 Or, from the example directory:
 
 ```sh
-akua render --out ./deploy
+akua render --out ./rendered
 ```
 
-Two ConfigMaps land in `./deploy/`:
+Two ConfigMaps land in `./rendered/` (checked in as reference output):
 
 ```
-deploy/
+rendered/
 ├── 000-configmap-frontend.yaml
 └── 001-configmap-backend.yaml
 ```

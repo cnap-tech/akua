@@ -25,12 +25,14 @@ Working examples of akua Packages, Apps, Environments, and Policies. Each direct
 | 06 | [06-multi-engine/](06-multi-engine/) | Helm + Kustomize + kro RGD + inline KCL resources in one Package, with per-source output routing | ❌ needs kustomize + kro engines |
 | 07 | [07-package-reuse/](07-package-reuse/) | one akua Package composing another via `pkg.render()` — nested `Input` schemas, OCI-pinned base, attestation-chain provenance | ❌ needs OCI fetch (path-based composition works — see 08) |
 | 08 | [08-pkg-compose/](08-pkg-compose/) | pure-KCL Package-of-Packages composition — outer calls `pkg.render("./shared", …)` twice, renders two ConfigMaps | ✅ |
+| 09 | [09-kustomize-hello/](09-kustomize-hello/) | smallest working `kustomize.build` example — overlay adds a namePrefix + labels to a base ConfigMap | ✅ with `engine-kustomize-shell` |
 
 What **does** run today:
 
 - Any pure-KCL Package (no engine imports). The `akua init` scaffold is a minimal working example.
 - `examples/00-helm-hello/` — exercises `helm.template` when built with the `engine-helm-shell` feature and a `helm` binary on PATH.
 - `examples/08-pkg-compose/` — pure-KCL Package-of-Packages composition via `pkg.render`.
+- `examples/09-kustomize-hello/` — exercises `kustomize.build` when built with the `engine-kustomize-shell` feature and a `kustomize` binary on PATH.
 
 ---
 

@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 const HELM_K: &str = include_str!("../stdlib/akua/helm.k");
+const KUSTOMIZE_K: &str = include_str!("../stdlib/akua/kustomize.k");
 const PKG_K: &str = include_str!("../stdlib/akua/pkg.k");
 
 /// Minimal `kcl.mod` — KCL's loader requires the external pkg root
@@ -45,6 +46,7 @@ pub fn stdlib_root() -> &'static Path {
         std::fs::create_dir_all(&dir).expect("mkdir akua stdlib tempdir");
         std::fs::write(dir.join("kcl.mod"), KCL_MOD).expect("write akua/kcl.mod");
         std::fs::write(dir.join("helm.k"), HELM_K).expect("write akua/helm.k");
+        std::fs::write(dir.join("kustomize.k"), KUSTOMIZE_K).expect("write akua/kustomize.k");
         std::fs::write(dir.join("pkg.k"), PKG_K).expect("write akua/pkg.k");
         dir
     })
@@ -64,11 +66,16 @@ mod tests {
         assert!(root.is_dir(), "root must be a directory: {}", root.display());
         assert!(root.join("kcl.mod").is_file());
         assert!(root.join("helm.k").is_file());
+        assert!(root.join("kustomize.k").is_file());
         assert!(root.join("pkg.k").is_file());
 
         let helm = std::fs::read_to_string(root.join("helm.k")).unwrap();
         assert!(helm.contains("kcl_plugin.helm"));
         assert!(helm.contains("template"));
+
+        let kustomize = std::fs::read_to_string(root.join("kustomize.k")).unwrap();
+        assert!(kustomize.contains("kcl_plugin.kustomize"));
+        assert!(kustomize.contains("build"));
 
         let pkg = std::fs::read_to_string(root.join("pkg.k")).unwrap();
         assert!(pkg.contains("kcl_plugin.pkg"));
