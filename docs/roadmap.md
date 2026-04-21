@@ -80,7 +80,7 @@ Goal: the signature experience.
 - `akua repl` (Rego + KCL).
 - `akua trace`, `akua cov` for policy evaluation inspection.
 - `akua query` against cluster-native Loki / Prom (no federation).
-- **`akua serve`** — long-lived daemon over Unix socket + HTTP bearer auth. REST + chunked JSON streaming. Exposes all render/policy/deploy verbs as HTTP endpoints. The SDK's daemon transport (`AkuaOptions.transport: 'daemon'`) connects here. Use case: high-throughput Temporal workers sharing a warm engine cache across hundreds of concurrent activities. Version handshake via `GET /v1/healthz` on connect.
+- **`akua serve`** — long-lived daemon over Unix socket + HTTP bearer auth. REST + chunked JSON streaming. Exposes all render/policy/deploy verbs as HTTP endpoints. The SDK's daemon transport (`AkuaOptions.transport: 'daemon'`) connects here. Use case: backend services running many concurrent render/policy calls sharing a warm engine cache. Version handshake via `GET /v1/healthz` on connect.
 
 Exit gate: solo-developer journey from [`masterplan §19.1`](../../cortex/workspaces/robin/akua-masterplan.md) runs end-to-end on a fresh laptop in under 5 minutes.
 

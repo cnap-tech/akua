@@ -863,7 +863,7 @@ The browser SDK loads the Rust core as a WASM module (once, lazily) and uses it 
 | **WASM-in-SDK** (default, v0.1+) | the Rust core is compiled to wasm32-unknown-unknown and bundled inside the npm/JSR package | SDK version = WASM module version; always in lockstep, no binary on `$PATH` required |
 | **Daemon** (`akua serve`, v0.3+) | the SDK connects to a running `akua` daemon over a Unix socket or HTTP | version checked at connect via `/v1/healthz`; allows sharing one long-lived process across many SDK clients |
 
-For most consumers — including Temporal activity workers — the WASM transport is the right choice. Load once, evaluate many times, no process isolation overhead, guaranteed version lockstep.
+For most consumers the WASM transport is the right choice. Load once, evaluate many times, no process isolation overhead, guaranteed version lockstep.
 
 The daemon transport exists for scenarios that need long-running hot state (warm KCL import cache, pre-compiled Helm WASM module) shared across many parallel callers. Use it when you have measured shell-call latency as a bottleneck at scale.
 
