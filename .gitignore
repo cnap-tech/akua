@@ -3,6 +3,9 @@ target/
 **/*.rs.bk
 Cargo.lock.bak
 
+# Rendered output — users regenerate these locally.
+**/deploy/
+
 # Node
 node_modules/
 dist/
