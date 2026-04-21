@@ -17,7 +17,7 @@ import { AkuaTransportError, classifyCliError } from './errors.ts';
 import { validateAs } from './validate.ts';
 
 export * from './errors.ts';
-export { AkuaContractError, validateAs } from './validate.ts';
+export { AkuaContractError, standardSchemaFor, validateAs } from './validate.ts';
 export type { VersionOutput };
 export type { ExitCode } from '../../../sdk-types/ExitCode.ts';
 export type { StructuredError, Level } from '../../../sdk-types/StructuredError.ts';

@@ -10,7 +10,8 @@
 // no transform step needed. Consumers who prefer Zod can derive via
 // json-schema-to-zod; this module is the canonical validator.
 
-import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020.js';
+import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020.js';
+import type { StandardSchemaV1 } from '@standard-schema/spec';
 
 import { AkuaError } from './errors.ts';
 import akuaSchema from '../../../sdk-schemas/akua.json' with { type: 'json' };
@@ -25,6 +26,12 @@ const bundle = akuaSchema as unknown as SchemaBundle;
 // Draft 2020-12 instance (matches the `$schema` in akua.json). `strict: false`
 // because schemars emits `format: "uint32"` etc. that ajv doesn't know natively.
 const ajv = new Ajv2020({ strict: false, allErrors: true });
+// Silence "unknown format" warnings for schemars' Rust-integer annotations.
+// Each is already captured structurally (`type: integer` + `minimum: 0`),
+// so declaring them as no-op formats loses no checking power.
+for (const f of ['uint8', 'uint16', 'uint32', 'uint64', 'int8', 'int16', 'int32', 'int64']) {
+	ajv.addFormat(f, true);
+}
 
 // Register the bundle once. Every per-type validator retrieved below is a
 // reference *into* this registered schema, so $refs resolve correctly and
@@ -96,4 +103,43 @@ export function validateAs<T>(schemaName: string, value: unknown): T {
 		throw new AkuaContractError(schemaName, validate.errors ?? [], value);
 	}
 	return value as T;
+}
+
+/**
+ * Turn one ajv error into a Standard Schema issue. `instancePath` is a
+ * JSON Pointer (`/outputs/0/name`); Standard Schema wants a path array
+ * of `PropertyKey`s, so we split + coerce numeric segments.
+ */
+function ajvErrorToIssue(err: ErrorObject): StandardSchemaV1.Issue {
+	const segments = (err.instancePath || '')
+		.split('/')
+		.filter(Boolean)
+		.map((seg) => (seg.match(/^\d+$/) ? Number(seg) : seg));
+	const msg = err.message ?? 'invalid value';
+	return segments.length > 0 ? { message: msg, path: segments } : { message: msg };
+}
+
+/**
+ * Build a StandardSchemaV1 adapter for a bundled type. Lets consumers
+ * plug `@akua/sdk`'s types into any framework that accepts Standard
+ * Schema — Hono validators, tRPC inputs, SvelteKit form() / remote(),
+ * react-hook-form resolvers — without a Zod/Valibot dependency.
+ *
+ * Usage:
+ *   import { standardSchemaFor } from '@akua/sdk';
+ *   const VersionSchema = standardSchemaFor<VersionOutput>('VersionOutput');
+ *   app.post('/version', validator(VersionSchema), ...);
+ */
+export function standardSchemaFor<T>(schemaName: string): StandardSchemaV1<unknown, T> {
+	const validate = compile(schemaName);
+	return {
+		'~standard': {
+			version: 1,
+			vendor: 'akua',
+			validate(value) {
+				if (validate(value)) return { value: value as T };
+				return { issues: (validate.errors ?? []).map(ajvErrorToIssue) };
+			},
+		},
+	};
 }
