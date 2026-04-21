@@ -57,3 +57,5 @@ coverage/
 
 # Claude Code worktrees
 .claude/worktrees/
+# Agent-spawned git worktrees at the repo root.
+.worktrees/
