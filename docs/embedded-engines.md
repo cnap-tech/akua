@@ -181,3 +181,4 @@ Agents get the full engine toolkit from one install with zero PATH management. W
 - **[package-format.md](package-format.md)** — KCL (the primary host)
 - **[policy-format.md](policy-format.md)** — OPA / Rego / Kyverno / CEL (the policy host + pluggable guests)
 - **[cli-contract.md §1.3 determinism](cli-contract.md#13-determinism)** — why embedding matters for reproducibility
+- **[security.md](security.md)** — how the WASM sandbox eliminates Helm renderer attack vectors (CVE-2022-24348, CVE-2024-29893)

@@ -77,4 +77,4 @@ See [`design-notes.md §engine-determinism`](./design-notes.md#10-engine-determi
 - [CLI reference](./cli.md) · [CLI contract](./cli-contract.md) · [SDK](./sdk.md)
 - [Package format](./package-format.md) · [Policy format](./policy-format.md)
 - [Lockfile format](./lockfile-format.md) · [Embedded engines](./embedded-engines.md)
-- [Agent usage](./agent-usage.md) · [Design notes](./design-notes.md) · [Roadmap](./roadmap.md)
+- [Security model](./security.md) · [Agent usage](./agent-usage.md) · [Design notes](./design-notes.md) · [Roadmap](./roadmap.md)
