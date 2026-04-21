@@ -55,7 +55,7 @@ const result = await akua.render({
   path: './my-pkg',
   inputs: { appName: 'checkout', hostname: 'checkout.example.com' }
 });
-console.log(result.outputs);  // [{ name, format, hash, manifests }]
+console.log(result.manifests, result.hash);  // e.g. 3, 'sha256:...'
 
 // publish
 const pub = await akua.publish({
@@ -210,25 +210,18 @@ interface RenderOptions {
   path?: string;               // package directory (default: cwd)
   inputs?: Record<string, unknown>;
   inputsFile?: string;
-  output?: string;             // named output; default: all
   outDir?: string;
   dryRun?: boolean;
-  format?: 'raw' | 'helm' | 'rgd' | 'xr' | 'oci';
 }
 
 interface RenderResult {
-  outputs: RenderedOutput[];
-  policy: PolicyVerdict;
-  attestationPath?: string;
-}
-
-interface RenderedOutput {
-  name: string;
-  format: string;
+  format: 'raw-manifests';
   target: string;
-  manifestCount: number;
+  manifests: number;
   hash: string;                // sha256
-  manifestPaths: string[];
+  files: string[];
+  policy?: PolicyVerdict;
+  attestationPath?: string;
 }
 
 interface PublishOptions {

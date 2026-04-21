@@ -72,10 +72,6 @@ _dashboard = {
 
 # Aggregate.
 resources = [*_base, _dashboard]
-
-outputs = [
-    { kind: "RawManifests", target: "./rendered" }
-]
 ```
 
 Three things fall out of this shape:

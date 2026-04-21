@@ -100,13 +100,6 @@ _app = helm.template(webapp.Chart {
 })
 
 resources = [*_pg, *_app]
-
-outputs = [
-    {
-        kind:   "RawManifests"
-        target: "./"
-    }
-]
 ```
 
 ### 6. Migrate transforms
@@ -155,7 +148,7 @@ Once the akua Package renders identically and a production run has succeeded, de
 
 - **Helmfile hooks** (`hooks.prepare`, `hooks.postsync`) — akua has no equivalent by design; use Argo/Flux PreSync/PostSync hooks or a Runbook.
 - **Helmfile's `needs:` ordering** — replaced by Kubernetes' level-triggered reconciliation (works for most cases) or by emitting `kro` RGD output for explicit runtime late-binding.
-- **Helmfile's `selectors` for partial apply** — use named outputs and per-environment inputs instead; see [examples/03-multi-env-app](../../examples/03-multi-env-app/).
+- **Helmfile's `selectors` for partial apply** — use per-environment inputs (or separate Packages composed via `pkg.render`); see [examples/03-multi-env-app](../../examples/03-multi-env-app/).
 
 ## Failure modes
 

@@ -28,7 +28,7 @@ akua is a pre-alpha project; the pivot is a **surgical rewrite, not a greenfield
 | `crates/akua-core/src/schema.rs` | `x-user-input` / `x-install` vocabulary → `@ui` decorators on KCL schemas (see [`package-format.md`](./package-format.md)) |
 | `crates/akua-core/src/source.rs` | `package.yaml` + `engine:` field loader → `Package.k` KCL loader |
 | `crates/akua-core/src/engine/` | Engine trait kept; impls become **callables from KCL** (`helm.template()`, `kustomize.build()`, `rgd.instantiate()`) instead of `Engine::prepare()` invoked by umbrella assembler |
-| `crates/akua-core/src/render.rs` | Umbrella assembly → KCL program execution; `resources = [...]` + `outputs = [...]` shape per [`package-format.md`](./package-format.md) |
+| `crates/akua-core/src/render.rs` | Umbrella assembly → KCL program execution; top-level `resources = [...]` is the single render output per [`package-format.md`](./package-format.md) |
 | `crates/akua-core/src/values.rs` | CEL transforms → KCL-native composition (schemas + `check:` blocks replace runtime CEL in most cases) |
 | `packages/sdk/src/*.ts` | JSR publish kept; API surface expanded for parity with 30-verb CLI |
 | `packages/ui/src/*.ts` | Empty today; populate per Phase E |
@@ -138,7 +138,7 @@ Each task below is sized for a single agent session (~1–3 hours of focused wor
 
 **A.5 — `akua render` (KCL-only)**
 - Spec: [`cli.md`](./cli.md) `render` section + [`package-format.md`](./package-format.md) output format
-- Deliverable: execute a `Package.k` with given inputs, produce `resources[]` + `outputs[]` per the KCL program's declarations. KCL-only (no Helm, no Kustomize yet).
+- Deliverable: execute a `Package.k` with given inputs, produce `resources[]` per the KCL program's top-level binding. KCL-only (no Helm, no Kustomize yet).
 - Tests: `examples/01-hello-webapp` produces expected manifests; byte-identical across three runs.
 - Depends on: A.2, A.4.
 

@@ -132,12 +132,9 @@ fn init_then_render_produces_deterministic_manifests() {
     assert_exit(&out, 0);
 
     let parsed = stdout_json(&out);
-    assert_eq!(parsed["outputs"][0]["manifests"], 1);
-    assert_eq!(parsed["outputs"][0]["format"], "raw-manifests");
-    assert!(parsed["outputs"][0]["hash"]
-        .as_str()
-        .unwrap()
-        .starts_with("sha256:"));
+    assert_eq!(parsed["manifests"], 1);
+    assert_eq!(parsed["format"], "raw-manifests");
+    assert!(parsed["hash"].as_str().unwrap().starts_with("sha256:"));
 
     // The sole ConfigMap landed on disk under the scaffolded name.
     assert!(app.join("deploy").join("000-configmap-hello.yaml").is_file());
@@ -154,7 +151,7 @@ fn init_then_render_without_inputs_flag_uses_scaffold_inputs_example() {
     let out = run(&app, &["render", "--out", "./deploy", "--json"]);
     assert_exit(&out, 0);
     let parsed = stdout_json(&out);
-    assert_eq!(parsed["outputs"][0]["manifests"], 1);
+    assert_eq!(parsed["manifests"], 1);
     assert!(app.join("deploy/000-configmap-hello.yaml").is_file());
 }
 

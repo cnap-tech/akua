@@ -8,7 +8,7 @@ This document specifies what a `package.k` file may contain. Companion reference
 
 ## 1. Anatomy
 
-Every Package is one KCL program with four typed regions:
+Every Package is one KCL program with three typed regions:
 
 ```python
 # package.k
@@ -24,21 +24,22 @@ schema Input:
     hostname: str
     replicas: int = 3
 
-input: Input
+input: Input = option("input") or Input {}
 
-# (3) body — source engine calls + transforms + aggregation
-_pg  = helm.template(cnpg.Chart { values = cnpg.Values { ... } })
-_app = helm.template(webapp.Chart { values = webapp.Values { ... } })
+# (3) body — source-engine calls + transforms + aggregation
+_pg  = helm.template(helm.Template { chart = cnpg.Chart,   values = ... })
+_app = helm.template(helm.Template { chart = webapp.Chart, values = ... })
 
-resources = [*_pg, *_app]
-
-# (4) outputs — what formats akua emits
-outputs = [
-    { kind: "RawManifests", target: "./" }
-]
+resources = _pg + _app
 ```
 
-The four regions have strict rules. Everything else is disallowed or by convention.
+That's it. `akua render` writes `resources` as raw YAML files under
+`--out`. Other distribution shapes (Helm charts, OCI bundles, kro RGDs)
+come from either (a) **transformation** functions invoked in the body
+that produce more K8s resources (`kro.rgd(...)`, `crossplane.composition(...)`),
+or (b) future `akua publish --as <format>` at distribution time. The
+Package itself never pre-commits to an emit format — `resources` is
+the single canonical thing it produces.
 
 ---
 
@@ -252,84 +253,40 @@ KCL `check:` blocks evaluate at render time against each resource; failures surf
 
 ---
 
-## 5. Outputs — what akua emits
+## 5. The render output
 
-The `outputs` array declares target format(s). Each item has optional `name` for per-source routing (see §6).
+`akua render --out ./deploy` writes every entry in `resources` as its
+own YAML file in `./deploy/`. Filenames are deterministic
+(`<NNN>-<kind>-<name>.yaml`), ordered by resource-list position.
 
-**Omitting `outputs` is equivalent to:**
-
-```python
-outputs = [{ kind: "RawManifests", target: "./" }]
+```
+deploy/
+├── 000-configmap-hello.yaml
+├── 001-service-hello.yaml
+└── 002-deployment-hello.yaml
 ```
 
-— i.e. every resource emitted as raw YAML under `--out`. Declare `outputs`
-explicitly when you need multiple targets, a non-`RawManifests` kind, or
-per-source routing.
+Raw manifests are akua's single render shape. Downstream systems that
+want a different shape use one of:
 
-```python
-outputs = [
-    {
-        kind:   "RawManifests"
-        target: "./"
-    }
-]
-```
+- **In-body transformations** — a KCL function (present or future) that
+  consumes resources and returns more K8s resources. `kro.rgd(...)`,
+  `crossplane.composition(...)`, `kyverno.policy(...)` all fit this
+  mould: they produce CRDs + composite resources that go into
+  `resources` alongside everything else, and ship as plain YAML.
+- **Future distribution verbs** — `akua publish --as helm-chart`
+  wraps rendered manifests into a Helm chart at distribution time;
+  `akua publish --as oci-bundle` signs and packages them. These are
+  distribution concerns, not render concerns — the Package's `resources`
+  are the input, not a pre-declared output list.
 
-Supported `kind` values and their shapes:
-
-| kind | artifact | when to use |
-|---|---|---|
-| `RawManifests` | YAML files under `target/` | default for Compiled GitOps; ArgoCD/Flux/kubectl consume |
-| `HelmChart` | `Chart.yaml` + templates (or `.tgz` at publish time) | customer needs Helm release lifecycle |
-| `ResourceGraphDefinition` | a kro-compatible RGD | late-binding at runtime via kro controller |
-| `Crossplane` | XR + Composition | multi-cloud infra compositions |
-| `OCIBundle` | multi-layer OCI artifact | signed distribution; future-format-ready |
-| `WASMRenderer` | self-hosting artifact containing the renderer | v2 / Gen-4 / edge / browser |
-
-Each output kind may accept additional fields specific to that format:
-
-```python
-outputs = [
-    {
-        kind:   "RawManifests"
-        target: "./deploy"
-    },
-    {
-        kind:      "HelmChart"
-        target:    "oci://pkg.example.com/my-app"
-        chartName: input.appName
-        appVersion: "1.0.0"
-    },
-    {
-        kind:   "ResourceGraphDefinition"
-        target: "./rgd"
-        name:   "platform-app"
-    }
-]
-```
+This keeps the Package shape trivially uniform: one `resources` list,
+one render target. Authors reason about what exists; the CLI decides
+how it ships.
 
 ---
 
-## 6. Per-source output routing
-
-Advanced: a package with mixed runtime requirements can route different sources to different outputs. Most packages have one output and don't use this.
-
-```python
-outputs = [
-    { name: "static",  kind: "RawManifests", target: "./deploy" },
-    { name: "runtime", kind: "ResourceGraphDefinition", target: "./deploy/rgd" }
-]
-
-_pg  = helm.template(cnpg.Chart { ... }, output = "static")
-_app = helm.template(webapp.Chart { ... }, output = "static")
-_glue = rgd.instantiate(glue.RGD, { ... }, output = "runtime")   # needs runtime late-binding
-```
-
-An omitted `output = ...` defaults to every unnamed output. Two reconcilers can cooperate on the same deploy because they create different resources with different owner references.
-
----
-
-## 7. Metadata
+## 6. Metadata
 
 Optional top-level metadata that `akua` tooling surfaces in `inspect`, `diff`, and publishing:
 
@@ -357,7 +314,7 @@ All fields optional; missing fields default to package-name-and-version derived 
 
 ---
 
-## 8. What's disallowed
+## 7. What's disallowed
 
 Because determinism and the WASI sandbox are load-bearing:
 
@@ -371,7 +328,7 @@ Violation of any of these is a compile error with a clear message.
 
 ---
 
-## 9. Rendering model
+## 8. Rendering model
 
 `akua render`:
 
@@ -379,15 +336,15 @@ Violation of any of these is a compile error with a clear message.
 2. Loads `input` from inputs file (YAML or KCL). Validates against the `Input` schema.
 3. Resolves dependencies via `akua.toml` / `akua.lock`. Pulls and verifies signed artifacts.
 4. Evaluates the KCL program. Every engine call happens here (in-process, sandboxed).
-5. Collects the `resources` list and partitions by output routing.
-6. Emits each output according to its `kind`.
-7. Writes `attestation.json` (SLSA v1 predicate) to the primary output directory.
+5. Collects the `resources` list — expanding any post-eval sentinels (`pkg.render`).
+6. Writes each resource as its own YAML file under `--out`.
+7. (Future) Writes `attestation.json` (SLSA v1 predicate) alongside the manifests.
 
 Every step is deterministic: same inputs + same `akua.lock` + same `akua` version → byte-identical output.
 
 ---
 
-## 10. Minimal example
+## 9. Minimal example
 
 The smallest possible Package:
 
@@ -399,26 +356,23 @@ import charts.nginx as nginx
 schema Input:
     hostname: str
 
-input: Input
+input: Input = option("input") or Input {}
 
-_nginx = helm.template(nginx.Chart {
+_nginx = helm.template(helm.Template {
+    chart  = nginx.Chart
     values = nginx.Values {
         ingress.hostname = input.hostname
     }
 })
 
 resources = _nginx
-
-outputs = [
-    { kind: "RawManifests", target: "./" }
-]
 ```
 
 See [examples/01-hello-webapp](../examples/01-hello-webapp/) for the fully runnable version.
 
 ---
 
-## 11. Testing Packages
+## 10. Testing Packages
 
 Packages ship with tests. The test runner is built into `akua test`; no separate framework required.
 
@@ -505,7 +459,7 @@ Packages without tests ship with a lint warning; platform teams can enforce a po
 
 ---
 
-## 12. Relationship to other docs
+## 11. Relationship to other docs
 
 - **[cli.md — `akua init` / `akua add` / `akua render` / `akua export` / `akua test` / `akua publish`](cli.md)** — the verbs that operate on packages. `render` runs the program; `export` converts the canonical form to a view.
 - **[lockfile-format.md](lockfile-format.md)** — how `akua.toml` + `akua.lock` pin imports

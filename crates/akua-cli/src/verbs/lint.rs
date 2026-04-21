@@ -156,7 +156,6 @@ schema Input:
 input: Input = option("input") or Input {}
 
 resources = []
-outputs = [{ kind: "RawManifests", target: "./" }]
 "#;
 
     const BROKEN: &str = "schema Input:\n  !!!\n";

@@ -148,7 +148,7 @@ Or via reconciler:
   kubectl apply -f argocd-application.yaml
 ```
 
-`akua` is a build tool here. No hosting platform, no install UI. The output is a vanilla Helm chart (or raw manifests, or RGD, or whatever format the Package's `outputs` declared) — any OCI-aware consumer works.
+`akua` is a build tool here. No hosting platform, no install UI. The output is raw manifests any OCI-aware consumer works with; future `akua publish --as helm-chart` / `--as oci-bundle` will wrap the render into other distribution shapes at publish time.
 
 ---
 

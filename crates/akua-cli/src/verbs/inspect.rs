@@ -144,12 +144,10 @@ schema Input:
 input: Input = option("input") or Input {}
 
 resources = []
-outputs = [{ kind: "RawManifests", target: "./" }]
 "#;
 
     const NO_OPTIONS: &str = r#"
 resources = []
-outputs = [{ kind: "RawManifests", target: "./" }]
 "#;
 
     fn write_pkg(body: &str) -> (TempDir, PathBuf) {

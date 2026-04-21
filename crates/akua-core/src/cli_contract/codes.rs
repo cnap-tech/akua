@@ -20,9 +20,6 @@ pub const E_PACKAGE_PARSE: &str = "E_PACKAGE_PARSE";
 pub const E_INPUTS_MISSING: &str = "E_INPUTS_MISSING";
 pub const E_INPUTS_PARSE: &str = "E_INPUTS_PARSE";
 pub const E_RENDER_KCL: &str = "E_RENDER_KCL";
-pub const E_RENDER_OUTPUT_NOT_FOUND: &str = "E_RENDER_OUTPUT_NOT_FOUND";
-pub const E_RENDER_OUTPUT_AMBIGUOUS: &str = "E_RENDER_OUTPUT_AMBIGUOUS";
-pub const E_RENDER_UNSUPPORTED_KIND: &str = "E_RENDER_UNSUPPORTED_KIND";
 pub const E_RENDER_YAML: &str = "E_RENDER_YAML";
 
 // ----- Init ----------------------------------------------------------------

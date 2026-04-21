@@ -38,5 +38,3 @@ _manifests = helm.template(helm.Template {
 })
 
 resources = _manifests
-
-# `outputs` omitted — defaults to `[{kind: "RawManifests", target: "./"}]`.

@@ -101,18 +101,14 @@ resources = _pg
 
 Each call returns a list of typed Kubernetes resources. Concatenate them with `[*_pg, *_app, ...]`.
 
-### 5. Declare outputs
+### 5. Render output
 
-```python
-outputs = [
-    {
-        kind:   "RawManifests"
-        target: "./"
-    }
-]
-```
-
-Most packages have one `RawManifests` output. Advanced: emit `ResourceGraphDefinition` for kro runtime late-binding, or `HelmChart` for Helm-release lifecycle, or multiple in parallel. See [docs/cli.md — akua render](../../docs/cli.md#akua-render).
+`akua render --out ./deploy` writes every entry in `resources` as its own
+YAML file under `./deploy/`. No output-kind declaration — raw manifests
+is the single render shape. Ecosystem-specific shapes come either from
+in-body transformation functions (`kro.rgd(...)`, `crossplane.composition(...)`
+that produce K8s manifests joined into `resources`) or from future
+distribution verbs like `akua publish --as <format>`. See [docs/cli.md — akua render](../../docs/cli.md#akua-render).
 
 ### 6. Validate
 

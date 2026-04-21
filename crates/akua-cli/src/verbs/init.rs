@@ -178,11 +178,6 @@ resources = [{
     metadata.name: input.appName
     data.replicas: str(input.replicas)
 }]
-
-# `outputs` is optional — omitted here means:
-#   outputs = [{ kind: "RawManifests", target: "./" }]
-# Declare it explicitly to route groups to different directories or
-# emit in other formats (HelmChart, ResourceGraphDefinition, OCIBundle).
 "#;
 
 const INPUTS_EXAMPLE: &str = r#"appName: hello
@@ -309,6 +304,5 @@ mod tests {
         .expect("inputs.yaml parses");
         let rendered = loaded.render(&inputs).expect("renders");
         assert_eq!(rendered.resources.len(), 1);
-        assert_eq!(rendered.outputs[0].kind, "RawManifests");
     }
 }

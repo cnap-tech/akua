@@ -93,7 +93,6 @@ On `akua inspect --json`:
   "sources": [
     {"kind": "helm", "chart": "cnpg-cluster", "version": "0.20.0"}
   ],
-  "outputs": ["raw-manifests"],
   "attestation": {
     "slsa_level": 3,
     "builder": "github.com/example/webapp/.github/workflows/release.yml"

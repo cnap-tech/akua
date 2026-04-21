@@ -536,8 +536,6 @@ resources = [{
     metadata.name: "plugin-demo"
     data.greeting: greet.hello("akua")
 }]
-
-outputs = [{ kind: "RawManifests", target: "./" }]
 "#;
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("package.k");

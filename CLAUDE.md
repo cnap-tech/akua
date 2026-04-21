@@ -72,7 +72,7 @@ Violations of these are architectural bugs:
 
 ## The one akua-specified shape
 
-- **`Package.k`** — a KCL program with four regions (imports / schema / body / outputs), publishable to OCI, signed, deterministically rendered. See [docs/package-format.md](docs/package-format.md).
+- **`Package.k`** — a KCL program with three regions (imports / schema / body), publishable to OCI, signed, deterministically rendered. Top-level `resources = [...]` is the single render output; akua writes raw YAML. See [docs/package-format.md](docs/package-format.md).
 
 That's it. akua does **not** specify `App`, `Environment`, `Cluster`, `Secret`, `SecretStore`, `Gateway`, `PolicySet`, `Runbook`, `Rollout`, `Budget`, `Incident`, `Experiment`, or `Tenant` as akua-owned kinds. Users define their own schemas for those concepts in their workspace, shaped to their reality; ecosystems like ArgoCD / Flux / kro consume the rendered raw-Kubernetes output. akua Cloud may carry its own Convex-backed schemas for coordination concepts (Workspace, Tenant, etc.) — those live in Cloud, not in the OSS surface.
 

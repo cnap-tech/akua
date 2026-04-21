@@ -23,5 +23,3 @@ resources = [{
     }
     data: input.payload
 }]
-# `outputs` omitted — inner Package's resources are spliced into
-# the outer's `resources`, so the outer's outputs drive emission.

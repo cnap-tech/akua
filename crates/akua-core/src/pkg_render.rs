@@ -172,8 +172,6 @@ resources = [{
     kind: "ConfigMap"
     metadata.name: input.name
 }]
-
-outputs = [{ kind: "RawManifests", target: "./" }]
 "#;
 
     #[test]
@@ -188,9 +186,7 @@ import kcl_plugin.pkg
 
 _nested = pkg.render({ path = "./inner.k", inputs = { name = "from-outer" } })
 
-resources = _nested
-outputs = [{ kind: "RawManifests", target: "./" }]
-"#,
+resources = _nested"#,
         );
 
         let outer = PackageK::load(&outer_path).expect("load outer");
@@ -218,9 +214,7 @@ import kcl_plugin.pkg
 
 _self = pkg.render({ path = "./cyclic.k" })
 
-resources = _self
-outputs = [{ kind: "RawManifests", target: "./" }]
-"#,
+resources = _self"#,
         );
 
         let pkg = PackageK::load(&tmp.path().join("cyclic.k")).expect("load");
@@ -246,9 +240,7 @@ import kcl_plugin.pkg
 # Directory, not a file — pkg.render appends package.k.
 _rs = pkg.render({ path = "./nested" })
 
-resources = _rs
-outputs = [{ kind: "RawManifests", target: "./" }]
-"#,
+resources = _rs"#,
         );
 
         let outer = PackageK::load(&outer_path).expect("load");
@@ -273,9 +265,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
             r#"
 import kcl_plugin.pkg
 
-resources = pkg.render({ path = "./deep.k", inputs = { name = "deep-from-middle" } })
-outputs = [{ kind: "RawManifests", target: "./" }]
-"#,
+resources = pkg.render({ path = "./deep.k", inputs = { name = "deep-from-middle" } })"#,
         );
         let outer_path = write(
             tmp.path(),
@@ -283,9 +273,7 @@ outputs = [{ kind: "RawManifests", target: "./" }]
             r#"
 import kcl_plugin.pkg
 
-resources = pkg.render({ path = "./middle.k" })
-outputs = [{ kind: "RawManifests", target: "./" }]
-"#,
+resources = pkg.render({ path = "./middle.k" })"#,
         );
 
         let outer = PackageK::load(&outer_path).expect("load");

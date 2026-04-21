@@ -43,7 +43,7 @@ $ akua render
 
 # Agent context — auto-JSON, no flag needed
 $ CLAUDECODE=1 akua render
-{"outputs":[...],"policy":{...}}
+{"format":"raw-manifests","target":"./deploy","manifests":3,"hash":"sha256:…"}
 ```
 
 See [cli-contract.md §1.5](cli-contract.md#15-agent-context-auto-detection) for the full detection rules, override semantics, and env-var reference.
@@ -266,14 +266,13 @@ akua render [path] [flags]
 |---|---|
 | `--package=<path>` | path to the `package.k` file (default `./package.k`) |
 | `--inputs=<file>` | inputs file (JSON or YAML). When omitted, probes `./inputs.yaml` then `./inputs.example.yaml` next to the package; falls back to schema defaults if neither exists |
-| `--output=<name>` | render only this named output (from the Package's `outputs` list) |
 | `--out=<dir>` | write to directory (default: `./deploy/`) |
-| `--stdout` | print rendered YAML to stdout (requires a single selected output) |
+| `--stdout` | print rendered manifests as multi-doc YAML to stdout instead of writing files |
 | `--dry-run` | render but don't write files |
 
-> **Shipped today vs planned.** The verb executes the Package's KCL + the `RawManifests` output emitter. Other output kinds (`HelmChart`, `ResourceGraphDefinition`, `Crossplane`, `OCIBundle`) return `E_RENDER_UNSUPPORTED_KIND` until their engine callables land (Phase B). Multi-document workspace discovery (`akua render` with no path + `--filter`), render-time policy verdicts, and SLSA attestation files are future surface.
+> **Engine callables.** `pkg.render(Render)` is callable today via `import akua.pkg` (pure KCL — no extra feature needed) for Package-of-Packages composition; see [`examples/08-pkg-compose`](../examples/08-pkg-compose). `helm.template(Template)` is callable today via `import akua.helm` when the binary is built with `--features akua-core/engine-helm-shell` (requires `helm` on PATH); see [`examples/00-helm-hello`](../examples/00-helm-hello). `kustomize.build(Build)` is callable today via `import akua.kustomize` with `--features akua-core/engine-kustomize-shell`; see [`examples/09-kustomize-hello`](../examples/09-kustomize-hello). Future transformation functions (`kro.rgd`, `crossplane.composition`) arrive in later Phase B increments.
 >
-> **Engine callables.** `pkg.render(path, inputs)` is callable today via `import kcl_plugin.pkg` (pure KCL — no extra feature needed) for Package-of-Packages composition; see [`examples/08-pkg-compose`](../examples/08-pkg-compose). `helm.template(chart, values, release, namespace)` is callable today via `import kcl_plugin.helm` when the binary is built with `--features akua-core/engine-helm-shell` (requires `helm` on PATH); see [`examples/00-helm-hello`](../examples/00-helm-hello). `kustomize.build` and `rgd.instantiate` arrive in later Phase B increments.
+> **One render output.** akua writes raw YAML manifests, one file per resource. Distribution shapes like Helm charts or OCI bundles are future `akua publish --as <format>` concerns — they wrap rendered manifests at distribution time, not as a Package-declared output.
 
 ### Exit codes
 
@@ -283,19 +282,15 @@ akua render [path] [flags]
 
 ```json
 {
-  "outputs": [
-    {
-      "format": "raw-manifests",
-      "target": "./deploy",
-      "manifests": 1,
-      "hash": "sha256:…",
-      "files": ["000-configmap-hello.yaml"]
-    }
-  ]
+  "format": "raw-manifests",
+  "target": "./deploy",
+  "manifests": 1,
+  "hash": "sha256:…",
+  "files": ["000-configmap-hello.yaml"]
 }
 ```
 
-Each output carries `format`, `target`, `manifests` (count), `hash` (`sha256:` prefix), and `files`. `name` is present only when the Package declared a named output.
+`format` is always `"raw-manifests"` today. `target` is the resolved output directory. `hash` is `sha256:<hex>` of the concatenated `<filename>\n<yaml>` blocks — stable across runs when inputs + lockfile + akua version match.
 
 ---
 

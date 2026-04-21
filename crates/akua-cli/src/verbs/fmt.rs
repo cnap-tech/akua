@@ -164,7 +164,7 @@ mod tests {
 
     /// Deliberately non-canonical whitespace so the formatter has
     /// something to change.
-    const UNFORMATTED: &str = "schema Input:\n  x:int=1\n\ninput:Input=option(\"input\") or Input{}\nresources = []\noutputs=[{kind:\"RawManifests\",target:\"./\"}]\n";
+    const UNFORMATTED: &str = "schema Input:\n  x:int=1\n\ninput:Input=option(\"input\") or Input{}\nresources = []\n";
 
     fn write_package(body: &str) -> (TempDir, PathBuf) {
         let tmp = TempDir::new().unwrap();

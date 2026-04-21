@@ -25,7 +25,3 @@ _app = helm.template(nginx.Chart {
 })
 
 resources = _app
-
-outputs = [
-    { kind: "RawManifests", target: "./rendered" }
-]

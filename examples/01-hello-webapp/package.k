@@ -49,12 +49,4 @@ _nginx = helm.template(nginx.Chart {
     }
 })
 
-# One output. Default format is raw Kubernetes manifests committed to git.
 resources = _nginx
-
-outputs = [
-    {
-        kind:   "RawManifests"
-        target: "./rendered"
-    }
-]

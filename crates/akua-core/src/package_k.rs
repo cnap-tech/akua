@@ -15,10 +15,9 @@
 //! so a Package is standalone-valid KCL (`kcl fmt` / `kcl lint` / IDE
 //! LSPs all work without akua-specific preprocessing).
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_yaml::Value;
 
 /// The `option()` key every Package uses for its `input` binding.
@@ -33,32 +32,12 @@ pub struct PackageK {
 
 /// Result of evaluating a `Package.k` with concrete inputs.
 ///
-/// `resources` are the Kubernetes-shaped dicts the package emits
-/// (opaque to this module — a reconciler or policy engine parses
-/// them). `outputs` are the output specs declared in the package's
-/// `outputs = [...]` list.
+/// `resources` is the flat list of Kubernetes-shaped dicts the Package
+/// emitted — opaque to this module; a reconciler or policy engine
+/// parses them. The renderer writes them as raw YAML under `--out`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderedPackage {
     pub resources: Vec<Value>,
-    pub outputs: Vec<OutputSpec>,
-}
-
-/// One entry in the Package's `outputs` list. Known fields are typed;
-/// any extras (e.g. `chartName` on a `HelmChart` output) survive in
-/// [`extras`] so the render pipeline can pass them through to the
-/// relevant format emitter.
-///
-/// See [`docs/package-format.md §5`](../../../docs/package-format.md).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct OutputSpec {
-    pub kind: String,
-    pub target: String,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-
-    #[serde(flatten)]
-    pub extras: BTreeMap<String, Value>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -90,9 +69,6 @@ pub enum PackageKError {
 
     #[error("`resources` must be a sequence; got {got}")]
     ResourcesWrongShape { got: &'static str },
-
-    #[error("`outputs` must be a sequence of output specs; got {got}")]
-    OutputsWrongShape { got: &'static str },
 
     #[error("cycle detected while expanding pkg.render — `{path}` is already on the render stack")]
     Cycle { path: PathBuf },
@@ -144,10 +120,7 @@ impl PackageK {
         // returned — see `pkg_render` module docs for why this is
         // post-eval rather than inline.
         let resources = crate::pkg_render::expand_sentinels(parsed.resources)?;
-        Ok(RenderedPackage {
-            resources,
-            outputs: parsed.outputs,
-        })
+        Ok(RenderedPackage { resources })
     }
 }
 
@@ -158,41 +131,17 @@ fn parse_rendered(yaml: &str) -> Result<RenderedPackage, PackageKError> {
         return Err(PackageKError::TopLevelWrongShape { got });
     };
 
-    let resources_val = map
-        .get(Value::String("resources".into()))
-        .ok_or(PackageKError::MissingResources)?;
-    let resources = match resources_val {
-        Value::Sequence(s) => s.clone(),
-        other => {
+    let resources = match map.get(Value::String("resources".into())) {
+        None => return Err(PackageKError::MissingResources),
+        Some(Value::Sequence(s)) => s.clone(),
+        Some(other) => {
             return Err(PackageKError::ResourcesWrongShape {
                 got: value_kind(other),
             });
         }
     };
 
-    // Omitting `outputs` is shorthand for the overwhelmingly common
-    // case: emit every resource as raw YAML into `--out`. Packages
-    // that want multiple targets, non-RawManifests kinds, or
-    // per-source routing still declare `outputs` explicitly.
-    let outputs = match map.get(Value::String("outputs".into())) {
-        None => vec![OutputSpec {
-            kind: "RawManifests".to_string(),
-            target: "./".to_string(),
-            name: None,
-            extras: Default::default(),
-        }],
-        Some(Value::Sequence(seq)) => seq
-            .iter()
-            .map(|entry| serde_yaml::from_value(entry.clone()))
-            .collect::<Result<Vec<OutputSpec>, _>>()?,
-        Some(other) => {
-            return Err(PackageKError::OutputsWrongShape {
-                got: value_kind(other),
-            });
-        }
-    };
-
-    Ok(RenderedPackage { resources, outputs })
+    Ok(RenderedPackage { resources })
 }
 
 fn value_kind(v: &Value) -> &'static str {
@@ -395,8 +344,6 @@ resources = [{
     metadata.name: "test"
     data.count: str(input.replicas)
 }]
-
-outputs = [{ kind: "RawManifests", target: "./" }]
 "#;
 
     fn write_fixture(source: &str) -> (tempfile::TempDir, PathBuf) {
@@ -444,10 +391,6 @@ outputs = [{ kind: "RawManifests", target: "./" }]
         let cm = &rendered.resources[0];
         assert_eq!(cm["kind"], Value::String("ConfigMap".into()));
         assert_eq!(cm["data"]["count"], Value::String("3".into()));
-
-        assert_eq!(rendered.outputs.len(), 1);
-        assert_eq!(rendered.outputs[0].kind, "RawManifests");
-        assert_eq!(rendered.outputs[0].target, "./");
     }
 
     #[test]
@@ -485,14 +428,11 @@ outputs = [{ kind: "RawManifests", target: "./" }]
 
     #[test]
     fn render_missing_resources_typed() {
-        // Declares outputs but no resources.
         let bad = r#"
 schema Input:
     x: int = 0
 
 input: Input = option("input") or Input {}
-
-outputs = [{ kind: "RawManifests", target: "./" }]
 "#;
         let (_tmp, path) = write_fixture(bad);
         let pkg = PackageK::load(&path).expect("load");
@@ -501,84 +441,6 @@ outputs = [{ kind: "RawManifests", target: "./" }]
             matches!(err, PackageKError::MissingResources),
             "expected MissingResources, got {err:?}"
         );
-    }
-
-    #[test]
-    fn render_defaults_outputs_when_omitted() {
-        // No `outputs` binding — should auto-default to a single
-        // RawManifests emit into the render-root.
-        let fixture = r#"
-schema Input:
-    x: int = 0
-
-input: Input = option("input") or Input {}
-
-resources = []
-"#;
-        let (_tmp, path) = write_fixture(fixture);
-        let pkg = PackageK::load(&path).expect("load");
-        let rendered = pkg.render(&empty_inputs()).expect("render");
-        assert_eq!(rendered.outputs.len(), 1);
-        assert_eq!(rendered.outputs[0].kind, "RawManifests");
-        assert_eq!(rendered.outputs[0].target, "./");
-        assert!(rendered.outputs[0].name.is_none());
-    }
-
-    #[test]
-    fn render_output_extras_are_preserved() {
-        // HelmChart output with chartName + appVersion extras.
-        let fixture = r#"
-schema Input:
-    x: int = 0
-
-input: Input = option("input") or Input {}
-
-resources = []
-
-outputs = [{
-    kind: "HelmChart"
-    target: "oci://pkg.example.com/my-app"
-    chartName: "my-app"
-    appVersion: "1.0.0"
-}]
-"#;
-        let (_tmp, path) = write_fixture(fixture);
-        let pkg = PackageK::load(&path).expect("load");
-        let rendered = pkg.render(&empty_inputs()).expect("render");
-        let o = &rendered.outputs[0];
-        assert_eq!(o.kind, "HelmChart");
-        assert_eq!(o.name, None);
-        assert_eq!(
-            o.extras.get("chartName"),
-            Some(&Value::String("my-app".into()))
-        );
-        assert_eq!(
-            o.extras.get("appVersion"),
-            Some(&Value::String("1.0.0".into()))
-        );
-    }
-
-    #[test]
-    fn render_named_output_routes_via_name_field() {
-        let fixture = r#"
-schema Input:
-    x: int = 0
-
-input: Input = option("input") or Input {}
-
-resources = []
-
-outputs = [
-    { name: "static",  kind: "RawManifests",            target: "./deploy/static" }
-    { name: "runtime", kind: "ResourceGraphDefinition", target: "./deploy/rgd"    }
-]
-"#;
-        let (_tmp, path) = write_fixture(fixture);
-        let pkg = PackageK::load(&path).expect("load");
-        let rendered = pkg.render(&empty_inputs()).expect("render");
-        assert_eq!(rendered.outputs.len(), 2);
-        assert_eq!(rendered.outputs[0].name.as_deref(), Some("static"));
-        assert_eq!(rendered.outputs[1].name.as_deref(), Some("runtime"));
     }
 
     #[test]
@@ -601,8 +463,6 @@ resources = [{
     data.user: input.database.user
     data.port: str(input.database.port)
 }]
-
-outputs = [{ kind: "RawManifests", target: "./" }]
 "#;
         let (_tmp, path) = write_fixture(fixture);
         let pkg = PackageK::load(&path).expect("load");

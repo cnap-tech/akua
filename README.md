@@ -37,7 +37,7 @@ Prebuilt binaries live on [GitHub Releases][releases]. Agent setup for Claude Co
 
 ## Quick start
 
-A Package.k is plain KCL with four regions — imports, schema, body, outputs:
+A Package.k is plain KCL with three regions — imports, schema, body:
 
 ```kcl
 schema Input:
@@ -52,8 +52,6 @@ resources = [{
     metadata.name: input.appName
     data.replicas: str(input.replicas)
 }]
-
-outputs = [{ kind: "RawManifests", target: "./" }]
 ```
 
 Render it:

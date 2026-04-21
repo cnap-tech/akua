@@ -1,22 +1,18 @@
 # Example 06 — multi-engine
 #
-# One Package, four sources:
+# One Package, four sources, one render output (raw YAML):
 #   - Helm        (upstream webapp chart)
 #   - Kustomize   (./overlays base → ServiceMonitor + ConfigMap patch)
-#   - kro RGD     (platform glue, runtime late-binding)
+#   - kro RGD     (platform glue as a transformation producing an RGD manifest)
 #   - Inline KCL  (NetworkPolicy authored directly in KCL)
-#
-# Two named outputs:
-#   - `static`  → raw manifests for ArgoCD/Flux
-#   - `runtime` → RGD for kro to reconcile at deploy time
 #
 # Render:
 #   akua add
-#   akua render --inputs inputs.yaml
+#   akua render --inputs inputs.yaml --out ./deploy
 
 import akua.helm
 import akua.kustomize
-import akua.rgd
+import akua.kro
 import charts.webapp   as webapp
 import rgds.platform   as platform
 
@@ -34,25 +30,22 @@ schema Input:
 input: Input = option("input") or Input {}
 
 # --- 1. Helm source ---
-_app = helm.template(
-    webapp.Chart {
-        values = webapp.Values {
-            replicaCount        = input.replicas
-            ingress.hostname    = input.hostname
-            ingress.tls.enabled = True
-            fullnameOverride    = input.appName
-        }
-    },
-    output = "static",
-)
+_app = helm.template(helm.Template {
+    chart = webapp.Chart
+    values = webapp.Values {
+        replicaCount        = input.replicas
+        ingress.hostname    = input.hostname
+        ingress.tls.enabled = True
+        fullnameOverride    = input.appName
+    }
+})
 
 # --- 2. Kustomize source ---
 # Builds ./overlays — a small overlay adding a ServiceMonitor and patching
 # a ConfigMap. Kustomize runs offline; output is deterministic.
-_monitor = kustomize.build(
-    "./overlays",
-    output = "static",
-)
+_monitor = kustomize.build(kustomize.Build {
+    path = "./overlays"
+})
 
 # --- 3. Inline KCL-native resource ---
 # NetworkPolicy denying all ingress except from the app's own namespace.
@@ -78,24 +71,19 @@ _netpol = {
     }
 }
 
-# --- 4. kro RGD source ---
+# --- 4. kro RGD transformation ---
 # Genuine runtime late-binding: DNS records and cert references whose status
-# fields are observed post-apply. Routed to the `runtime` output so kro's
-# controller reconciles it.
-_glue = rgd.instantiate(
-    platform.RGD,
-    {
+# fields are observed post-apply. `kro.rgd` produces the ResourceGraphDefinition
+# as a regular K8s manifest that kro's controller picks up from the rendered
+# YAML — not a separate emit kind.
+_glue = kro.rgd(kro.Rgd {
+    definition = platform.RGD
+    instance   = {
         metadata.name      = input.appName
         spec.domain        = input.hostname
         spec.ingress_class = "traefik"
-    },
-    output = "runtime",
-)
+    }
+})
 
 # --- aggregate ---
-resources = [*_app, *_monitor, _netpol, *_glue]
-
-outputs = [
-    { name: "static",  kind: "RawManifests",            target: "./deploy/static" }
-    { name: "runtime", kind: "ResourceGraphDefinition", target: "./deploy/rgd"    }
-]
+resources = [*_app, *_monitor, _netpol, _glue]

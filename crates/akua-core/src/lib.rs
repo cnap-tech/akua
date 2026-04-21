@@ -49,11 +49,10 @@ pub use mod_file::{
 pub use dir_diff::{diff as dir_diff, DirDiff, DirDiffError, FileChange};
 #[cfg(feature = "engine-kcl")]
 pub use package_k::{
-    format_kcl, lint_kcl, list_options_kcl, LintIssue, OptionInfo, OutputSpec, PackageK,
-    PackageKError, RenderedPackage,
+    format_kcl, lint_kcl, list_options_kcl, LintIssue, OptionInfo, PackageK, PackageKError,
+    RenderedPackage,
 };
 #[cfg(feature = "engine-kcl")]
 pub use package_render::{
-    render_outputs, OutputSummary, RenderError as PackageRenderError, RenderSummary,
-    FORMAT_RAW_MANIFESTS,
+    render, RenderError as PackageRenderError, RenderSummary, FORMAT_RAW_MANIFESTS,
 };

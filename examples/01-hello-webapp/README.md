@@ -1,6 +1,6 @@
 # Example 01 — hello-webapp
 
-The smallest possible akua Package. One Helm chart, one schema input (plus three with defaults), raw-manifest output. Teaches the four regions of `package.k` — imports, schema, body, outputs — and the two patterns for UI hints (docstrings + `@ui` decorators).
+The smallest possible akua Package. One Helm chart, one schema input (plus three with defaults), raw-manifest output. Teaches the three regions of `package.k` — imports, schema, body — and the two patterns for UI hints (docstrings + `@ui` decorators).
 
 Read this first. Every other example adds exactly one concept over this one.
 
@@ -15,12 +15,11 @@ Read this first. Every other example adds exactly one concept over this one.
 └── README.md
 ```
 
-## The four regions in `package.k`
+## The three regions in `package.k`
 
 1. **Imports** — `akua.helm` (engine callable), `akua.ui` (decorator home), `charts.nginx` (resolved from `akua.toml`).
 2. **Schema** — `Input` with four fields. `hostname` is required; `name`, `replicas`, `tls` have defaults. Docstrings become UI labels; `@ui` decorators add ordering, groups, placeholders, widget hints.
-3. **Body** — one call to `helm.template(...)` wiring our public schema into the chart's native values. No fork of the chart needed.
-4. **Outputs** — a single raw-manifest output written to `./rendered`.
+3. **Body** — one call to `helm.template(...)` wiring our public schema into the chart's native values, aggregated into the top-level `resources` list. akua writes one YAML file per resource under `--out`. No fork of the chart needed.
 
 ## Run
 

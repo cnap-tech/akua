@@ -18,4 +18,3 @@ _manifests = kustomize.build(kustomize.Build {
 })
 
 resources = _manifests
-# `outputs` omitted — defaults to `[{kind: "RawManifests", target: "./"}]`.

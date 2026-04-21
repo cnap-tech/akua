@@ -91,10 +91,6 @@ _extra_ingresses = [
 # owner references, not list position.
 resources = [*_base, _dashboard, *_extra_ingresses]
 
-outputs = [
-    { kind: "RawManifests", target: "./rendered" }
-]
-
 # Metadata for `akua inspect` and audit surfaces.
 metadata = {
     name:        "checkout-with-dashboard"

@@ -215,19 +215,15 @@ struct RenderCliArgs {
     #[arg(long)]
     inputs: Option<PathBuf>,
 
-    /// Root directory for `RawManifests` outputs.
+    /// Root directory where rendered YAML files land.
     #[arg(long, default_value = "./deploy")]
     out: PathBuf,
-
-    /// Render only the named output.
-    #[arg(long)]
-    output: Option<String>,
 
     /// Render but don't write files.
     #[arg(long)]
     dry_run: bool,
 
-    /// Print rendered manifests to stdout (requires a single selected output).
+    /// Print rendered manifests as multi-doc YAML to stdout instead of writing files.
     #[arg(long)]
     stdout: bool,
 }
@@ -479,7 +475,6 @@ fn run_render(args: &UniversalArgs, render_args: &RenderCliArgs) -> ExitCode {
         package_path: &render_args.package,
         inputs_path: render_args.inputs.as_deref(),
         out_dir: &render_args.out,
-        output_filter: render_args.output.as_deref(),
         dry_run: render_args.dry_run,
         stdout_mode: render_args.stdout,
     };
@@ -530,8 +525,6 @@ mod tests {
             "in.yaml",
             "--out",
             "./dist",
-            "--output",
-            "static",
             "--dry-run",
         ]);
         match cli.command {
@@ -539,7 +532,6 @@ mod tests {
                 assert_eq!(render_args.package, PathBuf::from("my.k"));
                 assert_eq!(render_args.inputs, Some(PathBuf::from("in.yaml")));
                 assert_eq!(render_args.out, PathBuf::from("./dist"));
-                assert_eq!(render_args.output.as_deref(), Some("static"));
                 assert!(render_args.dry_run);
                 assert!(!render_args.stdout);
             }

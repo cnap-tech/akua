@@ -42,51 +42,46 @@ import rgds.platform    as platform
 
 - **Helm** — the webapp chart, values mapped from the public schema.
 - **Kustomize** — a local overlay under `./overlays/`, building a `ServiceMonitor` + a patched ConfigMap.
-- **kro RGD** — the platform glue (e.g. app-scoped DNS record + cert) instantiated with the current App's metadata. Because it genuinely needs runtime status late-binding, this goes to the `runtime` output; kro's controller reconciles it.
+- **kro RGD** — the platform glue (e.g. app-scoped DNS record + cert) instantiated with the current App's metadata. `kro.rgd(...)` produces the ResourceGraphDefinition as a regular K8s manifest; kro's controller picks it up from the rendered YAML.
 - **Inline KCL** — a `NetworkPolicy` authored directly in KCL. No external engine needed.
 
-### Aggregation with per-source routing
+### Aggregation
 
 ```python
-_app     = helm.template(webapp.Chart { ... }, output = "static")
-_monitor = kustomize.build("./overlays",       output = "static")
-_netpol  = NetworkPolicy { ... }                                     # → static by default
-_glue    = rgd.instantiate(platform.RGD, { ... }, output = "runtime")
+_app     = helm.template(helm.Template { chart = webapp.Chart, values = ... })
+_monitor = kustomize.build(kustomize.Build { path = "./overlays" })
+_netpol  = NetworkPolicy { ... }
+_glue    = kro.rgd(kro.Rgd { definition = platform.RGD, instance = { ... } })
 
-resources = [*_app, *_monitor, _netpol, *_glue]
-
-outputs = [
-    { name: "static",  kind: "RawManifests",             target: "./deploy/static" },
-    { name: "runtime", kind: "ResourceGraphDefinition",  target: "./deploy/rgd"    },
-]
+resources = [*_app, *_monitor, _netpol, _glue]
 ```
 
-One Package, two deploy paths. ArgoCD applies the static output; kro reconciles the runtime output. No conflict — the resources are disjoint.
+One Package, one flat resource list, one render output. ArgoCD/Flux
+applies the rendered YAML as it would any other manifest set; kro's
+controller sees the RGD and reconciles its instances.
 
 ## Render
 
 ```sh
 akua add                         # resolve deps
-akua render --inputs inputs.yaml # renders both outputs into ./deploy/
+akua render --inputs inputs.yaml --out ./deploy
 ```
 
 Result:
 
 ```
 deploy/
-├── static/
-│   ├── deployment.yaml          # from helm
-│   ├── service.yaml             # from helm
-│   ├── ingress.yaml             # from helm
-│   ├── configmap.yaml           # from kustomize
-│   ├── servicemonitor.yaml      # from kustomize
-│   └── networkpolicy.yaml       # from inline KCL
-└── rgd/
-    └── platform-glue.yaml       # the RGD for kro to reconcile
+├── 000-deployment-webapp.yaml          # from helm
+├── 001-service-webapp.yaml             # from helm
+├── 002-ingress-webapp.yaml             # from helm
+├── 003-configmap-webapp.yaml           # from kustomize
+├── 004-servicemonitor-webapp.yaml      # from kustomize
+├── 005-networkpolicy-webapp.yaml       # from inline KCL
+└── 006-resourcegraphdefinition-glue.yaml  # from kro.rgd — kro reconciles it
 ```
 
 ## See also
 
-- [package-format.md §6 Per-source output routing](../../docs/package-format.md) — the spec for named outputs
+- [package-format.md](../../docs/package-format.md) — the Package spec
 - [embedded-engines.md](../../docs/embedded-engines.md) — which engines are embedded; escape-hatch via `--engine=shell`
 - [architecture.md#what-akua-is-not](../../docs/architecture.md) — why we compose reconcilers instead of replacing them

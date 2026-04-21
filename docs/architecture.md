@@ -49,7 +49,7 @@ See [`docs/embedded-engines.md`](./embedded-engines.md) for the embedding contra
 
 ## Canonical form is typed code
 
-- **Packages** — authored in **KCL** (`Package.k` with four regions: imports / schema / body / outputs). Published as signed OCI artifacts. See [`docs/package-format.md`](./package-format.md).
+- **Packages** — authored in **KCL** (`Package.k` with three regions: imports / schema / body). Published as signed OCI artifacts. `akua render` emits raw YAML, one file per resource. See [`docs/package-format.md`](./package-format.md).
 - **Policies** — authored in **Rego**. Kyverno / CEL / foreign Rego modules are consumed as compile-resolved imports via `akua.toml`, not runtime string lookups.
 - **Higher-level workspace concepts** (App, Environment, Cluster, Secret, Gateway, Workspace, PolicySet, …) — **user-defined KCL schemas** in the consumer's own workspace, shaped to their deployment reality. akua does not ship a KRM vocabulary. Reconcilers (ArgoCD / Flux / kro) consume the raw-Kubernetes output of `akua render`; they don't need akua-specific kinds.
 

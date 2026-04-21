@@ -74,7 +74,3 @@ _app = helm.template(webapp.Chart {
 })
 
 resources = [*_pg, *_app]
-
-outputs = [
-    { kind: "RawManifests", target: "./" }
-]
