@@ -312,7 +312,13 @@ pub fn format_kcl(source: &str) -> Result<String, PackageKError> {
 fn eval_kcl(path: &Path, code: &str, option_json: &str) -> Result<String, PackageKError> {
     use kcl_lang::{Argument, ExecProgramArgs, API};
 
-    let api = API::default();
+    // A non-zero plugin_agent installs the akua-side plugin dispatcher
+    // so `kcl_plugin.<module>.<fn>` calls inside the Package resolve
+    // to handlers registered via `kcl_plugin::register`. Zero (default)
+    // leaves the dispatcher disabled — matches upstream KCL.
+    let api = API {
+        plugin_agent: crate::kcl_plugin::plugin_agent_ptr(),
+    };
     let args = ExecProgramArgs {
         k_filename_list: vec![path.to_string_lossy().into_owned()],
         k_code_list: vec![code.to_string()],

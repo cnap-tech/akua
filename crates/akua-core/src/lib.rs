@@ -18,6 +18,8 @@ pub mod cli_contract;
 #[cfg(feature = "engine-kcl")]
 pub mod dir_diff;
 pub(crate) mod hex;
+#[cfg(feature = "engine-kcl")]
+pub mod kcl_plugin;
 pub mod lock_file;
 pub mod mod_file;
 #[cfg(feature = "engine-kcl")]
