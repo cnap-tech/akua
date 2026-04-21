@@ -152,7 +152,7 @@ struct Session {
     memory: Memory,
     malloc: TypedFunc<i32, i32>,
     free: TypedFunc<i32, ()>,
-    build: TypedFunc<(i32, i32), i32>,
+    build_fn: TypedFunc<(i32, i32), i32>,
     result_len: TypedFunc<i32, i32>,
 }
 
@@ -176,20 +176,20 @@ impl Session {
         let free = instance
             .get_typed_func::<i32, ()>(&mut store, "kustomize_free")
             .map_err(wasm_err)?;
-        let build = instance
+        let build_fn = instance
             .get_typed_func::<(i32, i32), i32>(&mut store, "kustomize_build")
             .map_err(wasm_err)?;
         let result_len = instance
             .get_typed_func::<i32, i32>(&mut store, "kustomize_result_len")
             .map_err(wasm_err)?;
-        Ok(Session { store, memory, malloc, free, build, result_len })
+        Ok(Session { store, memory, malloc, free, build_fn, result_len })
     }
 
     fn call(&mut self, input: &[u8]) -> Result<Vec<u8>, KustomizeEngineError> {
         let input_ptr = copy_in(&mut self.store, &self.malloc, self.memory, input)
             .map_err(wasm_err)?;
         let result_ptr = self
-            .build
+            .build_fn
             .call(&mut self.store, (input_ptr, input.len() as i32))
             .map_err(wasm_err)?;
         let len = self

@@ -19,22 +19,32 @@ helm_tag="v4.1.4"
 
 mkdir -p "$crate_root/third_party"
 
-# Fast path: fork already present with patch applied.
-if [ -d "$fork_dir/.patch-applied" ]; then
-    echo "[fork/apply.sh] $fork_dir already has patch applied — skipping."
-    exit 0
+# Fast path: fork tree already patched (committed by us on top of the
+# upstream v4.1.4 tag). Use `git apply --check --reverse` as the
+# idempotence test — it succeeds iff the patch is fully applied, fails
+# otherwise. No sentinel files, no separate state to get out of sync.
+if [ -d "$fork_dir/.git" ]; then
+    if (cd "$fork_dir" && git apply --check --reverse "$patch") 2>/dev/null; then
+        echo "[fork/apply.sh] $fork_dir is already patched — skipping."
+        exit 0
+    fi
+    # Guard: refuse to operate on a fork dir with uncommitted hand-edits,
+    # those would be silently blown away by a clean re-apply.
+    if ! (cd "$fork_dir" && git diff --quiet) || ! (cd "$fork_dir" && git diff --quiet --cached); then
+        echo "[fork/apply.sh] $fork_dir has uncommitted changes; refusing to modify. Reset the tree or delete third_party/ to rebuild from scratch."
+        exit 1
+    fi
 fi
 
-# Clone upstream helm at the pinned tag.
+# Clone upstream helm at the pinned tag (fresh or re-fetch).
 if [ ! -d "$fork_dir/.git" ]; then
     echo "[fork/apply.sh] cloning helm $helm_tag into $fork_dir"
     rm -rf "$fork_dir"
-    git clone --depth 1 --branch "$helm_tag" https://github.com/helm/helm.git "$fork_dir" >/dev/null 2>&1
+    git clone --depth 1 --branch "$helm_tag" https://github.com/helm/helm.git "$fork_dir"
 fi
 
 echo "[fork/apply.sh] applying $patch"
 (cd "$fork_dir" && patch -p1 < "$patch")
-mkdir "$fork_dir/.patch-applied"
 
 # Rewrite go-src to use the forked path.
 go_src="$crate_root/go-src"

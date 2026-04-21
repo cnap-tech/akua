@@ -187,7 +187,7 @@ struct Session {
     memory: Memory,
     malloc: TypedFunc<i32, i32>,
     free: TypedFunc<i32, ()>,
-    render: TypedFunc<(i32, i32), i32>,
+    render_fn: TypedFunc<(i32, i32), i32>,
     result_len: TypedFunc<i32, i32>,
 }
 
@@ -219,7 +219,7 @@ impl Session {
         let free = instance
             .get_typed_func::<i32, ()>(&mut store, "helm_free")
             .map_err(wasm_err)?;
-        let render = instance
+        let render_fn = instance
             .get_typed_func::<(i32, i32), i32>(&mut store, "helm_render")
             .map_err(wasm_err)?;
         let result_len = instance
@@ -231,7 +231,7 @@ impl Session {
             memory,
             malloc,
             free,
-            render,
+            render_fn,
             result_len,
         })
     }
@@ -240,7 +240,7 @@ impl Session {
         let input_ptr = copy_in(&mut self.store, &self.malloc, self.memory, input)
             .map_err(wasm_err)?;
         let result_ptr = self
-            .render
+            .render_fn
             .call(&mut self.store, (input_ptr, input.len() as i32))
             .map_err(wasm_err)?;
         let len = self
