@@ -70,7 +70,7 @@ Research recommendation: revive akua's deleted fork, not vendor kclipper. Prior 
 
 **Exit gate:** ✅ `examples/00-helm-hello` renders in a sandbox. `helm` on PATH never consulted. All Phase 1 boxes (1a + 1b + 1c + 1d) shipped. Cold render in ~57 ms.
 
-**Phase 1e (followup, not blocking other phases):** extract shared `engine-host-wasm` crate. `helm-engine-wasm` and `kustomize-engine-wasm` have mechanically identical Session + call-wasm + cwasm-embed + error-shape. Future engines (kro, CEL, kyverno) would triple the duplication. Generic `Session<Plugin>` parameterized on plugin-name + export-prefix + entry-point-name.
+- [x] Phase 1e: shared `engine-host-wasm` crate. Holds `Session` + `precompile` + `EngineSpec` + `thread_local_call`. `helm-engine-wasm` and `kustomize-engine-wasm` are now thin shims (serde types + tar helpers + engine-specific error wrapper). Future kro/CEL/kyverno engines get the wasmtime plumbing for free.
 
 ---
 

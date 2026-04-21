@@ -8,13 +8,10 @@ repository.workspace = true
 authors.workspace = true
 
 [build-dependencies]
-# build.rs precompiles helm-engine.wasm → native-code .cwasm. Needs the
-# full wasmtime feature set (cranelift) so the default features are fine.
-wasmtime = "43"
+engine-host-wasm = { path = "../engine-host-wasm" }
 
 [dependencies]
-wasmtime = "43"
-wasmtime-wasi = "43"
+engine-host-wasm = { path = "../engine-host-wasm" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 base64 = "0.22"

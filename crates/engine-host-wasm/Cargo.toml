@@ -1,0 +1,13 @@
+[package]
+name = "engine-host-wasm"
+description = "Shared wasmtime host for akua's embedded Go→wasip1 rendering engines"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+wasmtime = "43"
+wasmtime-wasi = "43"
+thiserror = { workspace = true }

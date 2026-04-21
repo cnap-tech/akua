@@ -1019,6 +1019,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "engine-host-wasm"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
+ "wasmtime",
+ "wasmtime-wasi",
+]
+
+[[package]]
 name = "enquote"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1510,14 +1519,13 @@ name = "helm-engine-wasm"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "engine-host-wasm",
  "flate2",
  "serde",
  "serde_json",
  "tar",
  "tempfile",
  "thiserror 2.0.18",
- "wasmtime",
- "wasmtime-wasi",
 ]
 
 [[package]]
@@ -2588,14 +2596,13 @@ name = "kustomize-engine-wasm"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "engine-host-wasm",
  "flate2",
  "serde",
  "serde_json",
  "tar",
  "tempfile",
  "thiserror 2.0.18",
- "wasmtime",
- "wasmtime-wasi",
 ]
 
 [[package]]

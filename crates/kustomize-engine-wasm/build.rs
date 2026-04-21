@@ -1,14 +1,9 @@
-//! Precompile kustomize-engine.wasm → native-code .cwasm artifact.
-//!
-//! Same shape as helm-engine-wasm's build.rs — runtime `Module::deserialize`
-//! is a memcpy + fixup instead of the ~2-3s Cranelift cold compile this
-//! would otherwise cost on every akua invocation.
+//! Precompile kustomize-engine.wasm → native-code .cwasm via the shared
+//! `engine-host-wasm` helper.
 
 use std::env;
 use std::fs;
 use std::path::PathBuf;
-
-use wasmtime::{Config, Engine};
 
 fn main() {
     let wasm_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -31,15 +26,8 @@ fn main() {
     }
 
     let wasm = fs::read(&wasm_path).expect("read kustomize-engine.wasm");
-
-    let mut config = Config::new();
-    config.wasm_exceptions(true);
-
-    let engine = Engine::new(&config).expect("create wasmtime engine");
-    let cwasm = engine
-        .precompile_module(&wasm)
-        .expect("precompile kustomize-engine.wasm");
-
+    let cwasm =
+        engine_host_wasm::precompile(&wasm).expect("precompile kustomize-engine.wasm");
     fs::write(&dest, &cwasm).expect("write kustomize-engine.cwasm");
 
     println!(
