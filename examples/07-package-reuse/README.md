@@ -57,7 +57,7 @@ schema Input:
     @ui(order=99, group="Feature flags")
     experiment_X: bool = False
 
-input: Input
+input: Input = ctx.input()
 
 # Render the base Package with the nested input slice. Returns resources[].
 _base = pkg.render(base.Package, input.base)

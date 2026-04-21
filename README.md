@@ -21,7 +21,7 @@ akua render --inputs inputs.yaml      # render to raw YAML
 Designed agent-first: auto-detects Claude Code, Cursor, Codex, Gemini CLI, Goose, Amp, OpenCode, Cline, and 20+ more, emitting structured JSON on every verb. Ships a [skills library](skills/) conforming to the [Agent Skills Specification](https://agentskills.io).
 
 > [!WARNING]
-> **Pre-alpha.** The tree is mid-pivot. Only the `whoami`, `version`, `verify`, and `render` verbs exist today; the full verb set landed in [`docs/cli.md`](docs/cli.md) is the target, not the current state. Don't build production workloads on this yet.
+> **Pre-alpha.** The tree is mid-pivot. 13 verbs ship on `main` (`init`, `add`, `remove`, `tree`, `whoami`, `version`, `verify`, `check`, `lint`, `fmt`, `diff`, `inspect`, `render`); the full verb set landed in [`docs/cli.md`](docs/cli.md) is the target, not the current state. Don't build production workloads on this yet.
 
 ## Install
 
@@ -71,7 +71,7 @@ Two crates:
 - [`akua-core`](crates/akua-core) — the Rust library: CLI contract primitives, `akua.toml` / `akua.lock` parsers, `Package.k` loader, render output writer.
 - [`akua-cli`](crates/akua-cli) — the `akua` binary. Every verb JSON-first, idempotent, typed exit codes — see [`docs/cli-contract.md`](docs/cli-contract.md).
 
-KCL is the authoring language; in the target shape, Helm, kro RGDs, and Kustomize are callable KCL functions (`helm.template(...)`, `rgd.instantiate(...)`, `kustomize.build(...)`) — those engine callables arrive in Phase B.
+KCL is the authoring language. Engine callables live under `akua.*`: `helm.template(...)` and `kustomize.build(...)` ship today (behind `--features engine-helm-shell` / `engine-kustomize-shell`); `pkg.render(...)` ships always for Package-of-Packages composition; `kro.rgd(...)` / `crossplane.composition(...)` arrive in later Phase B increments.
 
 Deep dives:
 [`docs/architecture.md`](docs/architecture.md) ·
@@ -90,10 +90,11 @@ Deep dives:
 
 What's shipped on `main`:
 
-- `akua whoami` / `version` / `verify` / `render` verbs wired to the binary.
+- 13 CLI verbs: `init`, `add`, `remove`, `tree`, `whoami`, `version`, `verify`, `check`, `lint`, `fmt`, `diff`, `inspect`, `render`.
 - `akua.toml` + `akua.lock` parsers with round-trip tests against every example.
-- `Package.k` loader with input injection via KCL's `option()` mechanism.
-- RawManifests output emitter with deterministic filenames + sha256 hashes.
+- `Package.k` loader with inputs wired via the `akua.ctx` stdlib (`input: Input = ctx.input()`).
+- KCL plugin bridge: `akua.helm.template`, `akua.kustomize.build`, `akua.pkg.render` all callable from Packages. `helm`/`kustomize` gated behind their `engine-*-shell` features.
+- Raw-YAML render writer with deterministic filenames + `sha256` hashes — same inputs produce byte-identical output.
 
 What's next: [`docs/roadmap.md`](docs/roadmap.md).
 
