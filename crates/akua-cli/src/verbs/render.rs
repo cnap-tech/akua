@@ -44,6 +44,15 @@ pub struct RenderArgs<'a> {
     /// the render path from "best effort" to "every dep accounted
     /// for," which is what CI pipelines want.
     pub strict: bool,
+
+    /// `--offline`: the resolver may not touch the network. OCI deps
+    /// must be fully satisfied from the content-addressed cache. A
+    /// missing cache entry fails the render with `E_CHART_RESOLVE`
+    /// (distinct from a HTTP failure). Path + replace deps always
+    /// resolve locally, so offline renders keep working for them.
+    /// Designed for air-gapped CI runners where the `akua add` step
+    /// happened elsewhere.
+    pub offline: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -193,7 +202,7 @@ pub fn run<W: Write>(
     let package = PackageK::load(args.package_path)?;
     let resolved_inputs = resolve_inputs_path(args);
     let inputs = load_inputs(resolved_inputs.as_deref())?;
-    let charts = resolve_package_charts(args.package_path)?;
+    let charts = resolve_package_charts(args.package_path, args.offline)?;
     let rendered = package.render_opts(&inputs, &charts, args.strict)?;
 
     if args.stdout_mode {
@@ -241,7 +250,10 @@ fn resolve_inputs_path(args: &RenderArgs<'_>) -> Option<PathBuf> {
 /// unpacked tree. Lockfile digests flow in as `expected_digests` so a
 /// drifted tag at the registry fails the render instead of silently
 /// picking up new bytes.
-fn resolve_package_charts(package_path: &Path) -> Result<ResolvedCharts, RenderError> {
+fn resolve_package_charts(
+    package_path: &Path,
+    offline: bool,
+) -> Result<ResolvedCharts, RenderError> {
     let workspace = package_path.parent().unwrap_or(Path::new("."));
     let manifest = match AkuaManifest::load(workspace) {
         Ok(m) => m,
@@ -266,7 +278,7 @@ fn resolve_package_charts(package_path: &Path) -> Result<ResolvedCharts, RenderE
     };
 
     let opts = ResolverOptions {
-        offline: false,
+        offline,
         cache_root: None,
         expected_digests,
     };
@@ -362,6 +374,7 @@ resources = [{
             dry_run: false,
             stdout_mode: false,
             strict: false,
+            offline: false,
         }
     }
 
@@ -597,6 +610,21 @@ resources = [
         let err = run(&Context::human(), &args(&pkg, tmp.path()), &mut Vec::new())
             .unwrap_err();
         assert_eq!(err.to_structured().code, codes::E_INPUTS_PARSE);
+    }
+
+    #[test]
+    fn offline_flag_threads_through_to_resolver() {
+        // Offline mode with no OCI dep in the manifest → render
+        // succeeds on the minimal package (no deps to resolve).
+        let tmp = TempDir::new().unwrap();
+        let pkg = write_package(&tmp, MINIMAL_PACKAGE);
+        let a = RenderArgs {
+            offline: true,
+            dry_run: true,
+            ..args(&pkg, tmp.path())
+        };
+        let code = run(&Context::human(), &a, &mut Vec::new()).expect("render");
+        assert_eq!(code, ExitCode::Success);
     }
 
     #[test]

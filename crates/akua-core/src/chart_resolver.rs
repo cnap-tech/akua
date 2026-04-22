@@ -289,13 +289,6 @@ fn resolve_oci(
     oci: &str,
     opts: &ResolverOptions,
 ) -> Result<ResolvedChart, ChartResolveError> {
-    if opts.offline {
-        return Err(ChartResolveError::UnsupportedSource {
-            name: name.to_string(),
-            kind: DependencySource::Oci,
-            reason: "resolver is in offline mode — run `akua add` (or enable oci-fetch) to pull",
-        });
-    }
     let version = dep
         .version
         .as_deref()
@@ -305,12 +298,33 @@ fn resolve_oci(
         .clone()
         .unwrap_or_else(default_oci_cache_root);
     let expected = opts.expected_digests.get(name).map(String::as_str);
-    let fetched = crate::oci_fetcher::fetch(oci, version, &cache_root, expected).map_err(
-        |source| ChartResolveError::OciFetch {
+
+    let fetched = if opts.offline {
+        // Air-gapped path: the resolver must not touch the network.
+        // Require a lockfile-pinned digest + a populated cache
+        // entry. Anything else is an operator error (run `akua add`
+        // on a networked machine first).
+        let digest = expected.ok_or_else(|| ChartResolveError::UnsupportedSource {
             name: name.to_string(),
-            source,
-        },
-    )?;
+            kind: DependencySource::Oci,
+            reason: "offline mode needs a lockfile-pinned digest — run `akua add` first",
+        })?;
+        crate::oci_fetcher::fetch_from_cache(&cache_root, digest).ok_or_else(|| {
+            ChartResolveError::UnsupportedSource {
+                name: name.to_string(),
+                kind: DependencySource::Oci,
+                reason: "offline mode and the OCI cache doesn't have this dep — run `akua add` online first",
+            }
+        })?
+    } else {
+        crate::oci_fetcher::fetch(oci, version, &cache_root, expected).map_err(|source| {
+            ChartResolveError::OciFetch {
+                name: name.to_string(),
+                source,
+            }
+        })?
+    };
+
     // The content-addressed cache dir has a stable structure, so the
     // tree digest = the blob digest (same bytes just unpacked). Reuse
     // the blob digest rather than re-hashing the tree.

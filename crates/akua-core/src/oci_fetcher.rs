@@ -168,6 +168,22 @@ fn parse_ref(s: &str) -> Result<OciRef, OciFetchError> {
 
 // --- Public entry point ---------------------------------------------------
 
+/// Cache-hit lookup only. Returns `Some(FetchedChart)` when the
+/// content-addressed cache already has the blob, `None` otherwise.
+/// Used by the resolver's offline path so air-gapped renders succeed
+/// as long as `akua add` populated the cache earlier.
+pub fn fetch_from_cache(cache_root: &Path, digest: &str) -> Option<FetchedChart> {
+    let cached = cache_dir_for(cache_root, digest);
+    if !has_chart(&cached) {
+        return None;
+    }
+    let chart_dir = find_chart_root(&cached).ok()?;
+    Some(FetchedChart {
+        chart_dir,
+        blob_digest: digest.to_string(),
+    })
+}
+
 /// Fetch and extract a Helm OCI chart into `cache_root`. If the chart
 /// is already cached (content-addressed under its digest), skip the
 /// network call entirely. When `expected_digest` is `Some`, verify

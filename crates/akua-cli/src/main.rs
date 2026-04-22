@@ -232,6 +232,12 @@ struct RenderCliArgs {
     /// Cargo's `--locked` — CI-grade "every dep accounted for."
     #[arg(long)]
     strict: bool,
+
+    /// Forbid network access during resolve. OCI deps must be fully
+    /// satisfied from the local cache (populated by a prior
+    /// `akua add`). Path + replace deps are unaffected.
+    #[arg(long)]
+    offline: bool,
 }
 
 fn main() {
@@ -484,6 +490,7 @@ fn run_render(args: &UniversalArgs, render_args: &RenderCliArgs) -> ExitCode {
         dry_run: render_args.dry_run,
         stdout_mode: render_args.stdout,
         strict: render_args.strict,
+        offline: render_args.offline,
     };
     let mut stdout = io::stdout().lock();
     match render_verb::run(&ctx, &verb_args, &mut stdout) {
