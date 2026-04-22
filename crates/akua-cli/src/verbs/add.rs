@@ -11,7 +11,10 @@ use std::path::{Path, PathBuf};
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
 use akua_core::lock_file::{AkuaLock, LockLoadError};
 use akua_core::mod_file::{Dependency, ManifestError};
-use akua_core::{chart_resolver, AkuaManifest, ChartResolveError, ManifestLoadError};
+use akua_core::{
+    chart_resolver, chart_resolver::ResolverOptions, AkuaManifest, ChartResolveError,
+    ManifestLoadError,
+};
 use serde::Serialize;
 
 use crate::contract::{emit_output, Context};
@@ -158,22 +161,46 @@ pub fn run<W: Write>(
         source: e,
     })?;
 
-    // Best-effort lockfile update. Resolving all manifest deps is a
-    // nice-to-have on `akua add` — the edit to `akua.toml` is already
-    // valid, and the user's workflow (add + fetch-later, add + write-
-    // chart-later) shouldn't be broken by deps that aren't yet
-    // reachable. Common cases: bare OCI/git deps (Phase 2b slice B) or
-    // path deps pointing at a directory the user will create next.
-    // `akua render` / `akua verify` re-run the resolver strictly when
-    // the dep actually has to be reached.
-    if let Ok(resolved) = chart_resolver::resolve(&manifest, args.workspace) {
-        let mut lock = match AkuaLock::load(args.workspace) {
-            Ok(l) => l,
-            Err(LockLoadError::Missing { .. }) => AkuaLock::empty(),
-            Err(e) => return Err(AddError::LockSave(e)),
-        };
-        chart_resolver::merge_into_lock(&mut lock, &resolved);
-        lock.save(args.workspace)?;
+    // `akua add` is the verb where OCI pulls + lockfile updates are
+    // authorized — this is the Cargo/Go-modules "go get" semantic.
+    // Path deps resolve locally, OCI deps pull over the network,
+    // replace-overridden deps source from the local fork. Prior
+    // lockfile digests flow into the resolver as `expected_digests`,
+    // so a tag moving under us fails loudly instead of silently
+    // re-pinning.
+    let prior_lock = match AkuaLock::load(args.workspace) {
+        Ok(l) => l,
+        Err(LockLoadError::Missing { .. }) => AkuaLock::empty(),
+        Err(e) => return Err(AddError::LockSave(e)),
+    };
+    let expected_digests = prior_lock
+        .packages
+        .iter()
+        .filter(|p| p.source.starts_with("oci://"))
+        .map(|p| (p.name.clone(), p.digest.clone()))
+        .collect();
+    let opts = ResolverOptions {
+        offline: false,
+        cache_root: None,
+        expected_digests,
+    };
+    // Best-effort: a dep pointing at a path that doesn't exist yet
+    // (common in "add now, write chart later" flows) shouldn't block
+    // the manifest edit. Hard OCI failures propagate so the user sees
+    // why the registry didn't accept the pull.
+    match chart_resolver::resolve_with_options(&manifest, args.workspace, &opts) {
+        Ok(resolved) => {
+            let mut lock = prior_lock;
+            chart_resolver::merge_into_lock(&mut lock, &resolved);
+            lock.save(args.workspace)?;
+        }
+        Err(_soft) => {
+            // Soft-fail: manifest edit above stands. A network flake,
+            // a pre-existing chart dir, an OCI auth 403 — none of
+            // these should undo the user's declarative intent. The
+            // hard failure surface is `akua render`, which requires
+            // every dep to resolve before producing output.
+        }
     }
 
     let output = AddOutput {

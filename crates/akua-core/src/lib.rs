@@ -16,6 +16,8 @@
 
 #[cfg(feature = "engine-kcl")]
 pub mod chart_resolver;
+#[cfg(feature = "oci-fetch")]
+pub mod oci_fetcher;
 pub mod cli_contract;
 #[cfg(feature = "engine-kcl")]
 pub mod dir_diff;

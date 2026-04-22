@@ -43,13 +43,16 @@ dependencies = [
 name = "akua-core"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "helm-engine-wasm",
  "kcl-lang",
  "kustomize-engine-wasm",
+ "reqwest",
  "serde",
  "serde_json",
  "serde_yml",
  "sha2 0.10.9",
+ "tar",
  "tempfile",
  "thiserror 2.0.18",
  "toml 0.8.23",
@@ -3794,6 +3797,7 @@ checksum = "eddd3ca559203180a307f12d114c268abf583f59b03cb906fd0b3ff8646c1147"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "http",

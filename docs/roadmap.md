@@ -85,20 +85,35 @@ Spec-to-code convergence. [docs/package-format.md §2](package-format.md) and [d
 - [x] `PackageK::render_with_charts` threads resolved chart paths as allowed absolute roots for the plugin path-escape guard — `helm.template(nginx.path, ...)` survives without an `--unsafe-host` escape hatch
 - [x] `akua render` CLI verb auto-loads sibling `akua.toml`, resolves charts, passes them through
 - [x] `examples/01-hello-webapp` vendored nginx chart + rewritten Package renders end-to-end — verified via `examples_hello_webapp.rs` integration test
-- [x] OCI / git / replace deps return typed `E_CHART_RESOLVE` errors pointing at Phase 2b
 
-### Phase 2b — remote deps + lockfile integration
+### Phase 2b slice A — replace directive + lockfile digests (SHIPPED — 2026-04-22)
 
-- [ ] OCI pull + digest verify (no cosign yet — Phase 6)
-- [ ] Git checkout + tag/rev pinning
-- [ ] Local-path digests written to `akua.lock` on `akua add`
+- [x] `replace = { path = "..." }` on OCI/git deps honored — pull source from the local fork while the lockfile still pins the canonical ref
+- [x] `ResolvedSource` enum (`Path` / `Oci` / `OciReplaced` / `GitReplaced`) drives the lockfile writer
+- [x] `chart_resolver::merge_into_lock` upserts path-dep + replace entries, preserving prior cosign / attestation metadata
+- [x] `AkuaLock::save` / `find` / `upsert` writer API
+- [x] `akua add` best-effort updates the lockfile on every edit
+- [x] `akua verify` exempts `path+file://` sources from strict_signing
+
+### Phase 2b slice B — OCI pull + digest verify (SHIPPED — 2026-04-22)
+
+- [x] `oci_fetcher` module: HTTPS GET of manifest + chart blob, anonymous bearer-token dance for public ghcr.io / docker.io / quay.io
+- [x] Content-addressed cache at `$XDG_CACHE_HOME/akua/oci/sha256/<hex>` — second render reuses the unpacked tree
+- [x] Lockfile-pinned digest verify on pull — a drifted tag fails the render loudly with `LockDigestMismatch`
+- [x] `ResolverOptions { offline, cache_root, expected_digests }` gate — `resolve()` stays offline for tests; `resolve_with_options()` is the network path
+- [x] `akua render` + `akua add` pass lockfile digests as `expected_digests`
+- [x] Integration test pulls `ghcr.io/stefanprodan/charts/podinfo:6.6.0`, caches, verifies digest-mismatch rejection
+
+### Phase 2b slice C — deferred
+
+- [ ] Git checkout + tag/rev pinning via `gix`
+- [ ] Private-repo auth: `~/.docker/config.json` + `$HOME/.config/akua/auth.toml`
 - [ ] Richer generated `charts.<name>.Chart` / `.Values` schemas (values.schema.json → KCL)
 - [ ] `helm.Template.chart: str | Chart` union type
-- [ ] `--strict` render mode: reject raw-string chart paths (forces typed import)
-- [ ] `akua add`, `akua remove`, `akua tree` grow chart-dep support
-- [ ] Replace directive (`{ oci = "...", replace = { path = "../fork" } }`) honored
+- [ ] `--strict` render mode: reject raw-string chart paths
+- [ ] `akua remove`, `akua tree` grow chart-dep support
 
-**Exit gate:** `examples/01-hello-webapp` rendered against local-path nginx ✅. Phase 2b gate: same example re-points at an OCI chart pinned by digest, `akua render --strict` rejects any raw-string plugin path.
+**Exit gate (for the phase as a whole):** An OCI-sourced chart end-to-end works under `akua render`, pinned by digest in `akua.lock`, with a cache hit on second render. ✅ (slice B test covers this). Slice C is pure follow-up; none of its items block the sandbox-first core.
 
 ---
 

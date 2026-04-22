@@ -8,7 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-default = ["engine-kcl", "engine-helm", "engine-kustomize"]
+default = ["engine-kcl", "engine-helm", "engine-kustomize", "oci-fetch"]
 # KCL engine — native Rust via kcl-lang/lib (git dep).
 engine-kcl = ["dep:kcl-lang", "dep:sha2", "dep:tempfile"]
 # Embedded Helm v4 template engine. Go source in crates/helm-engine-wasm/
@@ -18,6 +18,12 @@ engine-helm = ["dep:helm-engine-wasm"]
 # Embedded kustomize engine. Same shape as engine-helm — Go source in
 # crates/kustomize-engine-wasm/ compiled to wasip1.
 engine-kustomize = ["dep:kustomize-engine-wasm"]
+# OCI chart fetch. Pulls Helm charts from registries (ghcr.io,
+# registry-1.docker.io, public-only for now). Synchronous reqwest
+# client — no tokio runtime injection into the render path. Disable
+# for offline-only builds (lockfile-only, no resolution against
+# remote registries).
+oci-fetch = ["dep:reqwest", "dep:flate2", "dep:tar"]
 
 [dependencies]
 serde = { workspace = true }
@@ -32,6 +38,11 @@ sha2 = { version = "0.10", optional = true }
 tempfile = { version = "3", optional = true }
 helm-engine-wasm = { path = "../helm-engine-wasm", optional = true }
 kustomize-engine-wasm = { path = "../kustomize-engine-wasm", optional = true }
+
+# OCI chart fetch. `rustls-tls` avoids the openssl dep chain.
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
+flate2 = { version = "1", optional = true }
+tar = { version = "0.4", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -56,6 +56,15 @@ pub enum ResolvedSource {
     /// writes `source = "path+file://<declared>"` with `version = "local"`.
     Path { declared: String },
 
+    /// OCI-fetched dep. `blob_digest` is what the registry served us
+    /// (sha256 of the helm chart layer); lockfile stores it under
+    /// `digest`, subsequent pulls verify against it.
+    Oci {
+        oci: String,
+        version: String,
+        blob_digest: String,
+    },
+
     /// OCI-sourced dep with a local fork override applied via
     /// `replace = { path = "..." }`. Lockfile still records the
     /// canonical `oci://…@version` — removing the replace just works.
@@ -102,16 +111,26 @@ pub enum ChartResolveError {
         source: std::io::Error,
     },
 
-    /// OCI / git deps without a `replace` override point at Phase 2b
-    /// slice B (OCI pull). Distinguishable from a user mistake so the
-    /// CLI can surface the roadmap link.
-    #[error("chart `{name}`: {} source not yet supported — waiting on Phase 2b slice B (OCI pull + digest verify). Add `replace = {{ path = \"…\" }}` to source from a local fork in the meantime. See docs/roadmap.md.", source_kind_label(*kind))]
+    /// Source isn't supported by this resolver path. Caller either
+    /// passed [`ResolverOptions::offline = true`] or the source is
+    /// still roadmap-pending (git).
+    #[error("chart `{name}`: {} source not resolvable in the current mode — {reason}", source_kind_label(*kind))]
     UnsupportedSource {
         name: String,
-        /// `source` would collide with thiserror's `#[source]` detection,
-        /// so the field is named `kind` — DependencySource isn't an
-        /// `Error` anyway.
         kind: DependencySource,
+        /// Context for the user: which gate blocked resolution
+        /// (offline mode, Phase 2b slice C git support, etc).
+        reason: &'static str,
+    },
+
+    /// An `oci_fetcher::fetch` call failed. Kept as `OciFetchError` so
+    /// the CLI layer can differentiate HTTP vs digest-mismatch.
+    #[cfg(feature = "oci-fetch")]
+    #[error("chart `{name}`: OCI fetch failed: {source}")]
+    OciFetch {
+        name: String,
+        #[source]
+        source: crate::oci_fetcher::OciFetchError,
     },
 }
 
@@ -121,9 +140,59 @@ pub enum ChartResolveError {
 ///
 /// `workspace_root` is the directory `akua.toml` sits in. Relative
 /// path deps resolve against it.
+/// Options controlling how much network the resolver is allowed to do
+/// + where it caches fetched artifacts.
+#[derive(Debug, Clone)]
+pub struct ResolverOptions {
+    /// When `true`, OCI deps return [`ChartResolveError::UnsupportedSource`]
+    /// rather than attempting a network fetch. `akua verify` / tests
+    /// turn this on to guarantee determinism without a network.
+    pub offline: bool,
+
+    /// Where OCI blobs live on disk. None → resolver uses the default
+    /// cache (`$XDG_CACHE_HOME/akua/oci` or `$HOME/.cache/akua/oci`).
+    pub cache_root: Option<PathBuf>,
+
+    /// Lockfile-pinned digests keyed by dep name. When present, the
+    /// fetcher verifies the pulled blob matches; a mismatch fails the
+    /// resolve hard. Populated from `akua.lock` by the CLI.
+    pub expected_digests: BTreeMap<String, String>,
+}
+
+impl Default for ResolverOptions {
+    fn default() -> Self {
+        Self {
+            offline: false,
+            cache_root: None,
+            expected_digests: BTreeMap::new(),
+        }
+    }
+}
+
+/// Offline resolve — path + replace only, OCI/git surface as
+/// [`ChartResolveError::UnsupportedSource`]. The simplest callers
+/// (tests, pure-local workflows) use this.
 pub fn resolve(
     manifest: &AkuaManifest,
     workspace_root: &Path,
+) -> Result<ResolvedCharts, ChartResolveError> {
+    resolve_with_options(
+        manifest,
+        workspace_root,
+        &ResolverOptions {
+            offline: true,
+            ..Default::default()
+        },
+    )
+}
+
+/// Full resolver — handles path, replace, and OCI (Phase 2b slice B).
+/// Git deps still return [`ChartResolveError::UnsupportedSource`] —
+/// Phase 2b slice C.
+pub fn resolve_with_options(
+    manifest: &AkuaManifest,
+    workspace_root: &Path,
+    opts: &ResolverOptions,
 ) -> Result<ResolvedCharts, ChartResolveError> {
     let mut entries = BTreeMap::new();
     for (name, dep) in &manifest.dependencies {
@@ -133,8 +202,12 @@ pub fn resolve(
         // Bare path deps don't use `replace` (rejected upstream by
         // manifest validation).
         if let Some(replace) = &dep.replace {
-            let chart =
-                resolve_path(name, &replace.path, workspace_root, resolved_source_for_replace(name, dep, &replace.path)?)?;
+            let chart = resolve_path(
+                name,
+                &replace.path,
+                workspace_root,
+                resolved_source_for_replace(name, dep, &replace.path)?,
+            )?;
             entries.insert(name.clone(), chart);
             continue;
         }
@@ -149,22 +222,99 @@ pub fn resolve(
                 };
                 entries.insert(name.clone(), resolve_path(name, path, workspace_root, src)?);
             }
-            (None, Some(_), None) => {
-                return Err(ChartResolveError::UnsupportedSource {
-                    name: name.clone(),
-                    kind: DependencySource::Oci,
-                });
+            (None, Some(oci), None) => {
+                entries.insert(name.clone(), resolve_oci(name, dep, oci, opts)?);
             }
             (None, None, Some(_)) => {
                 return Err(ChartResolveError::UnsupportedSource {
                     name: name.clone(),
                     kind: DependencySource::Git,
+                    reason: "git deps land Phase 2b slice C; use `replace = { path = \"...\" }` to source from a local clone in the meantime",
                 });
             }
             _ => unreachable!("manifest validation rejects ambiguous / empty sources"),
         }
     }
     Ok(ResolvedCharts { entries })
+}
+
+/// Resolve an OCI-sourced dep: fetch (or retrieve from cache) via
+/// [`crate::oci_fetcher`], capture the blob digest into
+/// [`ResolvedSource::Oci`].
+#[cfg(feature = "oci-fetch")]
+fn resolve_oci(
+    name: &str,
+    dep: &Dependency,
+    oci: &str,
+    opts: &ResolverOptions,
+) -> Result<ResolvedChart, ChartResolveError> {
+    if opts.offline {
+        return Err(ChartResolveError::UnsupportedSource {
+            name: name.to_string(),
+            kind: DependencySource::Oci,
+            reason: "resolver is in offline mode — run `akua add` (or enable oci-fetch) to pull",
+        });
+    }
+    let version = dep
+        .version
+        .as_deref()
+        .expect("manifest validation requires `version` on oci deps");
+    let cache_root = opts
+        .cache_root
+        .clone()
+        .unwrap_or_else(default_oci_cache_root);
+    let expected = opts.expected_digests.get(name).map(String::as_str);
+    let fetched = crate::oci_fetcher::fetch(oci, version, &cache_root, expected).map_err(
+        |source| ChartResolveError::OciFetch {
+            name: name.to_string(),
+            source,
+        },
+    )?;
+    // The content-addressed cache dir has a stable structure, so the
+    // tree digest = the blob digest (same bytes just unpacked). Reuse
+    // the blob digest rather than re-hashing the tree.
+    Ok(ResolvedChart {
+        name: name.to_string(),
+        abs_path: fetched.chart_dir,
+        sha256: fetched.blob_digest.clone(),
+        source: ResolvedSource::Oci {
+            oci: oci.to_string(),
+            version: version.to_string(),
+            blob_digest: fetched.blob_digest,
+        },
+    })
+}
+
+#[cfg(not(feature = "oci-fetch"))]
+fn resolve_oci(
+    name: &str,
+    _dep: &Dependency,
+    _oci: &str,
+    _opts: &ResolverOptions,
+) -> Result<ResolvedChart, ChartResolveError> {
+    Err(ChartResolveError::UnsupportedSource {
+        name: name.to_string(),
+        kind: DependencySource::Oci,
+        reason: "oci-fetch feature disabled at compile time",
+    })
+}
+
+/// Default cache root: `$XDG_CACHE_HOME/akua/oci` with a fallback to
+/// `$HOME/.cache/akua/oci`, and finally `./.akua/cache/oci` when both
+/// env vars are absent (CI sandboxes, nix builds).
+#[cfg(feature = "oci-fetch")]
+fn default_oci_cache_root() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
+        if !xdg.is_empty() {
+            return PathBuf::from(xdg).join("akua/oci");
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        if !home.is_empty() {
+            return PathBuf::from(home).join(".cache/akua/oci");
+        }
+    }
+    PathBuf::from(".akua/cache/oci")
 }
 
 /// Build the `ResolvedSource::*Replaced` variant from a dep that has
@@ -217,6 +367,7 @@ pub fn merge_into_lock(lock: &mut crate::lock_file::AkuaLock, resolved: &Resolve
                 "local".to_string(),
                 None,
             ),
+            ResolvedSource::Oci { oci, version, .. } => (oci.clone(), version.clone(), None),
             ResolvedSource::OciReplaced {
                 oci,
                 version,
@@ -555,7 +706,7 @@ alpha = { path = "./charts/alpha" }
     }
 
     #[test]
-    fn oci_dep_surfaces_phase_2b_error() {
+    fn oci_dep_surfaces_typed_error_in_offline_mode() {
         let ws = tempfile::tempdir().unwrap();
         let manifest = minimal_manifest(
             r#"nginx = { oci = "oci://ghcr.io/foo/nginx", version = "1.0.0" }"#,
@@ -567,12 +718,14 @@ alpha = { path = "./charts/alpha" }
                 ChartResolveError::UnsupportedSource {
                     ref name,
                     kind: DependencySource::Oci,
+                    ..
                 } if name == "nginx"
             ),
             "got: {err:?}"
         );
-        // Error message must point a user at the roadmap.
-        assert!(err.to_string().contains("Phase 2b"));
+        // Reason text must mention offline so agents know which knob
+        // to turn.
+        assert!(err.to_string().contains("offline"), "got: {err}");
     }
 
     #[test]
@@ -588,6 +741,7 @@ alpha = { path = "./charts/alpha" }
                 ChartResolveError::UnsupportedSource {
                     ref name,
                     kind: DependencySource::Git,
+                    ..
                 } if name == "libs"
             ),
             "got: {err:?}"

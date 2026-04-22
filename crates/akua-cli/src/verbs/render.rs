@@ -7,10 +7,11 @@ use std::path::{Path, PathBuf};
 
 use crate::contract::{emit_output, Context};
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
+use akua_core::lock_file::{AkuaLock, LockLoadError};
 use akua_core::mod_file::ManifestLoadError;
 use akua_core::{
-    chart_resolver, package_k::PackageKError, render, AkuaManifest, ChartResolveError, PackageK,
-    PackageRenderError, RenderSummary, ResolvedCharts,
+    chart_resolver, chart_resolver::ResolverOptions, package_k::PackageKError, render,
+    AkuaManifest, ChartResolveError, PackageK, PackageRenderError, RenderSummary, ResolvedCharts,
 };
 
 #[derive(Debug, Clone)]
@@ -200,6 +201,12 @@ fn resolve_inputs_path(args: &RenderArgs<'_>) -> Option<PathBuf> {
 /// No `akua.toml` → empty `ResolvedCharts` (Package renders as if it
 /// had no deps, matches the pre-Phase-2 behavior). Parse / resolve
 /// errors surface as typed CLI errors so agents branch.
+///
+/// OCI pulls go through a content-addressed cache under
+/// `$XDG_CACHE_HOME/akua/oci`; the second render reuses the same
+/// unpacked tree. Lockfile digests flow in as `expected_digests` so a
+/// drifted tag at the registry fails the render instead of silently
+/// picking up new bytes.
 fn resolve_package_charts(package_path: &Path) -> Result<ResolvedCharts, RenderError> {
     let workspace = package_path.parent().unwrap_or(Path::new("."));
     let manifest = match AkuaManifest::load(workspace) {
@@ -212,7 +219,26 @@ fn resolve_package_charts(package_path: &Path) -> Result<ResolvedCharts, RenderE
             });
         }
     };
-    Ok(chart_resolver::resolve(&manifest, workspace)?)
+
+    let expected_digests = match AkuaLock::load(workspace) {
+        Ok(lock) => lock
+            .packages
+            .into_iter()
+            .filter(|p| p.source.starts_with("oci://"))
+            .map(|p| (p.name, p.digest))
+            .collect(),
+        Err(LockLoadError::Missing { .. }) => Default::default(),
+        Err(_) => Default::default(), // lock corruption surfaces via `akua verify`
+    };
+
+    let opts = ResolverOptions {
+        offline: false,
+        cache_root: None,
+        expected_digests,
+    };
+    Ok(chart_resolver::resolve_with_options(
+        &manifest, workspace, &opts,
+    )?)
 }
 
 fn load_inputs(path: Option<&Path>) -> Result<serde_yaml::Value, RenderError> {
