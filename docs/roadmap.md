@@ -76,18 +76,29 @@ Research recommendation: revive akua's deleted fork, not vendor kclipper. Prior 
 
 ## Phase 2 — Typed `charts.*` deps via `akua.toml` (2-3 weeks)
 
-Spec-to-code convergence. [docs/package-format.md §2](package-format.md) and [docs/lockfile-format.md](lockfile-format.md) already document `import charts.<name>` + OCI / Git / Path / Replace dep forms. The resolver doesn't exist yet.
+Spec-to-code convergence. [docs/package-format.md §2](package-format.md) and [docs/lockfile-format.md](lockfile-format.md) already document `import charts.<name>` + OCI / Git / Path / Replace dep forms. The resolver is shipping in two slices.
 
-- [ ] Extend `akua.toml` dep parser for `oci`, `git`, `path`, `replace` chart dep forms
-- [ ] Resolver: local path → sha256 into `akua.lock`; OCI → pull + digest verify (no cosign yet — Phase 6)
-- [ ] `akua.charts` stdlib module — resolver-produced typed `Chart` values exposed at `import charts.<name>`
+### Phase 2a — local-path deps (SHIPPED — 2026-04-22)
+
+- [x] `chart_resolver` module: local-path deps → canonicalized path + sha256 digest
+- [x] Per-render `charts` KCL external pkg generated from resolved deps (`charts/<name>.k` exposes `path` + `sha256` constants)
+- [x] `PackageK::render_with_charts` threads resolved chart paths as allowed absolute roots for the plugin path-escape guard — `helm.template(nginx.path, ...)` survives without an `--unsafe-host` escape hatch
+- [x] `akua render` CLI verb auto-loads sibling `akua.toml`, resolves charts, passes them through
+- [x] `examples/01-hello-webapp` vendored nginx chart + rewritten Package renders end-to-end — verified via `examples_hello_webapp.rs` integration test
+- [x] OCI / git / replace deps return typed `E_CHART_RESOLVE` errors pointing at Phase 2b
+
+### Phase 2b — remote deps + lockfile integration
+
+- [ ] OCI pull + digest verify (no cosign yet — Phase 6)
+- [ ] Git checkout + tag/rev pinning
+- [ ] Local-path digests written to `akua.lock` on `akua add`
+- [ ] Richer generated `charts.<name>.Chart` / `.Values` schemas (values.schema.json → KCL)
 - [ ] `helm.Template.chart: str | Chart` union type
 - [ ] `--strict` render mode: reject raw-string chart paths (forces typed import)
 - [ ] `akua add`, `akua remove`, `akua tree` grow chart-dep support
-- [ ] Replace directive (`{ oci = "...", replace = { path = "../fork" } }`) honored — go-modules-style dev override
-- [ ] `examples/01-hello-webapp` renders against a pinned OCI chart
+- [ ] Replace directive (`{ oci = "...", replace = { path = "../fork" } }`) honored
 
-**Exit gate:** `examples/01-hello-webapp` renders against a Verified OCI chart by digest. `akua render --strict` rejects any raw-string plugin path.
+**Exit gate:** `examples/01-hello-webapp` rendered against local-path nginx ✅. Phase 2b gate: same example re-points at an OCI chart pinned by digest, `akua render --strict` rejects any raw-string plugin path.
 
 ---
 

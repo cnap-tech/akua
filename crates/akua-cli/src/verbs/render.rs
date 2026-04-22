@@ -7,8 +7,10 @@ use std::path::{Path, PathBuf};
 
 use crate::contract::{emit_output, Context};
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
+use akua_core::mod_file::ManifestLoadError;
 use akua_core::{
-    package_k::PackageKError, render, PackageK, PackageRenderError, RenderSummary,
+    chart_resolver, package_k::PackageKError, render, AkuaManifest, ChartResolveError, PackageK,
+    PackageRenderError, RenderSummary, ResolvedCharts,
 };
 
 #[derive(Debug, Clone)]
@@ -51,6 +53,16 @@ pub enum RenderError {
 
     #[error(transparent)]
     Render(#[from] PackageRenderError),
+
+    #[error("akua.toml at {path}: {source}")]
+    ManifestParse {
+        path: PathBuf,
+        #[source]
+        source: ManifestLoadError,
+    },
+
+    #[error("resolving charts.*: {0}")]
+    Charts(#[from] ChartResolveError),
 
     #[error("write to stdout failed: {0}")]
     StdoutWrite(#[source] std::io::Error),
@@ -109,6 +121,13 @@ impl RenderError {
                 StructuredError::new(codes::E_RENDER_YAML, format!("resource #{index}: {source}"))
                     .with_default_docs()
             }
+            RenderError::ManifestParse { path, source } => source
+                .to_structured()
+                .with_path(path.display().to_string()),
+            RenderError::Charts(inner) => {
+                StructuredError::new(codes::E_CHART_RESOLVE, inner.to_string())
+                    .with_default_docs()
+            }
             RenderError::StdoutWrite(e) => {
                 StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
             }
@@ -124,6 +143,7 @@ impl RenderError {
                 ExitCode::SystemError
             }
             RenderError::Render(PackageRenderError::Io { .. }) => ExitCode::SystemError,
+            RenderError::ManifestParse { source, .. } if source.is_system() => ExitCode::SystemError,
             RenderError::StdoutWrite(_) => ExitCode::SystemError,
             _ => ExitCode::UserError,
         }
@@ -138,7 +158,8 @@ pub fn run<W: Write>(
     let package = PackageK::load(args.package_path)?;
     let resolved_inputs = resolve_inputs_path(args);
     let inputs = load_inputs(resolved_inputs.as_deref())?;
-    let rendered = package.render(&inputs)?;
+    let charts = resolve_package_charts(args.package_path)?;
+    let rendered = package.render_with_charts(&inputs, &charts)?;
 
     if args.stdout_mode {
         write_multi_doc_yaml(stdout, &rendered.resources).map_err(RenderError::StdoutWrite)?;
@@ -173,6 +194,25 @@ fn resolve_inputs_path(args: &RenderArgs<'_>) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Resolve `[dependencies]` from the Package's sibling `akua.toml`.
+/// No `akua.toml` → empty `ResolvedCharts` (Package renders as if it
+/// had no deps, matches the pre-Phase-2 behavior). Parse / resolve
+/// errors surface as typed CLI errors so agents branch.
+fn resolve_package_charts(package_path: &Path) -> Result<ResolvedCharts, RenderError> {
+    let workspace = package_path.parent().unwrap_or(Path::new("."));
+    let manifest = match AkuaManifest::load(workspace) {
+        Ok(m) => m,
+        Err(ManifestLoadError::Missing { .. }) => return Ok(ResolvedCharts::default()),
+        Err(source) => {
+            return Err(RenderError::ManifestParse {
+                path: workspace.join("akua.toml"),
+                source,
+            });
+        }
+    };
+    Ok(chart_resolver::resolve(&manifest, workspace)?)
 }
 
 fn load_inputs(path: Option<&Path>) -> Result<serde_yaml::Value, RenderError> {

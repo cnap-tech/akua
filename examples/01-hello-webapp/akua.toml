@@ -7,5 +7,7 @@ version = "0.1.0"
 edition = "akua.dev/v1alpha1"
 
 [dependencies]
-# Upstream nginx Helm chart.
-nginx = { oci = "oci://registry-1.docker.io/bitnamicharts/nginx", version = "18.2.0" }
+# Vendored nginx chart alongside the Package for Phase 2a. OCI pulling
+# of upstream charts (e.g. bitnami) ships in Phase 2b — see
+# docs/roadmap.md.
+nginx = { path = "./vendor/nginx" }

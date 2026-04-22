@@ -152,20 +152,31 @@ pub fn plugin_agent_ptr() -> u64 {
     dispatch as *const () as usize as u64
 }
 
-thread_local! {
-    /// Stack of `package.k` paths currently being rendered on this
-    /// thread. `PackageK::render` pushes on entry and pops on exit
-    /// via [`RenderScope`]. Plugin handlers read the top to resolve
-    /// user-supplied relative paths (helm chart dirs, nested
-    /// package refs) against the Package that called them instead
-    /// of against the process cwd.
-    static RENDER_STACK: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+/// One render frame on the thread-local stack: the Package being
+/// rendered + any additional absolute roots plugin paths are allowed
+/// to resolve under. The second half is populated by
+/// `package_k::render_with_charts` with the resolved chart directories
+/// so `helm.template(nginx.path, ...)` (an absolute path originating
+/// from the akua resolver) isn't rejected by the path-escape guard.
+#[derive(Debug)]
+struct RenderFrame {
+    package: PathBuf,
+    allowed_roots: Vec<PathBuf>,
 }
 
-/// RAII guard that pushes `package` onto the render stack on
-/// construction and pops it on drop. Must be held for the duration
-/// of the KCL evaluation — once dropped, the Package is no longer
-/// reachable via [`current_package_dir`] or [`is_rendering`].
+thread_local! {
+    /// Stack of active render frames on this thread. `PackageK::render`
+    /// pushes on entry and pops on exit via [`RenderScope`]. Plugin
+    /// handlers read the top to resolve user-supplied paths (helm
+    /// chart dirs, nested package refs) against the Package that
+    /// called them instead of against the process cwd.
+    static RENDER_STACK: RefCell<Vec<RenderFrame>> = const { RefCell::new(Vec::new()) };
+}
+
+/// RAII guard that pushes a render frame on construction and pops it
+/// on drop. Must be held for the duration of the KCL evaluation —
+/// once dropped, the Package is no longer reachable via
+/// [`current_package_dir`] or [`is_rendering`].
 #[must_use = "holding the guard is how the package stays on the render stack"]
 pub struct RenderScope {
     // Marker only; the push/pop bookkeeping lives on the thread-local.
@@ -173,9 +184,25 @@ pub struct RenderScope {
 }
 
 impl RenderScope {
-    /// Push `package` onto the current-thread render stack.
+    /// Push `package` onto the current-thread render stack with an
+    /// empty allowed-roots list — plugin paths must resolve under
+    /// `package.parent()`.
     pub fn enter(package: &Path) -> Self {
-        RENDER_STACK.with(|s| s.borrow_mut().push(package.to_path_buf()));
+        Self::enter_with_allowed_roots(package, &[])
+    }
+
+    /// Push `package` onto the current-thread render stack alongside
+    /// the list of absolute paths plugin-supplied chart paths are
+    /// allowed to live under. Caller must canonicalize the roots
+    /// before handing them in; [`resolve_in_package`] compares via
+    /// `starts_with` after its own best-effort canonicalize.
+    pub fn enter_with_allowed_roots(package: &Path, allowed_roots: &[PathBuf]) -> Self {
+        RENDER_STACK.with(|s| {
+            s.borrow_mut().push(RenderFrame {
+                package: package.to_path_buf(),
+                allowed_roots: allowed_roots.to_vec(),
+            });
+        });
         Self { _private: () }
     }
 }
@@ -199,7 +226,7 @@ pub fn current_package_dir() -> Option<PathBuf> {
     RENDER_STACK.with(|s| {
         s.borrow()
             .last()
-            .and_then(|p| p.parent().map(Path::to_path_buf))
+            .and_then(|f| f.package.parent().map(Path::to_path_buf))
     })
 }
 
@@ -207,7 +234,19 @@ pub fn current_package_dir() -> Option<PathBuf> {
 /// recursive plugins (`pkg.render`) to reject cycles before they
 /// cause infinite recursion.
 pub fn is_rendering(package: &Path) -> bool {
-    RENDER_STACK.with(|s| s.borrow().iter().any(|p| p == package))
+    RENDER_STACK.with(|s| s.borrow().iter().any(|f| f.package == package))
+}
+
+/// Absolute roots registered for the top-of-stack frame — the
+/// resolved chart paths `render_with_charts` pushed. Empty when the
+/// caller used `RenderScope::enter` directly (tests, legacy paths).
+fn current_allowed_roots() -> Vec<PathBuf> {
+    RENDER_STACK.with(|s| {
+        s.borrow()
+            .last()
+            .map(|f| f.allowed_roots.clone())
+            .unwrap_or_default()
+    })
 }
 
 /// Error from [`resolve_in_package`] when a plugin's user-supplied
@@ -236,20 +275,33 @@ pub enum PathError {
     },
 }
 
-/// Resolve a user-supplied plugin path against the current Package
-/// directory and assert the result stays inside it. Absolute paths are
-/// rejected (Packages can't reach outside their own tree); symlinks
-/// are followed via `canonicalize` so a crafted `./link → /etc`
-/// fails the under-dir check. Missing render scope is an error — every
+/// Resolve a user-supplied plugin path against the current render
+/// frame. Relative paths resolve under the Package dir; absolute paths
+/// are rejected **unless** they resolve under one of the frame's
+/// registered allowed roots — which is how resolved `charts.*` dep
+/// paths reach `helm.template` without escaping the sandbox. Symlinks
+/// are followed via `canonicalize` so a crafted `./link → /etc` fails
+/// the under-dir check. Missing render scope is an error — every
 /// plugin handler runs inside [`RenderScope`] by construction.
 ///
 /// See docs/security-model.md for the full threat model.
 pub fn resolve_in_package(path: &Path) -> Result<PathBuf, PathError> {
+    let package_dir = current_package_dir().ok_or(PathError::NoRenderScope)?;
+    let allowed_roots = current_allowed_roots();
+
     if path.is_absolute() {
+        let canon = canonicalize_best_effort(path).map_err(|e| PathError::Io {
+            path: path.to_path_buf(),
+            source: e,
+        })?;
+        for root in &allowed_roots {
+            if canon.starts_with(root) {
+                return Ok(canon);
+            }
+        }
         return Err(PathError::AbsoluteDisallowed(path.to_path_buf()));
     }
 
-    let package_dir = current_package_dir().ok_or(PathError::NoRenderScope)?;
     let pkg_canon = package_dir
         .canonicalize()
         .map_err(|e| PathError::Io {

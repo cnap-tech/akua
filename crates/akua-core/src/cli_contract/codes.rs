@@ -28,6 +28,9 @@ pub const E_ENGINE_NOT_AVAILABLE: &str = "E_ENGINE_NOT_AVAILABLE";
 /// Package argument to an engine plugin resolved to a path outside
 /// the Package directory (traversal / symlink escape).
 pub const E_PATH_ESCAPE: &str = "E_PATH_ESCAPE";
+/// `charts.*` dep in `akua.toml` failed to resolve (missing path,
+/// not-a-directory, OCI/git Phase-2b gate). See chart_resolver.
+pub const E_CHART_RESOLVE: &str = "E_CHART_RESOLVE";
 
 // ----- Init ----------------------------------------------------------------
 

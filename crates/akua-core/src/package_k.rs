@@ -128,9 +128,16 @@ impl PackageK {
         // Push self onto the render stack so plugin handlers can
         // resolve user-supplied relative paths (helm chart dirs,
         // nested package refs) against this Package's directory.
-        // Dropped on return — nested renders (pkg.render) stack
-        // naturally.
-        let _scope = crate::kcl_plugin::RenderScope::enter(&self.path);
+        // Resolved chart paths are registered as allowed absolute
+        // roots so `helm.template(nginx.path, ...)` survives the
+        // path-escape guard. Dropped on return — nested renders
+        // (pkg.render) stack naturally.
+        let allowed_roots: Vec<PathBuf> =
+            charts.entries.values().map(|c| c.abs_path.clone()).collect();
+        let _scope = crate::kcl_plugin::RenderScope::enter_with_allowed_roots(
+            &self.path,
+            &allowed_roots,
+        );
 
         // Materialize `charts/` alongside the static `akua/` stdlib.
         // TempDir dropped at end of scope, after `exec_program` has
