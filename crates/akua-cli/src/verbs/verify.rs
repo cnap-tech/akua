@@ -121,13 +121,7 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
 
     let locked_names: std::collections::HashSet<&str> =
         lock.packages.iter().map(|p| p.name.as_str()).collect();
-    for (dep_name, dep) in &manifest.dependencies {
-        // Path deps live on disk, not in a registry — no digest / no
-        // signature, so they're exempt from lockfile entries.
-        // OCI-pull digests land Phase 2b (docs/roadmap.md).
-        if dep.path.is_some() {
-            continue;
-        }
+    for (dep_name, _dep) in &manifest.dependencies {
         if !locked_names.contains(dep_name.as_str()) {
             violations.push(Violation::UnlockedDep {
                 name: dep_name.clone(),
@@ -148,6 +142,14 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
 
     if manifest.package.strict_signing {
         for pkg in &lock.packages {
+            // Path-sourced deps are local files (not registry-fetched),
+            // so there's nothing to sign against — exempt from strict
+            // signing. Phase 6 may revisit (provenance for locally-
+            // vendored charts via `akua publish` attestation), but
+            // until then a missing sig on a path dep is correct.
+            if pkg.source.starts_with("path+file://") {
+                continue;
+            }
             if pkg.signature.is_none() {
                 violations.push(Violation::MissingSignature {
                     name: pkg.name.clone(),

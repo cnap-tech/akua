@@ -1,13 +1,8 @@
-# akua.toml — declared deps. Human-edited.
-# Machine-maintained digest + signature ledger lives in akua.lock.
-
 [package]
-name    = "01-hello-webapp"
+name = "01-hello-webapp"
 version = "0.1.0"
 edition = "akua.dev/v1alpha1"
+strict_signing = true
 
-[dependencies]
-# Vendored nginx chart alongside the Package for Phase 2a. OCI pulling
-# of upstream charts (e.g. bitnami) ships in Phase 2b — see
-# docs/roadmap.md.
-nginx = { path = "./vendor/nginx" }
+[dependencies.nginx]
+path = "./vendor/nginx"

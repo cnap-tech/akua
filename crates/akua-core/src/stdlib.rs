@@ -180,6 +180,9 @@ mod tests {
                 name: "nginx".to_string(),
                 abs_path: PathBuf::from("/tmp/charts/nginx"),
                 sha256: "sha256:abc123".to_string(),
+                source: crate::chart_resolver::ResolvedSource::Path {
+                    declared: "./charts/nginx".to_string(),
+                },
             },
         );
         let resolved = ResolvedCharts { entries };
@@ -209,6 +212,9 @@ mod tests {
                 // otherwise mis-parse.
                 abs_path: PathBuf::from(r#"C:\charts\w"ei"rd"#),
                 sha256: "sha256:f00".to_string(),
+                source: crate::chart_resolver::ResolvedSource::Path {
+                    declared: r#"C:\charts\w"ei"rd"#.to_string(),
+                },
             },
         );
         let resolved = ResolvedCharts { entries };

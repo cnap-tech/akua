@@ -9,8 +9,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
+use akua_core::lock_file::{AkuaLock, LockLoadError};
 use akua_core::mod_file::{Dependency, ManifestError};
-use akua_core::{AkuaManifest, ManifestLoadError};
+use akua_core::{chart_resolver, AkuaManifest, ChartResolveError, ManifestLoadError};
 use serde::Serialize;
 
 use crate::contract::{emit_output, Context};
@@ -76,6 +77,12 @@ pub enum AddError {
         source: std::io::Error,
     },
 
+    #[error("resolving chart dep: {0}")]
+    Resolve(#[from] ChartResolveError),
+
+    #[error(transparent)]
+    LockSave(#[from] LockLoadError),
+
     #[error("write to stdout failed: {0}")]
     StdoutWrite(#[source] std::io::Error),
 }
@@ -102,6 +109,11 @@ impl AddError {
             AddError::Io { path, source } => StructuredError::new(codes::E_IO, source.to_string())
                 .with_path(path.display().to_string())
                 .with_default_docs(),
+            AddError::Resolve(inner) => {
+                StructuredError::new(codes::E_CHART_RESOLVE, inner.to_string())
+                    .with_default_docs()
+            }
+            AddError::LockSave(e) => e.to_structured(),
             AddError::StdoutWrite(e) => {
                 StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
             }
@@ -111,6 +123,7 @@ impl AddError {
     pub fn exit_code(&self) -> ExitCode {
         match self {
             AddError::Load(e) if e.is_system() => ExitCode::SystemError,
+            AddError::LockSave(e) if e.is_system() => ExitCode::SystemError,
             AddError::Io { .. } | AddError::StdoutWrite(_) => ExitCode::SystemError,
             _ => ExitCode::UserError,
         }
@@ -144,6 +157,24 @@ pub fn run<W: Write>(
         path: manifest_path,
         source: e,
     })?;
+
+    // Best-effort lockfile update. Resolving all manifest deps is a
+    // nice-to-have on `akua add` — the edit to `akua.toml` is already
+    // valid, and the user's workflow (add + fetch-later, add + write-
+    // chart-later) shouldn't be broken by deps that aren't yet
+    // reachable. Common cases: bare OCI/git deps (Phase 2b slice B) or
+    // path deps pointing at a directory the user will create next.
+    // `akua render` / `akua verify` re-run the resolver strictly when
+    // the dep actually has to be reached.
+    if let Ok(resolved) = chart_resolver::resolve(&manifest, args.workspace) {
+        let mut lock = match AkuaLock::load(args.workspace) {
+            Ok(l) => l,
+            Err(LockLoadError::Missing { .. }) => AkuaLock::empty(),
+            Err(e) => return Err(AddError::LockSave(e)),
+        };
+        chart_resolver::merge_into_lock(&mut lock, &resolved);
+        lock.save(args.workspace)?;
+    }
 
     let output = AddOutput {
         name: args.name.to_string(),

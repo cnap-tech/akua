@@ -522,6 +522,9 @@ input: Input = option("input") or Input {}
                 name: "nginx".to_string(),
                 abs_path: PathBuf::from("/opt/charts/nginx"),
                 sha256: "sha256:deadbeef".to_string(),
+                source: crate::chart_resolver::ResolvedSource::Path {
+                    declared: "./charts/nginx".to_string(),
+                },
             },
         );
         let resolved = ResolvedCharts { entries };

@@ -12,10 +12,10 @@
 //! `nginx` dep in `akua.toml` resolves to. That path + a content-addressed
 //! digest of the chart tree is exactly what this module computes.
 //!
-//! Phase 2a (this crate's shipping scope) resolves **local-path deps
-//! only** — OCI pull + digest verify + git checkout land in Phase 2b.
-//! OCI and git deps here return [`ChartResolveError::UnsupportedSource`]
-//! pointing at the roadmap.
+//! Phase 2a resolved local-path deps. Phase 2b adds `replace` directives
+//! + OCI/git remote fetches. Remote resolution without a `replace`
+//! override still returns [`ChartResolveError::UnsupportedSource`] until
+//! the OCI pull path lands (tracked in docs/roadmap.md Phase 2b slice B).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::hex::hex_encode;
-use crate::mod_file::{AkuaManifest, DependencySource};
+use crate::mod_file::{AkuaManifest, Dependency, DependencySource};
 
 /// A single resolved chart dep — a materialized on-disk directory plus
 /// a content-addressed digest of the tree (filenames + contents).
@@ -39,6 +39,40 @@ pub struct ResolvedChart {
     /// `sha256:<hex>` of the chart tree. Stable across machines when
     /// file contents + names are identical.
     pub sha256: String,
+
+    /// Where the chart canonically comes from. Used by the lockfile
+    /// writer to record the source of record even when a `replace`
+    /// directive is pulling it off local disk.
+    pub source: ResolvedSource,
+}
+
+/// The source of a resolved chart in a form suitable for lockfile
+/// serialization. Distinct from `mod_file::DependencySource` because
+/// it carries the concrete identifier (path / oci ref / git URL) and
+/// the replace-override, not just the discriminant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedSource {
+    /// Bare path dep — `nginx = { path = "./vendor/nginx" }`. Lockfile
+    /// writes `source = "path+file://<declared>"` with `version = "local"`.
+    Path { declared: String },
+
+    /// OCI-sourced dep with a local fork override applied via
+    /// `replace = { path = "..." }`. Lockfile still records the
+    /// canonical `oci://…@version` — removing the replace just works.
+    OciReplaced {
+        oci: String,
+        version: String,
+        replace_path: String,
+    },
+
+    /// Git-sourced dep with a `replace` override. Same semantics as
+    /// `OciReplaced`.
+    GitReplaced {
+        git: String,
+        /// Either the tag (preferred) or commit SHA.
+        tag_or_rev: String,
+        replace_path: String,
+    },
 }
 
 /// The resolver's output. Canonical order (alphabetical by dep name)
@@ -68,9 +102,10 @@ pub enum ChartResolveError {
         source: std::io::Error,
     },
 
-    /// OCI / git deps point at Phase 2b. Deliberately distinguishable
-    /// from a user mistake so the CLI can surface the roadmap link.
-    #[error("chart `{name}`: {} source not yet supported — waiting on Phase 2b (OCI pull + digest verify). See docs/roadmap.md.", source_kind_label(*kind))]
+    /// OCI / git deps without a `replace` override point at Phase 2b
+    /// slice B (OCI pull). Distinguishable from a user mistake so the
+    /// CLI can surface the roadmap link.
+    #[error("chart `{name}`: {} source not yet supported — waiting on Phase 2b slice B (OCI pull + digest verify). Add `replace = {{ path = \"…\" }}` to source from a local fork in the meantime. See docs/roadmap.md.", source_kind_label(*kind))]
     UnsupportedSource {
         name: String,
         /// `source` would collide with thiserror's `#[source]` detection,
@@ -78,12 +113,6 @@ pub enum ChartResolveError {
         /// `Error` anyway.
         kind: DependencySource,
     },
-
-    /// `replace.path` overrides on oci/git deps are Phase 2b as well —
-    /// path-only deps don't use replace at all (rejected by manifest
-    /// validation upstream).
-    #[error("chart `{name}`: replace override not yet supported — Phase 2b")]
-    ReplaceUnsupported { name: String },
 }
 
 /// Resolve every dep in `manifest` against `workspace_root` and return
@@ -98,8 +127,16 @@ pub fn resolve(
 ) -> Result<ResolvedCharts, ChartResolveError> {
     let mut entries = BTreeMap::new();
     for (name, dep) in &manifest.dependencies {
-        if dep.replace.is_some() {
-            return Err(ChartResolveError::ReplaceUnsupported { name: name.clone() });
+        // A `replace` directive on oci/git deps overrides resolution:
+        // source-of-record stays the canonical oci/git (tracked in
+        // lockfile for audit) but files come from the local fork.
+        // Bare path deps don't use `replace` (rejected upstream by
+        // manifest validation).
+        if let Some(replace) = &dep.replace {
+            let chart =
+                resolve_path(name, &replace.path, workspace_root, resolved_source_for_replace(name, dep, &replace.path)?)?;
+            entries.insert(name.clone(), chart);
+            continue;
         }
         // Match directly on the source fields rather than re-querying
         // `dep.source()` — pre-validated manifests are already guaranteed
@@ -107,7 +144,10 @@ pub fn resolve(
         // "path requires `path`" invariant unambiguous.
         match (&dep.path, &dep.oci, &dep.git) {
             (Some(path), None, None) => {
-                entries.insert(name.clone(), resolve_path(name, path, workspace_root)?);
+                let src = ResolvedSource::Path {
+                    declared: path.clone(),
+                };
+                entries.insert(name.clone(), resolve_path(name, path, workspace_root, src)?);
             }
             (None, Some(_), None) => {
                 return Err(ChartResolveError::UnsupportedSource {
@@ -127,6 +167,109 @@ pub fn resolve(
     Ok(ResolvedCharts { entries })
 }
 
+/// Build the `ResolvedSource::*Replaced` variant from a dep that has
+/// both a canonical source (`oci` / `git`) and a `replace.path`.
+/// Rejects replace on bare path deps — that shape has no canonical
+/// source to preserve.
+fn resolved_source_for_replace(
+    name: &str,
+    dep: &Dependency,
+    replace_path: &str,
+) -> Result<ResolvedSource, ChartResolveError> {
+    match (&dep.oci, &dep.git, &dep.path) {
+        (Some(oci), None, None) => Ok(ResolvedSource::OciReplaced {
+            oci: oci.clone(),
+            version: dep
+                .version
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
+            replace_path: replace_path.to_string(),
+        }),
+        (None, Some(git), None) => {
+            let tag_or_rev = dep
+                .tag
+                .clone()
+                .or_else(|| dep.rev.clone())
+                .unwrap_or_else(|| "HEAD".to_string());
+            Ok(ResolvedSource::GitReplaced {
+                git: git.clone(),
+                tag_or_rev,
+                replace_path: replace_path.to_string(),
+            })
+        }
+        _ => unreachable!(
+            "replace on a path-only or multi-source dep should have been rejected by manifest \
+             validation (dep `{name}`)"
+        ),
+    }
+}
+
+/// Upsert every [`ResolvedChart`] into `lock` as a [`LockedPackage`].
+/// Preserves prior `signature` / `attestation` when the entry already
+/// existed so a merge doesn't silently drop cosign metadata a
+/// follow-up `akua publish` has since populated.
+pub fn merge_into_lock(lock: &mut crate::lock_file::AkuaLock, resolved: &ResolvedCharts) {
+    use crate::lock_file::{LockedPackage, Replaced};
+    for chart in resolved.entries.values() {
+        let (source, version, replaced) = match &chart.source {
+            ResolvedSource::Path { declared } => (
+                format!("path+file://{declared}"),
+                "local".to_string(),
+                None,
+            ),
+            ResolvedSource::OciReplaced {
+                oci,
+                version,
+                replace_path,
+            } => (
+                oci.clone(),
+                version.clone(),
+                Some(Replaced {
+                    path: replace_path.clone(),
+                }),
+            ),
+            ResolvedSource::GitReplaced {
+                git,
+                tag_or_rev,
+                replace_path,
+            } => (
+                format!("git+{git}@{tag_or_rev}"),
+                tag_or_rev.clone(),
+                Some(Replaced {
+                    path: replace_path.clone(),
+                }),
+            ),
+        };
+
+        let prior = lock
+            .packages
+            .iter()
+            .find(|p| p.name == chart.name)
+            .cloned();
+
+        lock.upsert(LockedPackage {
+            name: chart.name.clone(),
+            version,
+            source,
+            digest: chart.sha256.clone(),
+            // Cosign signatures / SLSA attestations are populated by
+            // `akua publish` — preserve whatever the prior entry had
+            // on an update.
+            signature: prior.as_ref().and_then(|p| p.signature.clone()),
+            attestation: prior.as_ref().and_then(|p| p.attestation.clone()),
+            dependencies: prior
+                .as_ref()
+                .map(|p| p.dependencies.clone())
+                .unwrap_or_default(),
+            replaced,
+            yanked: prior.as_ref().and_then(|p| p.yanked),
+            kyverno_source_digest: prior.as_ref().and_then(|p| p.kyverno_source_digest.clone()),
+            converter_version: prior.as_ref().and_then(|p| p.converter_version.clone()),
+        });
+    }
+    lock.sort();
+}
+
 /// Human-readable tag for a dep source. Used by `UnsupportedSource`'s
 /// `#[error(...)]` template.
 fn source_kind_label(source: DependencySource) -> &'static str {
@@ -141,6 +284,7 @@ fn resolve_path(
     name: &str,
     requested: &str,
     workspace_root: &Path,
+    source: ResolvedSource,
 ) -> Result<ResolvedChart, ChartResolveError> {
     let rel = PathBuf::from(requested);
     let joined = if rel.is_absolute() {
@@ -188,6 +332,7 @@ fn resolve_path(
         name: name.to_string(),
         abs_path: canon,
         sha256,
+        source,
     })
 }
 
@@ -450,16 +595,176 @@ alpha = { path = "./charts/alpha" }
     }
 
     #[test]
-    fn replace_directive_rejected_until_phase_2b() {
+    fn resolved_source_is_path_for_bare_path_dep() {
+        let ws = tempfile::tempdir().unwrap();
+        write_minimal_chart(&ws.path().join("charts/nginx"));
+        let manifest = minimal_manifest(r#"nginx = { path = "./charts/nginx" }"#);
+        let resolved = resolve(&manifest, ws.path()).unwrap();
+        let nginx = resolved.entries.get("nginx").unwrap();
+        assert_eq!(
+            nginx.source,
+            ResolvedSource::Path {
+                declared: "./charts/nginx".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn oci_dep_with_replace_resolves_from_fork_path() {
+        // Dev-workflow staple: pull chart source from local fork while
+        // the lockfile still pins the canonical `oci://` digest.
         let ws = tempfile::tempdir().unwrap();
         write_minimal_chart(&ws.path().join("charts/nginx-fork"));
         let manifest = minimal_manifest(
             r#"nginx = { oci = "oci://r/n", version = "1.0.0", replace = { path = "./charts/nginx-fork" } }"#,
         );
+        let resolved = resolve(&manifest, ws.path()).expect("replace should resolve");
+        let nginx = resolved.entries.get("nginx").unwrap();
+        assert!(nginx.abs_path.ends_with("charts/nginx-fork"));
+        assert!(nginx.sha256.starts_with("sha256:"));
+        match &nginx.source {
+            ResolvedSource::OciReplaced {
+                oci,
+                version,
+                replace_path,
+            } => {
+                assert_eq!(oci, "oci://r/n");
+                assert_eq!(version, "1.0.0");
+                assert_eq!(replace_path, "./charts/nginx-fork");
+            }
+            other => panic!("expected OciReplaced, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn git_dep_with_replace_carries_canonical_source_through() {
+        let ws = tempfile::tempdir().unwrap();
+        write_minimal_chart(&ws.path().join("charts/lib-fork"));
+        let manifest = minimal_manifest(
+            r#"libs = { git = "https://github.com/foo/bar", tag = "v1.2.3", replace = { path = "./charts/lib-fork" } }"#,
+        );
+        let resolved = resolve(&manifest, ws.path()).unwrap();
+        match &resolved.entries.get("libs").unwrap().source {
+            ResolvedSource::GitReplaced {
+                git,
+                tag_or_rev,
+                replace_path,
+            } => {
+                assert_eq!(git, "https://github.com/foo/bar");
+                assert_eq!(tag_or_rev, "v1.2.3");
+                assert_eq!(replace_path, "./charts/lib-fork");
+            }
+            other => panic!("expected GitReplaced, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn git_dep_replace_prefers_tag_over_rev() {
+        // When both tag and rev are set, tag wins in the lockfile source.
+        let ws = tempfile::tempdir().unwrap();
+        write_minimal_chart(&ws.path().join("fork"));
+        let manifest = minimal_manifest(
+            r#"libs = { git = "https://x/y", tag = "v1.0", rev = "abc123", replace = { path = "./fork" } }"#,
+        );
+        let resolved = resolve(&manifest, ws.path()).unwrap();
+        match &resolved.entries.get("libs").unwrap().source {
+            ResolvedSource::GitReplaced { tag_or_rev, .. } => {
+                assert_eq!(tag_or_rev, "v1.0", "tag takes precedence over rev");
+            }
+            _ => panic!("expected GitReplaced"),
+        }
+    }
+
+    #[test]
+    fn replace_with_missing_path_still_surfaces_typed_error() {
+        // Replace directive pointing at a non-existent path is a user
+        // error — the resolver must report NotFound naming the dep.
+        let ws = tempfile::tempdir().unwrap();
+        let manifest = minimal_manifest(
+            r#"nginx = { oci = "oci://r/n", version = "1.0.0", replace = { path = "./nope" } }"#,
+        );
         let err = resolve(&manifest, ws.path()).unwrap_err();
         assert!(
-            matches!(err, ChartResolveError::ReplaceUnsupported { ref name } if name == "nginx"),
+            matches!(err, ChartResolveError::NotFound { ref name, .. } if name == "nginx"),
             "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn merge_into_lock_populates_path_deps() {
+        use crate::lock_file::AkuaLock;
+
+        let ws = tempfile::tempdir().unwrap();
+        write_minimal_chart(&ws.path().join("charts/nginx"));
+        let manifest = minimal_manifest(r#"nginx = { path = "./charts/nginx" }"#);
+        let resolved = resolve(&manifest, ws.path()).unwrap();
+
+        let mut lock = AkuaLock::empty();
+        merge_into_lock(&mut lock, &resolved);
+
+        assert_eq!(lock.packages.len(), 1);
+        let entry = &lock.packages[0];
+        assert_eq!(entry.name, "nginx");
+        assert_eq!(entry.version, "local");
+        assert_eq!(entry.source, "path+file://./charts/nginx");
+        assert!(entry.digest.starts_with("sha256:"));
+        assert!(entry.replaced.is_none());
+    }
+
+    #[test]
+    fn merge_into_lock_records_replaced_canonical_source() {
+        use crate::lock_file::AkuaLock;
+
+        let ws = tempfile::tempdir().unwrap();
+        write_minimal_chart(&ws.path().join("charts/nginx-fork"));
+        let manifest = minimal_manifest(
+            r#"nginx = { oci = "oci://r/n", version = "1.0.0", replace = { path = "./charts/nginx-fork" } }"#,
+        );
+        let resolved = resolve(&manifest, ws.path()).unwrap();
+
+        let mut lock = AkuaLock::empty();
+        merge_into_lock(&mut lock, &resolved);
+
+        let entry = &lock.packages[0];
+        assert_eq!(entry.source, "oci://r/n");
+        assert_eq!(entry.version, "1.0.0");
+        assert_eq!(
+            entry.replaced.as_ref().map(|r| r.path.as_str()),
+            Some("./charts/nginx-fork")
+        );
+    }
+
+    #[test]
+    fn merge_into_lock_preserves_signature_on_update() {
+        use crate::lock_file::{AkuaLock, LockedPackage};
+
+        let ws = tempfile::tempdir().unwrap();
+        write_minimal_chart(&ws.path().join("charts/nginx"));
+        let manifest = minimal_manifest(r#"nginx = { path = "./charts/nginx" }"#);
+
+        let mut lock = AkuaLock::empty();
+        lock.packages.push(LockedPackage {
+            name: "nginx".to_string(),
+            version: "local".to_string(),
+            source: "path+file://./charts/nginx".to_string(),
+            digest: "sha256:0000".to_string(), // stale digest
+            signature: Some("cosign:sigstore:prior-publish".to_string()),
+            dependencies: vec![],
+            attestation: None,
+            replaced: None,
+            yanked: None,
+            kyverno_source_digest: None,
+            converter_version: None,
+        });
+
+        let resolved = resolve(&manifest, ws.path()).unwrap();
+        merge_into_lock(&mut lock, &resolved);
+
+        // Digest refreshed to the live chart; signature preserved.
+        assert_ne!(lock.packages[0].digest, "sha256:0000");
+        assert_eq!(
+            lock.packages[0].signature.as_deref(),
+            Some("cosign:sigstore:prior-publish")
         );
     }
 
