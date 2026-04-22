@@ -30,7 +30,7 @@ fn renders_hello_webapp_with_resolved_chart_dep() {
         "example 01 must declare nginx dep"
     );
     let resolved = chart_resolver::resolve(&manifest, &dir).expect("resolve charts");
-    let nginx = resolved.get("nginx").expect("nginx resolved");
+    let nginx = resolved.entries.get("nginx").expect("nginx resolved");
     assert!(nginx.abs_path.is_absolute());
     assert!(nginx.abs_path.ends_with("vendor/nginx"));
     assert!(nginx.sha256.starts_with("sha256:"));

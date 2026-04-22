@@ -196,7 +196,12 @@ impl RenderScope {
     /// allowed to live under. Caller must canonicalize the roots
     /// before handing them in; [`resolve_in_package`] compares via
     /// `starts_with` after its own best-effort canonicalize.
-    pub fn enter_with_allowed_roots(package: &Path, allowed_roots: &[PathBuf]) -> Self {
+    ///
+    /// Crate-private: only `package_k::render_with_charts` is allowed
+    /// to register sandbox-escape roots — exposing this publicly
+    /// would be a security surface since the plugin-path guard
+    /// defers to whatever the top-of-stack frame permits.
+    pub(crate) fn enter_with_allowed_roots(package: &Path, allowed_roots: &[PathBuf]) -> Self {
         RENDER_STACK.with(|s| {
             s.borrow_mut().push(RenderFrame {
                 package: package.to_path_buf(),

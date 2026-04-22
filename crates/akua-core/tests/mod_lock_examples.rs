@@ -116,7 +116,12 @@ fn every_manifest_declared_dep_is_locked() {
         let locked_names: std::collections::HashSet<&str> =
             lock.packages.iter().map(|p| p.name.as_str()).collect();
 
-        for dep_name in manifest.dependencies.keys() {
+        for (dep_name, dep) in &manifest.dependencies {
+            // Path deps don't participate in lockfile digest tracking
+            // yet (see docs/roadmap.md Phase 2b + verify::check).
+            if dep.path.is_some() {
+                continue;
+            }
             assert!(
                 locked_names.contains(dep_name.as_str()),
                 "dep `{dep_name}` declared in {} is not present in {}",

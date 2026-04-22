@@ -48,7 +48,7 @@ pub use mod_file::{
     WorkspaceSection,
 };
 #[cfg(feature = "engine-kcl")]
-pub use chart_resolver::{resolve as resolve_charts, ChartResolveError, ResolvedChart, ResolvedCharts};
+pub use chart_resolver::{ChartResolveError, ResolvedChart, ResolvedCharts};
 #[cfg(feature = "engine-kcl")]
 pub use dir_diff::{diff as dir_diff, DirDiff, DirDiffError, FileChange};
 #[cfg(feature = "engine-kcl")]

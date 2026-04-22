@@ -121,7 +121,13 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
 
     let locked_names: std::collections::HashSet<&str> =
         lock.packages.iter().map(|p| p.name.as_str()).collect();
-    for dep_name in manifest.dependencies.keys() {
+    for (dep_name, dep) in &manifest.dependencies {
+        // Path deps live on disk, not in a registry — no digest / no
+        // signature, so they're exempt from lockfile entries.
+        // OCI-pull digests land Phase 2b (docs/roadmap.md).
+        if dep.path.is_some() {
+            continue;
+        }
         if !locked_names.contains(dep_name.as_str()) {
             violations.push(Violation::UnlockedDep {
                 name: dep_name.clone(),

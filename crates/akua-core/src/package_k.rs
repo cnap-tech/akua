@@ -142,7 +142,7 @@ impl PackageK {
         // Materialize `charts/` alongside the static `akua/` stdlib.
         // TempDir dropped at end of scope, after `exec_program` has
         // finished loading + executing the Package.
-        let charts_tmp = if charts.is_empty() {
+        let charts_tmp = if charts.entries.is_empty() {
             None
         } else {
             Some(crate::stdlib::materialize_charts(charts).map_err(|e| {

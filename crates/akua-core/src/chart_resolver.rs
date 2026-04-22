@@ -43,24 +43,13 @@ pub struct ResolvedChart {
 
 /// The resolver's output. Canonical order (alphabetical by dep name)
 /// so downstream users — `akua.lock` writers, `charts/` KCL module
-/// generators — get deterministic iteration for free.
+/// generators — get deterministic iteration for free. Newtype (rather
+/// than a bare `BTreeMap` alias) leaves room for future metadata —
+/// resolution timestamps, manifest digest, replace-provenance — to
+/// attach without breaking callers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolvedCharts {
     pub entries: BTreeMap<String, ResolvedChart>,
-}
-
-impl ResolvedCharts {
-    pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    pub fn get(&self, name: &str) -> Option<&ResolvedChart> {
-        self.entries.get(name)
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -81,8 +70,14 @@ pub enum ChartResolveError {
 
     /// OCI / git deps point at Phase 2b. Deliberately distinguishable
     /// from a user mistake so the CLI can surface the roadmap link.
-    #[error("chart `{name}`: {kind} source not yet supported — waiting on Phase 2b (OCI pull + digest verify). See docs/roadmap.md.")]
-    UnsupportedSource { name: String, kind: &'static str },
+    #[error("chart `{name}`: {} source not yet supported — waiting on Phase 2b (OCI pull + digest verify). See docs/roadmap.md.", source_kind_label(*kind))]
+    UnsupportedSource {
+        name: String,
+        /// `source` would collide with thiserror's `#[source]` detection,
+        /// so the field is named `kind` — DependencySource isn't an
+        /// `Error` anyway.
+        kind: DependencySource,
+    },
 
     /// `replace.path` overrides on oci/git deps are Phase 2b as well —
     /// path-only deps don't use replace at all (rejected by manifest
@@ -106,31 +101,40 @@ pub fn resolve(
         if dep.replace.is_some() {
             return Err(ChartResolveError::ReplaceUnsupported { name: name.clone() });
         }
-        // source() is `Some` for any manifest that passed validation.
-        let source = dep
-            .source()
-            .expect("manifest validated before resolver entry");
-        match source {
-            DependencySource::Path => {
-                let requested = dep.path.as_deref().expect("path source has path set");
-                let resolved = resolve_path(name, requested, workspace_root)?;
-                entries.insert(name.clone(), resolved);
+        // Match directly on the source fields rather than re-querying
+        // `dep.source()` — pre-validated manifests are already guaranteed
+        // to have exactly one set, and matching inline makes the
+        // "path requires `path`" invariant unambiguous.
+        match (&dep.path, &dep.oci, &dep.git) {
+            (Some(path), None, None) => {
+                entries.insert(name.clone(), resolve_path(name, path, workspace_root)?);
             }
-            DependencySource::Oci => {
+            (None, Some(_), None) => {
                 return Err(ChartResolveError::UnsupportedSource {
                     name: name.clone(),
-                    kind: "oci://",
+                    kind: DependencySource::Oci,
                 });
             }
-            DependencySource::Git => {
+            (None, None, Some(_)) => {
                 return Err(ChartResolveError::UnsupportedSource {
                     name: name.clone(),
-                    kind: "git",
+                    kind: DependencySource::Git,
                 });
             }
+            _ => unreachable!("manifest validation rejects ambiguous / empty sources"),
         }
     }
     Ok(ResolvedCharts { entries })
+}
+
+/// Human-readable tag for a dep source. Used by `UnsupportedSource`'s
+/// `#[error(...)]` template.
+fn source_kind_label(source: DependencySource) -> &'static str {
+    match source {
+        DependencySource::Oci => "oci://",
+        DependencySource::Git => "git",
+        DependencySource::Path => "path",
+    }
 }
 
 fn resolve_path(
@@ -204,14 +208,18 @@ fn hash_dir(root: &Path) -> std::io::Result<String> {
 
     let mut hasher = Sha256::new();
     for (rel, abs) in files {
-        let bytes = std::fs::read(&abs)?;
         // Use `to_string_lossy` for cross-platform parity: Windows uses
         // UTF-16 OsStr internally; Unix is bytes. A chart with
         // non-UTF8-path filenames is broken regardless — collapsing
         // here doesn't create realistic collisions.
         hasher.update(rel.to_string_lossy().as_bytes());
         hasher.update(b"\0");
-        hasher.update(&bytes);
+        // Stream the file into the hasher so multi-MB values.yaml
+        // or long template trees don't balloon memory. BufReader
+        // + io::copy is the standard pattern.
+        let file = std::fs::File::open(&abs)?;
+        let mut reader = std::io::BufReader::new(file);
+        std::io::copy(&mut reader, &mut hasher)?;
         hasher.update(b"\n");
     }
     Ok(format!("sha256:{}", hex_encode(&hasher.finalize())))
@@ -287,8 +295,8 @@ edition = "akua.dev/v1alpha1"
         let manifest = minimal_manifest(r#"nginx = { path = "./charts/nginx" }"#);
 
         let resolved = resolve(&manifest, ws.path()).expect("resolve");
-        assert_eq!(resolved.len(), 1);
-        let nginx = resolved.get("nginx").expect("nginx entry");
+        assert_eq!(resolved.entries.len(), 1);
+        let nginx = resolved.entries.get("nginx").expect("nginx entry");
         assert_eq!(nginx.name, "nginx");
         assert!(nginx.abs_path.ends_with("charts/nginx"));
         assert!(nginx.abs_path.is_absolute());
@@ -327,7 +335,10 @@ edition = "akua.dev/v1alpha1"
         .unwrap();
 
         let after = resolve(&manifest, ws.path()).unwrap();
-        assert_ne!(before.get("nginx").unwrap().sha256, after.get("nginx").unwrap().sha256);
+        assert_ne!(
+            before.entries.get("nginx").unwrap().sha256,
+            after.entries.get("nginx").unwrap().sha256
+        );
     }
 
     #[test]
@@ -353,7 +364,10 @@ edition = "akua.dev/v1alpha1"
         let mani_b = minimal_manifest(r#"x = { path = "./c" }"#);
         let a = resolve(&mani_a, ws_a.path()).unwrap();
         let b = resolve(&mani_b, ws_b.path()).unwrap();
-        assert_eq!(a.get("x").unwrap().sha256, b.get("x").unwrap().sha256);
+        assert_eq!(
+            a.entries.get("x").unwrap().sha256,
+            b.entries.get("x").unwrap().sha256
+        );
     }
 
     #[test]
@@ -403,7 +417,13 @@ alpha = { path = "./charts/alpha" }
         );
         let err = resolve(&manifest, ws.path()).unwrap_err();
         assert!(
-            matches!(err, ChartResolveError::UnsupportedSource { ref name, kind: "oci://" } if name == "nginx"),
+            matches!(
+                err,
+                ChartResolveError::UnsupportedSource {
+                    ref name,
+                    kind: DependencySource::Oci,
+                } if name == "nginx"
+            ),
             "got: {err:?}"
         );
         // Error message must point a user at the roadmap.
@@ -418,7 +438,13 @@ alpha = { path = "./charts/alpha" }
         );
         let err = resolve(&manifest, ws.path()).unwrap_err();
         assert!(
-            matches!(err, ChartResolveError::UnsupportedSource { ref name, kind: "git" } if name == "libs"),
+            matches!(
+                err,
+                ChartResolveError::UnsupportedSource {
+                    ref name,
+                    kind: DependencySource::Git,
+                } if name == "libs"
+            ),
             "got: {err:?}"
         );
     }
@@ -442,6 +468,6 @@ alpha = { path = "./charts/alpha" }
         let ws = tempfile::tempdir().unwrap();
         let manifest = minimal_manifest("");
         let resolved = resolve(&manifest, ws.path()).unwrap();
-        assert!(resolved.is_empty());
+        assert!(resolved.entries.is_empty());
     }
 }
