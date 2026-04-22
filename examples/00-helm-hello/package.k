@@ -1,12 +1,18 @@
 # Minimal Package that exercises the `helm.template` plugin callable.
 #
 # Renders the adjacent `./chart/` (a tiny ConfigMap template) through
-# akua's shell-out helm engine. Requires the `engine-helm-shell`
-# crate feature + a `helm` binary on PATH.
+# akua's embedded wasmtime-hosted helm engine. No `helm` binary
+# required; no shell-out. See docs/security-model.md + Phase 1 in
+# docs/roadmap.md for why.
 #
 # Render:
 #
 #   akua render --out ./rendered
+#
+# `./chart` is a raw-string path resolved under the Package dir — the
+# original simplest-possible shape. Example 01 shows the typed
+# `import charts.<name>` form that Phase 2a landed; `akua render
+# --strict` only accepts that form.
 #
 # Inputs flow through KCL's `option()` mechanism; `inputs.example.yaml`
 # is auto-discovered when --inputs is omitted.
