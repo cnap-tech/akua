@@ -14,6 +14,8 @@
 
 #![allow(dead_code)]
 
+#[cfg(feature = "engine-kcl")]
+pub mod chart_resolver;
 pub mod cli_contract;
 #[cfg(feature = "engine-kcl")]
 pub mod dir_diff;
@@ -45,6 +47,8 @@ pub use mod_file::{
     AkuaManifest, DependencySource, ManifestError, ManifestLoadError, PackageSection, Replace,
     WorkspaceSection,
 };
+#[cfg(feature = "engine-kcl")]
+pub use chart_resolver::{resolve as resolve_charts, ChartResolveError, ResolvedChart, ResolvedCharts};
 #[cfg(feature = "engine-kcl")]
 pub use dir_diff::{diff as dir_diff, DirDiff, DirDiffError, FileChange};
 #[cfg(feature = "engine-kcl")]
