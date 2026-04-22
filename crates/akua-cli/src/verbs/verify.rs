@@ -147,7 +147,7 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
             // signing. Phase 6 may revisit (provenance for locally-
             // vendored charts via `akua publish` attestation), but
             // until then a missing sig on a path dep is correct.
-            if pkg.source.starts_with("path+file://") {
+            if pkg.is_path() {
                 continue;
             }
             if pkg.signature.is_none() {

@@ -133,6 +133,25 @@ impl AddError {
     }
 }
 
+/// Did the resolver fail because the registry served a digest that
+/// disagrees with `akua.lock`? That's a supply-chain-integrity signal
+/// that must never be silently dropped.
+#[cfg(feature = "oci-fetch")]
+fn is_digest_drift(e: &ChartResolveError) -> bool {
+    matches!(
+        e,
+        ChartResolveError::OciFetch {
+            source: akua_core::oci_fetcher::OciFetchError::LockDigestMismatch { .. },
+            ..
+        }
+    )
+}
+
+#[cfg(not(feature = "oci-fetch"))]
+fn is_digest_drift(_e: &ChartResolveError) -> bool {
+    false
+}
+
 pub fn run<W: Write>(
     ctx: &Context,
     args: &AddArgs<'_>,
@@ -176,7 +195,7 @@ pub fn run<W: Write>(
     let expected_digests = prior_lock
         .packages
         .iter()
-        .filter(|p| p.source.starts_with("oci://"))
+        .filter(|p| p.is_oci())
         .map(|p| (p.name.clone(), p.digest.clone()))
         .collect();
     let opts = ResolverOptions {
@@ -194,12 +213,18 @@ pub fn run<W: Write>(
             chart_resolver::merge_into_lock(&mut lock, &resolved);
             lock.save(args.workspace)?;
         }
+        // Security-critical: a lockfile digest mismatch means the
+        // registry served different bytes than `akua.lock` pinned.
+        // Silently continuing would mask a supply-chain incident.
+        // Propagate up so the operator sees it at the verb that's
+        // actually editing the lockfile.
+        Err(e) if is_digest_drift(&e) => return Err(AddError::Resolve(e)),
         Err(_soft) => {
-            // Soft-fail: manifest edit above stands. A network flake,
-            // a pre-existing chart dir, an OCI auth 403 — none of
-            // these should undo the user's declarative intent. The
-            // hard failure surface is `akua render`, which requires
-            // every dep to resolve before producing output.
+            // Soft-fail: manifest edit above stands. A missing path,
+            // a pre-existing chart dir, an OCI auth 403 for a chart
+            // we can't reach — none of these should undo the user's
+            // declarative intent. `akua render` re-runs the resolver
+            // strictly when output actually has to be produced.
         }
     }
 

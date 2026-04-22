@@ -15,15 +15,13 @@ use akua_core::oci_fetcher;
 const OCI_REF: &str = "oci://ghcr.io/stefanprodan/charts/podinfo";
 const VERSION: &str = "6.6.0";
 
-/// Treat any HTTP/Status error as "network unavailable, skip". Only
-/// non-transient failures (bad cert, parse error, digest mismatch on
-/// a non-expected-digest fetch) panic. Mirrors the helm-hello-wasm
-/// skip pattern.
+/// Treat connection-level failures (DNS, TLS, timeout) as "network
+/// unavailable, skip" — genuine offline CI. A `Status` error means
+/// the registry *did* respond; those are either a real bug (our ref
+/// drifted, media type changed) or a deserved CI red. Don't swallow
+/// them.
 fn skip_if_network_flake(e: &oci_fetcher::OciFetchError) -> bool {
-    matches!(
-        e,
-        oci_fetcher::OciFetchError::Http { .. } | oci_fetcher::OciFetchError::Status { .. }
-    )
+    matches!(e, oci_fetcher::OciFetchError::Http { .. })
 }
 
 #[test]

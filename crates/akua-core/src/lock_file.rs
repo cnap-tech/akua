@@ -76,6 +76,22 @@ pub struct LockedPackage {
     pub converter_version: Option<String>,
 }
 
+impl LockedPackage {
+    /// `true` when this entry originates from a bare path dep
+    /// (`source = "path+file://..."`). Path deps skip signature +
+    /// lockfile-digest-drift checks — the on-disk tree *is* the truth.
+    pub fn is_path(&self) -> bool {
+        self.source.starts_with("path+file://")
+    }
+
+    /// `true` when this entry originates from an OCI pull — used to
+    /// gather `expected_digests` for the resolver without sniffing
+    /// source prefixes at every call site.
+    pub fn is_oci(&self) -> bool {
+        self.source.starts_with("oci://")
+    }
+}
+
 /// Local fork marker written into `akua.lock` when a `replace` directive
 /// from `akua.toml` is active.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

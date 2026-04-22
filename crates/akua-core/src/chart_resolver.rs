@@ -84,6 +84,47 @@ pub enum ResolvedSource {
     },
 }
 
+impl ResolvedSource {
+    /// Project into the triple `merge_into_lock` writes into every
+    /// `LockedPackage`: canonical source string, version (or `"local"`
+    /// for path deps), replace marker when a fork is active. Isolates
+    /// the "how does this variant map to the lockfile" knowledge here
+    /// instead of leaking it across every call site.
+    pub fn to_locked_fields(&self) -> (String, String, Option<crate::lock_file::Replaced>) {
+        use crate::lock_file::Replaced;
+        match self {
+            ResolvedSource::Path { declared } => (
+                format!("path+file://{declared}"),
+                "local".to_string(),
+                None,
+            ),
+            ResolvedSource::Oci { oci, version, .. } => (oci.clone(), version.clone(), None),
+            ResolvedSource::OciReplaced {
+                oci,
+                version,
+                replace_path,
+            } => (
+                oci.clone(),
+                version.clone(),
+                Some(Replaced {
+                    path: replace_path.clone(),
+                }),
+            ),
+            ResolvedSource::GitReplaced {
+                git,
+                tag_or_rev,
+                replace_path,
+            } => (
+                format!("git+{git}@{tag_or_rev}"),
+                tag_or_rev.clone(),
+                Some(Replaced {
+                    path: replace_path.clone(),
+                }),
+            ),
+        }
+    }
+}
+
 /// The resolver's output. Canonical order (alphabetical by dep name)
 /// so downstream users — `akua.lock` writers, `charts/` KCL module
 /// generators — get deterministic iteration for free. Newtype (rather
@@ -359,44 +400,10 @@ fn resolved_source_for_replace(
 /// existed so a merge doesn't silently drop cosign metadata a
 /// follow-up `akua publish` has since populated.
 pub fn merge_into_lock(lock: &mut crate::lock_file::AkuaLock, resolved: &ResolvedCharts) {
-    use crate::lock_file::{LockedPackage, Replaced};
+    use crate::lock_file::LockedPackage;
     for chart in resolved.entries.values() {
-        let (source, version, replaced) = match &chart.source {
-            ResolvedSource::Path { declared } => (
-                format!("path+file://{declared}"),
-                "local".to_string(),
-                None,
-            ),
-            ResolvedSource::Oci { oci, version, .. } => (oci.clone(), version.clone(), None),
-            ResolvedSource::OciReplaced {
-                oci,
-                version,
-                replace_path,
-            } => (
-                oci.clone(),
-                version.clone(),
-                Some(Replaced {
-                    path: replace_path.clone(),
-                }),
-            ),
-            ResolvedSource::GitReplaced {
-                git,
-                tag_or_rev,
-                replace_path,
-            } => (
-                format!("git+{git}@{tag_or_rev}"),
-                tag_or_rev.clone(),
-                Some(Replaced {
-                    path: replace_path.clone(),
-                }),
-            ),
-        };
-
-        let prior = lock
-            .packages
-            .iter()
-            .find(|p| p.name == chart.name)
-            .cloned();
+        let (source, version, replaced) = chart.source.to_locked_fields();
+        let prior = lock.packages.iter().find(|p| p.name == chart.name);
 
         lock.upsert(LockedPackage {
             name: chart.name.clone(),
@@ -406,16 +413,13 @@ pub fn merge_into_lock(lock: &mut crate::lock_file::AkuaLock, resolved: &Resolve
             // Cosign signatures / SLSA attestations are populated by
             // `akua publish` — preserve whatever the prior entry had
             // on an update.
-            signature: prior.as_ref().and_then(|p| p.signature.clone()),
-            attestation: prior.as_ref().and_then(|p| p.attestation.clone()),
-            dependencies: prior
-                .as_ref()
-                .map(|p| p.dependencies.clone())
-                .unwrap_or_default(),
+            signature: prior.and_then(|p| p.signature.clone()),
+            attestation: prior.and_then(|p| p.attestation.clone()),
+            dependencies: prior.map(|p| p.dependencies.clone()).unwrap_or_default(),
             replaced,
-            yanked: prior.as_ref().and_then(|p| p.yanked),
-            kyverno_source_digest: prior.as_ref().and_then(|p| p.kyverno_source_digest.clone()),
-            converter_version: prior.as_ref().and_then(|p| p.converter_version.clone()),
+            yanked: prior.and_then(|p| p.yanked),
+            kyverno_source_digest: prior.and_then(|p| p.kyverno_source_digest.clone()),
+            converter_version: prior.and_then(|p| p.converter_version.clone()),
         });
     }
     lock.sort();

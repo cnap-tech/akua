@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::contract::{emit_output, Context};
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
-use akua_core::lock_file::{AkuaLock, LockLoadError};
+use akua_core::lock_file::{AkuaLock, LockLoadError, LockedPackage};
 use akua_core::mod_file::ManifestLoadError;
 use akua_core::{
     chart_resolver, chart_resolver::ResolverOptions, package_k::PackageKError, render,
@@ -224,7 +224,7 @@ fn resolve_package_charts(package_path: &Path) -> Result<ResolvedCharts, RenderE
         Ok(lock) => lock
             .packages
             .into_iter()
-            .filter(|p| p.source.starts_with("oci://"))
+            .filter(LockedPackage::is_oci)
             .map(|p| (p.name, p.digest))
             .collect(),
         Err(LockLoadError::Missing { .. }) => Default::default(),
