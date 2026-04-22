@@ -1,12 +1,15 @@
-//! `akua remove` — drop a dependency from `akua.toml`.
+//! `akua remove` — drop a dependency from `akua.toml` + `akua.lock`.
 //!
-//! Mirror of [`crate::verbs::add`]. Pure manifest edit; no lockfile
-//! mutation, no cache eviction.
+//! Mirror of [`crate::verbs::add`]. Edits the manifest, prunes any
+//! matching `[[package]]` entry from the lockfile, and leaves OCI
+//! cache artifacts alone (they're content-addressed and cheap to
+//! re-fetch — a separate `akua cache gc` verb can reap them later).
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
+use akua_core::lock_file::{AkuaLock, LockLoadError};
 use akua_core::mod_file::ManifestError;
 use akua_core::{AkuaManifest, ManifestLoadError};
 use serde::Serialize;
@@ -49,6 +52,9 @@ pub enum RemoveError {
         source: std::io::Error,
     },
 
+    #[error(transparent)]
+    Lock(#[from] LockLoadError),
+
     #[error("write to stdout failed: {0}")]
     StdoutWrite(#[source] std::io::Error),
 }
@@ -70,6 +76,7 @@ impl RemoveError {
                     .with_path(path.display().to_string())
                     .with_default_docs()
             }
+            RemoveError::Lock(e) => e.to_structured(),
             RemoveError::StdoutWrite(e) => {
                 StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
             }
@@ -79,6 +86,7 @@ impl RemoveError {
     pub fn exit_code(&self) -> ExitCode {
         match self {
             RemoveError::Load(e) if e.is_system() => ExitCode::SystemError,
+            RemoveError::Lock(e) if e.is_system() => ExitCode::SystemError,
             RemoveError::Io { .. } | RemoveError::StdoutWrite(_) => ExitCode::SystemError,
             _ => ExitCode::UserError,
         }
@@ -106,6 +114,21 @@ pub fn run<W: Write>(
             path,
             source: e,
         })?;
+
+        // Prune matching lockfile entries too so `akua verify` stays
+        // green after the edit. Skip when the lockfile doesn't exist
+        // yet (a first-edit repo) — that's not an error.
+        match AkuaLock::load(args.workspace) {
+            Ok(mut lock) => {
+                let before = lock.packages.len();
+                lock.packages.retain(|p| p.name != args.name);
+                if lock.packages.len() != before {
+                    lock.save(args.workspace)?;
+                }
+            }
+            Err(LockLoadError::Missing { .. }) => {}
+            Err(e) => return Err(RemoveError::Lock(e)),
+        }
     }
 
     let output = RemoveOutput {
@@ -206,5 +229,47 @@ webapp = { oci = "oci://ghcr.io/acme/webapp", version = "1.0.0" }
         let err = run(&Context::human(), &args(tmp.path(), "x"), &mut Vec::new())
             .unwrap_err();
         assert_eq!(err.to_structured().code, codes::E_MANIFEST_MISSING);
+    }
+
+    #[test]
+    fn remove_prunes_matching_lockfile_entry() {
+        let ws = workspace(MANIFEST_WITH_DEP);
+        fs::write(
+            ws.path().join("akua.lock"),
+            r#"
+version = 1
+
+[[package]]
+name    = "cnpg"
+version = "0.20.0"
+source  = "oci://ghcr.io/cnpg/charts/cluster"
+digest  = "sha256:3c5d9e7f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d"
+signature = "cosign:sigstore:cnpg"
+
+[[package]]
+name    = "webapp"
+version = "1.0.0"
+source  = "oci://ghcr.io/acme/webapp"
+digest  = "sha256:a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2"
+signature = "cosign:sigstore:acme"
+"#,
+        )
+        .unwrap();
+        run(&Context::human(), &args(ws.path(), "cnpg"), &mut Vec::new()).expect("run");
+
+        let lock = AkuaLock::load(ws.path()).expect("load lock");
+        assert_eq!(lock.packages.len(), 1);
+        assert_eq!(lock.packages[0].name, "webapp");
+    }
+
+    #[test]
+    fn remove_without_lockfile_is_not_an_error() {
+        // First-edit repos don't have akua.lock yet; remove must still
+        // succeed on the manifest alone.
+        let ws = workspace(MANIFEST_WITH_DEP);
+        assert!(!ws.path().join("akua.lock").exists());
+        run(&Context::human(), &args(ws.path(), "cnpg"), &mut Vec::new()).expect("run");
+        // Still no lockfile — we don't magic one into existence.
+        assert!(!ws.path().join("akua.lock").exists());
     }
 }

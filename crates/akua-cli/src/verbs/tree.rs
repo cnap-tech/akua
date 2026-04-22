@@ -57,6 +57,12 @@ pub struct LockedInfo {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
+
+    /// Local fork override active for this dep. When set, the dep's
+    /// canonical source is whatever the manifest declared, but build-
+    /// time resolution reads files from `replaced_by`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub replaced_by: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -114,6 +120,7 @@ pub fn run<W: Write>(
             .map(|p| LockedInfo {
                 digest: p.digest.clone(),
                 signature: p.signature.clone(),
+                replaced_by: p.replaced.as_ref().map(|r| r.path.clone()),
             });
         deps.push(DepRow {
             name: name.clone(),
@@ -168,15 +175,21 @@ fn write_text<W: Write>(writer: &mut W, output: &TreeOutput) -> std::io::Result<
             .unwrap_or_default();
         let lock_marker = match &dep.locked {
             Some(l) => {
-                let sig_marker = if l.signature.is_some() { "✓signed" } else { "unsigned" };
+                let sig_marker = if l.signature.is_some() { "signed" } else { "unsigned" };
                 format!(" [locked {} ({})]", short_digest(&l.digest), sig_marker)
             }
             None => String::new(),
         };
+        let replace_marker = dep
+            .locked
+            .as_ref()
+            .and_then(|l| l.replaced_by.as_deref())
+            .map(|p| format!(" [replace -> {p}]"))
+            .unwrap_or_default();
         writeln!(
             writer,
-            "  - {}{} ({} {}){}",
-            dep.name, version, dep.source, dep.source_ref, lock_marker,
+            "  - {}{} ({} {}){}{}",
+            dep.name, version, dep.source, dep.source_ref, lock_marker, replace_marker,
         )?;
     }
     Ok(())
