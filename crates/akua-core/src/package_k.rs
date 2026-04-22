@@ -102,8 +102,25 @@ impl PackageK {
     }
 
     /// Execute the Package against the given inputs, returning the
-    /// typed resource + output lists.
+    /// typed resource list.
+    ///
+    /// `Package.k` files that `import charts.<name>` will fail to
+    /// parse on this path — the caller must use
+    /// [`render_with_charts`](Self::render_with_charts) and hand in
+    /// a resolver output. See `docs/roadmap.md` Phase 2a.
     pub fn render(&self, inputs: &Value) -> Result<RenderedPackage, PackageKError> {
+        self.render_with_charts(inputs, &crate::chart_resolver::ResolvedCharts::default())
+    }
+
+    /// Like [`render`](Self::render), but also registers a per-render
+    /// `charts` KCL package containing one module per resolved dep.
+    /// Packages that declare `[dependencies]` in their `akua.toml` and
+    /// write `import charts.nginx` resolve here.
+    pub fn render_with_charts(
+        &self,
+        inputs: &Value,
+        charts: &crate::chart_resolver::ResolvedCharts,
+    ) -> Result<RenderedPackage, PackageKError> {
         // Register every engine callable whose feature flag is on.
         // Idempotent per invocation — safe to call every render.
         crate::kcl_plugin::install_builtin_plugins();
@@ -115,8 +132,24 @@ impl PackageK {
         // naturally.
         let _scope = crate::kcl_plugin::RenderScope::enter(&self.path);
 
+        // Materialize `charts/` alongside the static `akua/` stdlib.
+        // TempDir dropped at end of scope, after `exec_program` has
+        // finished loading + executing the Package.
+        let charts_tmp = if charts.is_empty() {
+            None
+        } else {
+            Some(crate::stdlib::materialize_charts(charts).map_err(|e| {
+                PackageKError::KclEval(format!("materializing charts pkg: {e}"))
+            })?)
+        };
+
         let json = serde_json::to_string(inputs)?;
-        let yaml = eval_kcl(&self.path, &self.source, &json)?;
+        let yaml = eval_kcl(
+            &self.path,
+            &self.source,
+            &json,
+            charts_tmp.as_ref().map(|d| d.path()),
+        )?;
         let parsed = parse_rendered(&yaml)?;
 
         // Expand pkg.render sentinels now that eval_kcl has
@@ -294,7 +327,12 @@ pub fn format_kcl(source: &str) -> Result<String, PackageKError> {
     }
 }
 
-fn eval_kcl(path: &Path, code: &str, option_json: &str) -> Result<String, PackageKError> {
+fn eval_kcl(
+    path: &Path,
+    code: &str,
+    option_json: &str,
+    charts_pkg_dir: Option<&Path>,
+) -> Result<String, PackageKError> {
     use kcl_lang::{Argument, ExecProgramArgs, ExternalPkg, API};
 
     // A non-zero plugin_agent installs the akua-side plugin dispatcher
@@ -304,6 +342,16 @@ fn eval_kcl(path: &Path, code: &str, option_json: &str) -> Result<String, Packag
     let api = API {
         plugin_agent: crate::kcl_plugin::plugin_agent_ptr(),
     };
+    let mut external_pkgs = vec![ExternalPkg {
+        pkg_name: "akua".to_string(),
+        pkg_path: crate::stdlib::stdlib_root().to_string_lossy().into_owned(),
+    }];
+    if let Some(dir) = charts_pkg_dir {
+        external_pkgs.push(ExternalPkg {
+            pkg_name: "charts".to_string(),
+            pkg_path: dir.to_string_lossy().into_owned(),
+        });
+    }
     let args = ExecProgramArgs {
         k_filename_list: vec![path.to_string_lossy().into_owned()],
         k_code_list: vec![code.to_string()],
@@ -314,10 +362,7 @@ fn eval_kcl(path: &Path, code: &str, option_json: &str) -> Result<String, Packag
         // Expose the bundled akua KCL stdlib as the `akua` package,
         // so Packages can write `import akua.helm` / `import akua.pkg`
         // instead of reaching into `kcl_plugin.*` directly.
-        external_pkgs: vec![ExternalPkg {
-            pkg_name: "akua".to_string(),
-            pkg_path: crate::stdlib::stdlib_root().to_string_lossy().into_owned(),
-        }],
+        external_pkgs,
         ..Default::default()
     };
     match api.exec_program(&args) {
@@ -453,6 +498,63 @@ input: Input = option("input") or Input {}
             matches!(err, PackageKError::MissingResources),
             "expected MissingResources, got {err:?}"
         );
+    }
+
+    #[test]
+    fn render_with_charts_exposes_import_charts() {
+        use crate::chart_resolver::{ResolvedChart, ResolvedCharts};
+        use std::collections::BTreeMap;
+
+        // Simulate a resolved `nginx` dep. Its `path` + `sha256`
+        // should flow into the generated `charts/nginx.k` and be
+        // reachable from the Package as `nginx.path` / `nginx.sha256`.
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            "nginx".to_string(),
+            ResolvedChart {
+                name: "nginx".to_string(),
+                abs_path: PathBuf::from("/opt/charts/nginx"),
+                sha256: "sha256:deadbeef".to_string(),
+            },
+        );
+        let resolved = ResolvedCharts { entries };
+
+        let fixture = r#"
+import charts.nginx as nginx
+
+resources = [{
+    apiVersion: "v1"
+    kind: "ConfigMap"
+    metadata.name: "chart-demo"
+    data.chartPath:   nginx.path
+    data.chartDigest: nginx.sha256
+}]
+"#;
+        let (_tmp, path) = write_fixture(fixture);
+        let pkg = PackageK::load(&path).expect("load");
+        let rendered = pkg
+            .render_with_charts(&empty_inputs(), &resolved)
+            .expect("render");
+
+        assert_eq!(rendered.resources.len(), 1);
+        let cm = &rendered.resources[0];
+        assert_eq!(
+            cm["data"]["chartPath"],
+            Value::String("/opt/charts/nginx".into())
+        );
+        assert_eq!(
+            cm["data"]["chartDigest"],
+            Value::String("sha256:deadbeef".into())
+        );
+    }
+
+    #[test]
+    fn render_without_charts_still_works() {
+        // Back-compat: no-dep Package must not require charts wiring.
+        let (_tmp, path) = write_fixture(MINIMAL_FIXTURE);
+        let pkg = PackageK::load(&path).expect("load");
+        let rendered = pkg.render(&empty_inputs()).expect("render");
+        assert_eq!(rendered.resources.len(), 1);
     }
 
     #[test]

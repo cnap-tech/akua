@@ -10,7 +10,7 @@ authors.workspace = true
 [features]
 default = ["engine-kcl", "engine-helm", "engine-kustomize"]
 # KCL engine — native Rust via kcl-lang/lib (git dep).
-engine-kcl = ["dep:kcl-lang", "dep:sha2"]
+engine-kcl = ["dep:kcl-lang", "dep:sha2", "dep:tempfile"]
 # Embedded Helm v4 template engine. Go source in crates/helm-engine-wasm/
 # compiled to wasm32-wasip1, hosted via wasmtime. No shell-out: CLAUDE.md
 # "Sandboxed by default. No shell-out, ever."
@@ -29,6 +29,7 @@ thiserror = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 kcl-lang = { git = "https://github.com/kcl-lang/lib", optional = true }
 sha2 = { version = "0.10", optional = true }
+tempfile = { version = "3", optional = true }
 helm-engine-wasm = { path = "../helm-engine-wasm", optional = true }
 kustomize-engine-wasm = { path = "../kustomize-engine-wasm", optional = true }
 
