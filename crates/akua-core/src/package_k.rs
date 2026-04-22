@@ -121,6 +121,18 @@ impl PackageK {
         inputs: &Value,
         charts: &crate::chart_resolver::ResolvedCharts,
     ) -> Result<RenderedPackage, PackageKError> {
+        self.render_opts(inputs, charts, false)
+    }
+
+    /// Full-option render: charts + `strict` mode. `strict=true`
+    /// rejects plugin paths that don't come from a typed
+    /// `charts.*` import, forcing every chart through `akua.toml`.
+    pub fn render_opts(
+        &self,
+        inputs: &Value,
+        charts: &crate::chart_resolver::ResolvedCharts,
+        strict: bool,
+    ) -> Result<RenderedPackage, PackageKError> {
         // Register every engine callable whose feature flag is on.
         // Idempotent per invocation — safe to call every render.
         crate::kcl_plugin::install_builtin_plugins();
@@ -134,10 +146,8 @@ impl PackageK {
         // (pkg.render) stack naturally.
         let allowed_roots: Vec<PathBuf> =
             charts.entries.values().map(|c| c.abs_path.clone()).collect();
-        let _scope = crate::kcl_plugin::RenderScope::enter_with_allowed_roots(
-            &self.path,
-            &allowed_roots,
-        );
+        let _scope =
+            crate::kcl_plugin::RenderScope::enter_with(&self.path, &allowed_roots, strict);
 
         // Materialize `charts/` alongside the static `akua/` stdlib.
         // TempDir dropped at end of scope, after `exec_program` has

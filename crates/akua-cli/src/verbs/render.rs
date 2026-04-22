@@ -14,6 +14,12 @@ use akua_core::{
     AkuaManifest, ChartResolveError, PackageK, PackageRenderError, RenderSummary, ResolvedCharts,
 };
 
+/// Substring of the `PathError::StrictRequiresTypedImport` Display
+/// that's stable enough to sniff out of KCL's opaque plugin panic
+/// envelope. Lives next to the error-conversion site so a change to
+/// the PathError message stays colocated with its consumer.
+const STRICT_MARKER: &str = "strict mode requires every chart";
+
 #[derive(Debug, Clone)]
 pub struct RenderArgs<'a> {
     pub package_path: &'a Path,
@@ -31,6 +37,13 @@ pub struct RenderArgs<'a> {
     /// `--stdout`: emit rendered manifests as multi-document YAML to
     /// stdout instead of writing files.
     pub stdout_mode: bool,
+
+    /// `--strict`: reject raw-string plugin paths. Every chart must
+    /// come from a typed `import charts.<name>` — i.e. must be
+    /// declared in `akua.toml` and reachable via the resolver. Flips
+    /// the render path from "best effort" to "every dep accounted
+    /// for," which is what CI pipelines want.
+    pub strict: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -84,11 +97,32 @@ impl RenderError {
                     .with_default_docs()
             }
             RenderError::PackageK(PackageKError::KclEval(msg)) => {
-                StructuredError::new(codes::E_RENDER_KCL, msg.clone()).with_default_docs()
+                // Plugin errors flow back through KCL's `__kcl_PanicInfo__`
+                // envelope as an opaque string — we can't pattern-match
+                // on the typed `PathError` variant here. Sniff for the
+                // strict-mode marker the `resolve_in_package` error
+                // carries so the CLI surfaces a distinct code + hint
+                // instead of the generic `E_RENDER_KCL`.
+                if msg.contains(STRICT_MARKER) {
+                    StructuredError::new(codes::E_STRICT_UNTYPED_CHART, msg.clone())
+                        .with_suggestion(
+                            "Declare the chart in `akua.toml` and `import charts.<name>`, then pass `chart = <name>.path` to `helm.template`.",
+                        )
+                        .with_default_docs()
+                } else {
+                    StructuredError::new(codes::E_RENDER_KCL, msg.clone()).with_default_docs()
+                }
             }
             RenderError::PackageK(PackageKError::InputJson(e)) => {
                 StructuredError::new(codes::E_INPUTS_PARSE, e.to_string()).with_default_docs()
             }
+            RenderError::PackageK(PackageKError::PathEscape(
+                inner @ akua_core::kcl_plugin::PathError::StrictRequiresTypedImport(_),
+            )) => StructuredError::new(codes::E_STRICT_UNTYPED_CHART, inner.to_string())
+                .with_suggestion(
+                    "Declare the chart in `akua.toml` and `import charts.<name>`, then pass `chart = <name>.path` to `helm.template`.",
+                )
+                .with_default_docs(),
             RenderError::PackageK(PackageKError::PathEscape(inner)) => StructuredError::new(
                 codes::E_PATH_ESCAPE,
                 inner.to_string(),
@@ -160,7 +194,7 @@ pub fn run<W: Write>(
     let resolved_inputs = resolve_inputs_path(args);
     let inputs = load_inputs(resolved_inputs.as_deref())?;
     let charts = resolve_package_charts(args.package_path)?;
-    let rendered = package.render_with_charts(&inputs, &charts)?;
+    let rendered = package.render_opts(&inputs, &charts, args.strict)?;
 
     if args.stdout_mode {
         write_multi_doc_yaml(stdout, &rendered.resources).map_err(RenderError::StdoutWrite)?;
@@ -327,6 +361,7 @@ resources = [{
             out_dir: out,
             dry_run: false,
             stdout_mode: false,
+            strict: false,
         }
     }
 
@@ -562,6 +597,34 @@ resources = [
         let err = run(&Context::human(), &args(&pkg, tmp.path()), &mut Vec::new())
             .unwrap_err();
         assert_eq!(err.to_structured().code, codes::E_INPUTS_PARSE);
+    }
+
+    #[test]
+    fn strict_mode_rejects_raw_string_chart_path() {
+        // Package uses helm.template with a raw "./chart" literal —
+        // allowed by default (path resolves under Package dir) but
+        // must be rejected in strict mode.
+        let tmp = TempDir::new().unwrap();
+        let chart_dir = tmp.path().join("chart");
+        std::fs::create_dir_all(&chart_dir).unwrap();
+        std::fs::write(
+            chart_dir.join("Chart.yaml"),
+            "apiVersion: v2\nname: demo\nversion: 0.1.0\n",
+        )
+        .unwrap();
+
+        let body = r#"
+import akua.helm
+resources = helm.template(helm.Template { chart = "./chart" })
+"#;
+        let pkg = write_package(&tmp, body);
+        let a = RenderArgs {
+            strict: true,
+            dry_run: true,
+            ..args(&pkg, tmp.path())
+        };
+        let err = run(&Context::human(), &a, &mut Vec::new()).unwrap_err();
+        assert_eq!(err.to_structured().code, codes::E_STRICT_UNTYPED_CHART);
     }
 
     #[test]

@@ -226,6 +226,12 @@ struct RenderCliArgs {
     /// Print rendered manifests as multi-doc YAML to stdout instead of writing files.
     #[arg(long)]
     stdout: bool,
+
+    /// Reject raw-string plugin paths. Every chart must be declared in
+    /// `akua.toml` and imported as `charts.<name>`. Equivalent to
+    /// Cargo's `--locked` — CI-grade "every dep accounted for."
+    #[arg(long)]
+    strict: bool,
 }
 
 fn main() {
@@ -477,6 +483,7 @@ fn run_render(args: &UniversalArgs, render_args: &RenderCliArgs) -> ExitCode {
         out_dir: &render_args.out,
         dry_run: render_args.dry_run,
         stdout_mode: render_args.stdout,
+        strict: render_args.strict,
     };
     let mut stdout = io::stdout().lock();
     match render_verb::run(&ctx, &verb_args, &mut stdout) {

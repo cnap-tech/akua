@@ -162,6 +162,12 @@ pub fn plugin_agent_ptr() -> u64 {
 struct RenderFrame {
     package: PathBuf,
     allowed_roots: Vec<PathBuf>,
+    /// `--strict` semantics. When true, plugin paths must come from
+    /// a typed `charts.*` import (i.e. resolve under one of the
+    /// `allowed_roots`) — relative and raw-string paths under the
+    /// Package dir are rejected. Forces authors to declare every
+    /// chart in `akua.toml`, giving `akua.lock` full coverage.
+    strict: bool,
 }
 
 thread_local! {
@@ -188,24 +194,20 @@ impl RenderScope {
     /// empty allowed-roots list — plugin paths must resolve under
     /// `package.parent()`.
     pub fn enter(package: &Path) -> Self {
-        Self::enter_with_allowed_roots(package, &[])
+        Self::enter_with(package, &[], false)
     }
 
-    /// Push `package` onto the current-thread render stack alongside
-    /// the list of absolute paths plugin-supplied chart paths are
-    /// allowed to live under. Caller must canonicalize the roots
-    /// before handing them in; [`resolve_in_package`] compares via
-    /// `starts_with` after its own best-effort canonicalize.
-    ///
-    /// Crate-private: only `package_k::render_with_charts` is allowed
-    /// to register sandbox-escape roots — exposing this publicly
-    /// would be a security surface since the plugin-path guard
-    /// defers to whatever the top-of-stack frame permits.
-    pub(crate) fn enter_with_allowed_roots(package: &Path, allowed_roots: &[PathBuf]) -> Self {
+    /// Push `package` with resolved-chart roots + strict flag. Crate-
+    /// private: only `package_k::render_with_charts` is allowed to
+    /// register sandbox-escape roots — exposing this publicly would
+    /// be a security surface since the plugin-path guard defers to
+    /// whatever the top-of-stack frame permits.
+    pub(crate) fn enter_with(package: &Path, allowed_roots: &[PathBuf], strict: bool) -> Self {
         RENDER_STACK.with(|s| {
             s.borrow_mut().push(RenderFrame {
                 package: package.to_path_buf(),
                 allowed_roots: allowed_roots.to_vec(),
+                strict,
             });
         });
         Self { _private: () }
@@ -254,6 +256,13 @@ fn current_allowed_roots() -> Vec<PathBuf> {
     })
 }
 
+/// Whether the top-of-stack render frame is in strict mode. Plugin
+/// handlers consult this to reject raw-string plugin paths (i.e.
+/// paths that don't come from a resolved `charts.*` import).
+fn current_strict() -> bool {
+    RENDER_STACK.with(|s| s.borrow().last().map(|f| f.strict).unwrap_or(false))
+}
+
 /// Error from [`resolve_in_package`] when a plugin's user-supplied
 /// path escapes the Package directory. Surfaced to Packages as a
 /// parse error; to CLI callers with [`codes::E_PATH_ESCAPE`].
@@ -268,6 +277,9 @@ pub enum PathError {
 
     #[error("plugin path `{0}` is absolute; Package-relative paths only")]
     AbsoluteDisallowed(PathBuf),
+
+    #[error("plugin path `{0}` isn't a typed `charts.*` import; strict mode requires every chart to be declared in `akua.toml`")]
+    StrictRequiresTypedImport(PathBuf),
 
     #[error("no render scope — plugin called outside `PackageK::render`")]
     NoRenderScope,
@@ -293,6 +305,7 @@ pub enum PathError {
 pub fn resolve_in_package(path: &Path) -> Result<PathBuf, PathError> {
     let package_dir = current_package_dir().ok_or(PathError::NoRenderScope)?;
     let allowed_roots = current_allowed_roots();
+    let strict = current_strict();
 
     if path.is_absolute() {
         let canon = canonicalize_best_effort(path).map_err(|e| PathError::Io {
@@ -305,6 +318,14 @@ pub fn resolve_in_package(path: &Path) -> Result<PathBuf, PathError> {
             }
         }
         return Err(PathError::AbsoluteDisallowed(path.to_path_buf()));
+    }
+
+    // Strict mode: relative plugin paths aren't allowed — force the
+    // Package author to declare every chart in `akua.toml` and import
+    // it as `charts.<name>`. The only accepted inputs are absolute
+    // paths that land under a resolved-chart root (handled above).
+    if strict {
+        return Err(PathError::StrictRequiresTypedImport(path.to_path_buf()));
     }
 
     let pkg_canon = package_dir

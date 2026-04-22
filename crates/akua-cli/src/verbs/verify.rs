@@ -18,7 +18,7 @@ use std::io::Write;
 use std::path::Path;
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
-use akua_core::{AkuaLock, AkuaManifest, LockLoadError, ManifestLoadError};
+use akua_core::{chart_resolver, AkuaLock, AkuaManifest, LockLoadError, ManifestLoadError};
 use serde::Serialize;
 
 use crate::contract::{emit_output, Context};
@@ -52,6 +52,18 @@ pub enum Violation {
     OrphanLocked { name: String, version: String },
     /// Package is locked without a signature while `strict_signing = true`.
     MissingSignature { name: String, version: String },
+    /// Path-dep on-disk content diverges from the digest `akua.lock`
+    /// pinned. Someone mutated the vendored chart without re-running
+    /// `akua add` — either intentional (run add to refresh) or
+    /// accidental (revert the edit).
+    PathDigestDrift {
+        name: String,
+        expected: String,
+        actual: String,
+    },
+    /// Path-dep's declared target no longer exists on disk. Likely a
+    /// deleted `./vendor/<chart>` directory.
+    PathMissing { name: String, path: String },
 }
 
 impl VerifyOutput {
@@ -159,6 +171,53 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
         }
     }
 
+    // Path-dep drift detection: re-hash the on-disk chart and compare
+    // to the lockfile digest. A mismatch means someone mutated the
+    // vendored tree without re-running `akua add` — CI must fail. We
+    // run the resolver in offline mode so OCI/git deps don't touch
+    // the network from `akua verify`.
+    let drift_resolution = chart_resolver::resolve(&manifest, workspace);
+    if let Ok(resolved) = drift_resolution {
+        for pkg in &lock.packages {
+            if !pkg.is_path() {
+                continue;
+            }
+            match resolved.entries.get(&pkg.name) {
+                None => {
+                    // Dep declared in manifest but resolver couldn't find
+                    // its target. Only fires when `akua.toml` still lists
+                    // a path dep — OrphanLocked covers removal cases.
+                    if manifest.dependencies.contains_key(&pkg.name) {
+                        violations.push(Violation::PathMissing {
+                            name: pkg.name.clone(),
+                            path: pkg.source.clone(),
+                        });
+                    }
+                }
+                Some(resolved_chart) if resolved_chart.sha256 != pkg.digest => {
+                    violations.push(Violation::PathDigestDrift {
+                        name: pkg.name.clone(),
+                        expected: pkg.digest.clone(),
+                        actual: resolved_chart.sha256.clone(),
+                    });
+                }
+                Some(_) => {} // digest matches
+            }
+        }
+    } else if let Err(e) = drift_resolution {
+        // Resolver failures for path deps are surfaced as PathMissing
+        // violations — anything else (e.g. UnsupportedSource on a
+        // bare OCI dep) is legitimately not our problem here.
+        if let chart_resolver::ChartResolveError::NotFound { name, path }
+        | chart_resolver::ChartResolveError::NotADirectory { name, path } = e
+        {
+            violations.push(Violation::PathMissing {
+                name,
+                path: path.display().to_string(),
+            });
+        }
+    }
+
     let status = if violations.is_empty() { "ok" } else { "fail" };
 
     Ok(VerifyOutput {
@@ -210,6 +269,18 @@ fn write_text<W: Write>(stdout: &mut W, output: &VerifyOutput) -> std::io::Resul
                 Violation::MissingSignature { name, version } => {
                     writeln!(stdout, "  - missing-signature: {name}@{version}")?
                 }
+                Violation::PathDigestDrift {
+                    name,
+                    expected,
+                    actual,
+                } => writeln!(
+                    stdout,
+                    "  - path-digest-drift: {name}\n      expected {expected}\n      actual   {actual}\n      run `akua add --force {name} --path <current_path>` to refresh"
+                )?,
+                Violation::PathMissing { name, path } => writeln!(
+                    stdout,
+                    "  - path-missing: {name} at `{path}`"
+                )?,
             }
         }
     }
@@ -526,5 +597,148 @@ signature = "cosign:sigstore:cloudnative-pg"
                 result.violations
             );
         }
+    }
+
+    // ---------------------------------------------------------------
+    // Path-dep drift detection (Phase 2b slice C)
+    // ---------------------------------------------------------------
+
+    /// Write a minimal chart tree under `root` for use in path-dep
+    /// drift tests. Matches the digest shape the resolver produces.
+    fn write_chart(root: &std::path::Path, body: &str) {
+        fs::create_dir_all(root.join("templates")).unwrap();
+        fs::write(
+            root.join("Chart.yaml"),
+            "apiVersion: v2\nname: demo\nversion: 0.1.0\n",
+        )
+        .unwrap();
+        fs::write(root.join("templates/cm.yaml"), body).unwrap();
+    }
+
+    /// Build a workspace: manifest pins `nginx` as a local path, lock
+    /// carries a specific digest. Returns the TempDir for use.
+    fn write_path_workspace(chart_body: &str, lock_digest: &str) -> TempDir {
+        let dir = TempDir::new().unwrap();
+        write_chart(&dir.path().join("vendor/nginx"), chart_body);
+        fs::write(
+            dir.path().join("akua.toml"),
+            r#"
+[package]
+name    = "ws"
+version = "0.1.0"
+edition = "akua.dev/v1alpha1"
+
+[dependencies]
+nginx = { path = "./vendor/nginx" }
+"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("akua.lock"),
+            format!(
+                r#"
+version = 1
+
+[[package]]
+name    = "nginx"
+version = "local"
+source  = "path+file://./vendor/nginx"
+digest  = "{lock_digest}"
+"#
+            ),
+        )
+        .unwrap();
+        dir
+    }
+
+    #[test]
+    fn path_dep_digest_drift_surfaces_violation() {
+        let ws = write_path_workspace(
+            "apiVersion: v1\nkind: ConfigMap\nmetadata: { name: demo }\n",
+            // Bogus digest — chart on disk won't hash to this.
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        );
+        let result = check(ws.path()).expect("check");
+        assert_eq!(result.status, "fail");
+        let drift = result
+            .violations
+            .iter()
+            .find(|v| matches!(v, Violation::PathDigestDrift { .. }))
+            .expect("drift violation present");
+        match drift {
+            Violation::PathDigestDrift { name, expected, .. } => {
+                assert_eq!(name, "nginx");
+                assert!(expected.starts_with("sha256:0000"));
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn path_dep_with_matching_digest_is_ok() {
+        // Compute the real digest for the vendored chart, write it
+        // into the lock, verify clean.
+        let tmp = TempDir::new().unwrap();
+        write_chart(
+            &tmp.path().join("vendor/nginx"),
+            "apiVersion: v1\nkind: ConfigMap\nmetadata: { name: demo }\n",
+        );
+        fs::write(
+            tmp.path().join("akua.toml"),
+            r#"
+[package]
+name    = "ws"
+version = "0.1.0"
+edition = "akua.dev/v1alpha1"
+
+[dependencies]
+nginx = { path = "./vendor/nginx" }
+"#,
+        )
+        .unwrap();
+        let manifest =
+            AkuaManifest::load(tmp.path()).expect("manifest");
+        let resolved =
+            chart_resolver::resolve(&manifest, tmp.path()).expect("resolve");
+        let real_digest = resolved.entries.get("nginx").unwrap().sha256.clone();
+        fs::write(
+            tmp.path().join("akua.lock"),
+            format!(
+                r#"
+version = 1
+
+[[package]]
+name    = "nginx"
+version = "local"
+source  = "path+file://./vendor/nginx"
+digest  = "{real_digest}"
+"#
+            ),
+        )
+        .unwrap();
+
+        let result = check(tmp.path()).expect("check");
+        assert_eq!(result.status, "ok", "violations: {:?}", result.violations);
+    }
+
+    #[test]
+    fn deleted_path_dep_surfaces_path_missing_violation() {
+        let ws = write_path_workspace(
+            "apiVersion: v1\nkind: ConfigMap\nmetadata: { name: demo }\n",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        );
+        // Rip out the vendored chart.
+        fs::remove_dir_all(ws.path().join("vendor")).unwrap();
+
+        let result = check(ws.path()).expect("check");
+        assert_eq!(result.status, "fail");
+        assert!(
+            result
+                .violations
+                .iter()
+                .any(|v| matches!(v, Violation::PathMissing { name, .. } if name == "nginx")),
+            "violations: {:?}",
+            result.violations
+        );
     }
 }

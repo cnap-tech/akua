@@ -104,13 +104,17 @@ Spec-to-code convergence. [docs/package-format.md §2](package-format.md) and [d
 - [x] `akua render` + `akua add` pass lockfile digests as `expected_digests`
 - [x] Integration test pulls `ghcr.io/stefanprodan/charts/podinfo:6.6.0`, caches, verifies digest-mismatch rejection
 
-### Phase 2b slice C — deferred
+### Phase 2b slice C — partial (SHIPPED — 2026-04-22)
+
+- [x] `akua render --strict`: raw-string plugin paths rejected. Forces every chart to go through `akua.toml` + `import charts.<name>`. Typed exit code `E_STRICT_UNTYPED_CHART`.
+- [x] `akua verify` path-dep drift detection: re-hashes vendored charts on disk, emits `PathDigestDrift` / `PathMissing` violations when the tree diverged from `akua.lock` or was deleted.
+
+### Phase 2b slice C — still deferred
 
 - [ ] Git checkout + tag/rev pinning via `gix`
 - [ ] Private-repo auth: `~/.docker/config.json` + `$HOME/.config/akua/auth.toml`
 - [ ] Richer generated `charts.<name>.Chart` / `.Values` schemas (values.schema.json → KCL)
 - [ ] `helm.Template.chart: str | Chart` union type
-- [ ] `--strict` render mode: reject raw-string chart paths
 - [ ] `akua remove`, `akua tree` grow chart-dep support
 
 **Exit gate (for the phase as a whole):** An OCI-sourced chart end-to-end works under `akua render`, pinned by digest in `akua.lock`, with a cache hit on second render. ✅ (slice B test covers this). Slice C is pure follow-up; none of its items block the sandbox-first core.

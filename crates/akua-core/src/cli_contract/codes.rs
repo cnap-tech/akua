@@ -31,6 +31,10 @@ pub const E_PATH_ESCAPE: &str = "E_PATH_ESCAPE";
 /// `charts.*` dep in `akua.toml` failed to resolve (missing path,
 /// not-a-directory, OCI/git Phase-2b gate). See chart_resolver.
 pub const E_CHART_RESOLVE: &str = "E_CHART_RESOLVE";
+/// `akua render --strict`: a plugin was handed a raw-string chart
+/// path instead of a typed `charts.*` import. Surfaces the Package
+/// authoring site that needs to migrate.
+pub const E_STRICT_UNTYPED_CHART: &str = "E_STRICT_UNTYPED_CHART";
 
 // ----- Init ----------------------------------------------------------------
 
