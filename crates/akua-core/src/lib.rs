@@ -14,6 +14,8 @@
 
 #![allow(dead_code)]
 
+#[cfg(any(feature = "oci-fetch", feature = "git-fetch"))]
+pub mod cache_inventory;
 #[cfg(feature = "engine-kcl")]
 pub mod chart_resolver;
 #[cfg(feature = "git-fetch")]
