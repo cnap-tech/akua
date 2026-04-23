@@ -77,8 +77,9 @@ This is the current-state gap vs the target. See [docs/roadmap.md](roadmap.md) p
 | `akua serve` per-tenant isolation | Verb doesn't exist | Phase 5 |
 | cosign verification on OCI deps | Not implemented — lockfile digest verify only | Phase 6 |
 | SLSA attestation generation + chain walk | Not implemented | Phase 6 |
-| Git dep checkout via `gix` | Not implemented — use `replace = { path = ... }` | Phase 2b C (remainder) |
-| Private-repo OCI auth (docker config / akua auth.toml) | Public-only for now | Phase 2b C (remainder) |
+| Git dep checkout via `gix` | Shipped — pure Rust, no shell-out | ✅ Phase 2b C |
+| Private-repo OCI auth (docker config / akua auth.toml) | Shipped — Basic + bearer PAT | ✅ Phase 2b C |
+| Docker credential helpers | Not implemented — would require shell-out | Won't ship |
 
 ---
 

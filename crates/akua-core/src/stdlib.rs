@@ -69,7 +69,7 @@ pub fn materialize_charts(
         let values_schema = load_values_schema(&chart.abs_path);
         let body = build_chart_module(
             name,
-            &kcl_str_literal(&chart.abs_path.to_string_lossy()),
+            &crate::values_schema::kcl_string_literal(&chart.abs_path.to_string_lossy()),
             &chart.sha256,
             values_schema.as_deref(),
         );
@@ -137,38 +137,25 @@ fn build_chart_module(
 }
 
 /// Read `values.schema.json` from the chart root, convert it to KCL,
-/// and return the source. `None` when the file is absent or malformed
-/// — the latter is intentional: we don't want a stale schema in a
-/// vendored chart to block the whole render. Author-visible lint
-/// surfaces via the separate `akua check` path.
+/// and return the source. `None` when the file is absent. A
+/// malformed schema surfaces on stderr (see CLAUDE.md — structured
+/// errors, not prose) then falls back to `None`, so the render still
+/// proceeds with an untyped `{str:}` values shape instead of
+/// mysteriously crashing.
 fn load_values_schema(chart_dir: &std::path::Path) -> Option<String> {
     let schema_path = chart_dir.join("values.schema.json");
     let bytes = std::fs::read(&schema_path).ok()?;
     match crate::values_schema::generate_from_bytes(&bytes) {
         Ok(gen) if !gen.source.is_empty() => Some(gen.source),
-        _ => None,
-    }
-}
-
-/// Quote a string as a KCL double-quoted literal, escaping `\` and `"`.
-/// Chart paths may contain spaces on macOS (`/Users/someone with spaces/`)
-/// so `format!("\"{s}\"")` isn't safe — backslashes in a path would
-/// otherwise be interpreted as KCL escape sequences.
-fn kcl_str_literal(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            _ => out.push(c),
+        Ok(_) => None, // non-object root; generator returns empty
+        Err(e) => {
+            eprintln!(
+                "akua: skipping malformed values.schema.json at {}: {e}",
+                schema_path.display()
+            );
+            None
         }
     }
-    out.push('"');
-    out
 }
 
 pub fn stdlib_root() -> &'static Path {
@@ -405,9 +392,10 @@ mod tests {
 
     #[test]
     fn kcl_str_literal_escapes_special_chars() {
-        assert_eq!(kcl_str_literal("plain"), r#""plain""#);
-        assert_eq!(kcl_str_literal(r#"a"b"#), r#""a\"b""#);
-        assert_eq!(kcl_str_literal(r"a\b"), r#""a\\b""#);
-        assert_eq!(kcl_str_literal("line1\nline2"), r#""line1\nline2""#);
+        use crate::values_schema::kcl_string_literal;
+        assert_eq!(kcl_string_literal("plain"), r#""plain""#);
+        assert_eq!(kcl_string_literal(r#"a"b"#), r#""a\"b""#);
+        assert_eq!(kcl_string_literal(r"a\b"), r#""a\\b""#);
+        assert_eq!(kcl_string_literal("line1\nline2"), r#""line1\nline2""#);
     }
 }

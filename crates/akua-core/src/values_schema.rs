@@ -253,7 +253,9 @@ fn json_value_to_kcl(v: &serde_json::Value) -> Option<String> {
 }
 
 /// Format as a KCL string literal — quote + escape `\` and `"`.
-fn kcl_string_literal(s: &str) -> String {
+/// Pub for reuse by `stdlib::build_chart_module`, which also emits
+/// string literals (chart paths) and needs the same escaping rules.
+pub(crate) fn kcl_string_literal(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for c in s.chars() {
@@ -289,23 +291,33 @@ fn format_docstring(text: &str, indent: usize) -> String {
 }
 
 /// `replicaCount` / `image_pull_policy` → `ReplicaCount` / `ImagePullPolicy`.
-/// Used to name nested schemas off property names.
+/// Used to name nested schemas off property names. Non-ident chars
+/// (dots, slashes from JSON-Pointer-ish keys) are dropped so the
+/// result is always a valid KCL identifier. A leading digit or empty
+/// result gets `_` prefixed so the identifier parses; no silent empty
+/// schema names.
 fn pascal_case(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut capitalize_next = true;
     for c in s.chars() {
-        if c == '_' || c == '-' {
-            capitalize_next = true;
-            continue;
-        }
-        if capitalize_next {
-            out.extend(c.to_uppercase());
-            capitalize_next = false;
+        if c.is_ascii_alphanumeric() {
+            if capitalize_next {
+                out.extend(c.to_uppercase());
+                capitalize_next = false;
+            } else {
+                out.push(c);
+            }
         } else {
-            out.push(c);
+            // `_`, `-`, `.`, `/`, etc. — treat all as word separators.
+            capitalize_next = true;
         }
     }
-    out
+    // KCL identifiers can't start with a digit and can't be empty.
+    match out.chars().next() {
+        None => "_".to_string(),
+        Some(c) if c.is_ascii_digit() => format!("_{out}"),
+        _ => out,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -444,6 +456,20 @@ mod tests {
         assert_eq!(pascal_case("replicaCount"), "ReplicaCount");
         assert_eq!(pascal_case("image_pull_policy"), "ImagePullPolicy");
         assert_eq!(pascal_case("node-selector"), "NodeSelector");
+    }
+
+    #[test]
+    fn pascal_case_guards_kcl_identifier_shape() {
+        // Leading digit → prefixed `_` so the result is a legal KCL
+        // identifier. Without the guard the generated `schema 2xx:`
+        // would fail to parse.
+        assert_eq!(pascal_case("2xx"), "_2xx");
+        // Non-ident chars (dots from JSON-Pointer-ish keys) become
+        // word boundaries, not identifier content.
+        assert_eq!(pascal_case("foo.bar"), "FooBar");
+        assert_eq!(pascal_case("api/v1"), "ApiV1");
+        // Empty input → sentinel rather than an empty identifier.
+        assert_eq!(pascal_case(""), "_");
     }
 
     #[test]
