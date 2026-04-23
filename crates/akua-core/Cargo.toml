@@ -8,7 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-default = ["engine-kcl", "engine-helm", "engine-kustomize", "oci-fetch", "git-fetch"]
+default = ["engine-kcl", "engine-helm", "engine-kustomize", "oci-fetch", "git-fetch", "cosign-verify"]
 # KCL engine — native Rust via kcl-lang/lib (git dep).
 engine-kcl = ["dep:kcl-lang", "dep:sha2", "dep:tempfile"]
 # Embedded Helm v4 template engine. Go source in crates/helm-engine-wasm/
@@ -30,6 +30,12 @@ oci-fetch = ["dep:reqwest", "dep:flate2", "dep:tar", "dep:base64"]
 # Public HTTPS + file:// URLs supported; ssh:// + private-repo auth
 # are follow-ups.
 git-fetch = ["dep:gix"]
+# Cosign keyed signature verification. Pairs with oci-fetch: when a
+# public key is configured, the pull path also pulls the chart's
+# cosign `.sig` sidecar and verifies the signature before handing
+# the blob to the renderer. Phase 6 slice A — keyless (fulcio/rekor)
+# is deferred.
+cosign-verify = ["oci-fetch", "dep:p256", "dep:pem", "dep:signature"]
 
 [dependencies]
 serde = { workspace = true }
@@ -54,6 +60,12 @@ base64 = { version = "0.22", optional = true }
 # we already pull in for oci-fetch; `max-performance-safe` keeps
 # compile time reasonable (skips `zlib-ng` optional perf wins).
 gix = { version = "0.66", default-features = false, features = ["blocking-http-transport-reqwest-rust-tls", "max-performance-safe", "worktree-mutation"], optional = true }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std", "pem"], optional = true }
+pem = { version = "3", optional = true }
+signature = { version = "2", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+# cosign test fixtures generate a keypair per test run; keeps tests
+# hermetic instead of committing a PEM to the repo.
+rand = "0.8"
