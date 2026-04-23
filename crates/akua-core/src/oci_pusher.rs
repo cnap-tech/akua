@@ -161,6 +161,110 @@ pub fn push(
     })
 }
 
+/// Push a cosign `.sig` sidecar for an already-published artifact.
+/// `payload_bytes` + `signature_b64` come from
+/// [`crate::cosign::build_simple_signing_payload`] and
+/// [`crate::cosign::sign_keyed`]. Signature tag is `sha256-<hex>.sig`.
+pub fn push_cosign_signature(
+    oci_ref: &str,
+    manifest_digest: &str,
+    payload_bytes: &[u8],
+    signature_b64: &str,
+    creds: &CredsStore,
+) -> Result<String, OciPushError> {
+    let parsed = parse_ref(oci_ref).map_err(OciPushError::from)?;
+    let client = build_client().map_err(OciPushError::from)?;
+    let registry_creds = oci_auth::for_registry(creds, &parsed.registry);
+    let mut token = TokenCache::default();
+
+    // Payload blob.
+    let payload_digest = format!("sha256:{}", hex_encode(&Sha256::digest(payload_bytes)));
+    upload_blob(
+        &client,
+        &parsed,
+        payload_bytes,
+        &payload_digest,
+        registry_creds.as_ref(),
+        &mut token,
+    )?;
+
+    // Empty config — cosign sidecar uses the generic OCI image config
+    // media type with `{}` content.
+    let config_bytes: &[u8] = b"{}";
+    let config_digest = format!("sha256:{}", hex_encode(&Sha256::digest(config_bytes)));
+    upload_blob(
+        &client,
+        &parsed,
+        config_bytes,
+        &config_digest,
+        registry_creds.as_ref(),
+        &mut token,
+    )?;
+
+    // Signature manifest. The layer carries the signature in an
+    // `annotations` map, distinct from the config.
+    #[derive(Serialize)]
+    struct SigLayer<'a> {
+        #[serde(rename = "mediaType")]
+        media_type: &'a str,
+        size: u64,
+        digest: &'a str,
+        annotations: std::collections::BTreeMap<&'a str, &'a str>,
+    }
+    #[derive(Serialize)]
+    struct SigManifest<'a> {
+        #[serde(rename = "schemaVersion")]
+        schema_version: u32,
+        #[serde(rename = "mediaType")]
+        media_type: &'a str,
+        config: Descriptor,
+        layers: Vec<SigLayer<'a>>,
+    }
+    let mut annotations = std::collections::BTreeMap::new();
+    annotations.insert("dev.cosignproject.cosign/signature", signature_b64);
+    let manifest = SigManifest {
+        schema_version: 2,
+        media_type: OCI_MANIFEST_MEDIA_TYPE,
+        config: Descriptor {
+            media_type: "application/vnd.oci.image.config.v1+json".to_string(),
+            size: config_bytes.len() as u64,
+            digest: config_digest,
+        },
+        layers: vec![SigLayer {
+            media_type: "application/vnd.dev.cosign.simplesigning.v1+json",
+            size: payload_bytes.len() as u64,
+            digest: &payload_digest,
+            annotations,
+        }],
+    };
+    let manifest_bytes = serde_json::to_vec(&manifest)?;
+
+    // Tag transform: `sha256:<hex>` → `sha256-<hex>.sig`.
+    let hex = manifest_digest
+        .strip_prefix("sha256:")
+        .unwrap_or(manifest_digest);
+    let sig_tag = format!("sha256-{hex}.sig");
+
+    let sig_manifest_url = format!(
+        "https://{}/v2/{}/manifests/{}",
+        parsed.registry, parsed.repository, sig_tag
+    );
+    send_with_auth(
+        &client,
+        &sig_manifest_url,
+        &parsed.registry,
+        registry_creds.as_ref(),
+        &mut token,
+        |req| {
+            req.header("Content-Type", OCI_MANIFEST_MEDIA_TYPE)
+                .body(manifest_bytes.clone())
+        },
+        HttpMethod::Put,
+    )?;
+
+    Ok(sig_tag)
+}
+
 // --- Blob upload ----------------------------------------------------------
 
 /// Monolithic blob upload: start with `POST` to get a location, then

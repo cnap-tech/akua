@@ -41,9 +41,19 @@ pub struct AkuaManifest {
 pub struct SigningSection {
     /// Filesystem path to a PEM-encoded P-256 cosign public key,
     /// relative to the workspace root. Applies to every OCI dep in
-    /// this manifest.
+    /// this manifest (verify path).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cosign_public_key: Option<String>,
+
+    /// Filesystem path to a PEM-encoded P-256 cosign private key
+    /// (unencrypted PKCS#8), relative to the workspace root. When
+    /// set, `akua publish` signs every published artifact by
+    /// default. Absent → publish unsigned.
+    ///
+    /// Store with restrictive filesystem perms (0600). Passphrase /
+    /// HSM support is a follow-up slice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cosign_private_key: Option<String>,
 }
 
 /// `[package]` table.

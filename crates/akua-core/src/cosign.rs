@@ -23,7 +23,7 @@
 
 use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
 use p256::pkcs8::DecodePublicKey;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// The canonical cosign simple-signing payload shape. We parse the
 /// subset needed to correlate the signature with the blob we're
@@ -50,6 +50,9 @@ pub enum CosignError {
     #[error("public key is not a valid PEM-encoded P-256 ECDSA key: {0}")]
     BadPublicKey(String),
 
+    #[error("private key is not a valid PEM-encoded P-256 ECDSA key: {0}")]
+    BadPrivateKey(String),
+
     #[error("signature is not valid DER/raw base64: {0}")]
     BadSignature(String),
 
@@ -64,6 +67,79 @@ pub enum CosignError {
          different artifact"
     )]
     DigestMismatch { claimed: String, actual: String },
+}
+
+// --- Signing primitive (Phase 7) -------------------------------------------
+
+/// Cosign simple-signing payload produced for an artifact. Output of
+/// [`build_simple_signing_payload`]; bytes are what [`sign_keyed`]
+/// signs and what consumers verify.
+#[derive(Debug, Serialize)]
+struct SimpleSigningPayloadOut<'a> {
+    critical: CriticalOut<'a>,
+    optional: Option<()>,
+}
+
+#[derive(Debug, Serialize)]
+struct CriticalOut<'a> {
+    identity: IdentityOut<'a>,
+    image: ImageOut<'a>,
+    #[serde(rename = "type")]
+    ty: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct IdentityOut<'a> {
+    #[serde(rename = "docker-reference")]
+    docker_reference: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct ImageOut<'a> {
+    #[serde(rename = "docker-manifest-digest")]
+    docker_manifest_digest: &'a str,
+}
+
+/// Build the simple-signing payload bytes for `(docker_reference,
+/// manifest_digest)`. Output is the JSON cosign would emit for
+/// `cosign sign oci://...@sha256:...`.
+///
+/// Returned bytes are what the caller signs + pushes as the `.sig`
+/// sidecar's layer. Separated out from [`sign_keyed`] so callers can
+/// inspect / modify the payload before signing if a future feature
+/// demands it (SLSA predicate embedding, annotations).
+pub fn build_simple_signing_payload(docker_reference: &str, manifest_digest: &str) -> Vec<u8> {
+    let payload = SimpleSigningPayloadOut {
+        critical: CriticalOut {
+            identity: IdentityOut { docker_reference },
+            image: ImageOut {
+                docker_manifest_digest: manifest_digest,
+            },
+            ty: "cosign container image signature",
+        },
+        optional: None,
+    };
+    // Canonical JSON isn't required by cosign but using serde_json's
+    // default serialization gives byte-deterministic output for a
+    // stable input — two `build + sign` calls yield identical bytes.
+    serde_json::to_vec(&payload).expect("simple-signing payload serializes")
+}
+
+/// Sign `payload_bytes` with a P-256 ECDSA private key, returning a
+/// base64-encoded DER signature. Matches what cosign emits + what
+/// [`verify_keyed`] accepts.
+pub fn sign_keyed(
+    private_key_pem: &str,
+    payload_bytes: &[u8],
+) -> Result<String, CosignError> {
+    use base64::Engine as _;
+    use p256::ecdsa::{signature::Signer, SigningKey};
+    use p256::pkcs8::DecodePrivateKey;
+
+    let signing = SigningKey::from_pkcs8_pem(private_key_pem)
+        .map_err(|e: p256::pkcs8::Error| CosignError::BadPrivateKey(e.to_string()))?;
+    let signature: Signature = signing.sign(payload_bytes);
+    Ok(base64::engine::general_purpose::STANDARD.encode(signature.to_der().as_bytes()))
 }
 
 /// Verify a cosign signature end-to-end:
@@ -223,5 +299,46 @@ mod tests {
         let (pem, sig) = sign_fixture(&payload);
         let err = verify_keyed(&pem, &payload, &sig, "sha256:00").unwrap_err();
         assert!(matches!(err, CosignError::BadPayload(_)), "got {err:?}");
+    }
+
+    // --- Signing + round-trip ----------------------------------------------
+
+    /// Produce a (public PEM, private PEM) pair for round-trip tests.
+    fn keypair_fixture() -> (String, String) {
+        use p256::ecdsa::SigningKey;
+        use p256::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
+        let mut rng = rand::rngs::OsRng;
+        let signing = SigningKey::random(&mut rng);
+        let verifying = signing.verifying_key();
+        let priv_pem = signing.to_pkcs8_pem(LineEnding::LF).unwrap().to_string();
+        let pub_pem = verifying.to_public_key_pem(LineEnding::LF).unwrap();
+        (pub_pem, priv_pem)
+    }
+
+    #[test]
+    fn build_simple_signing_payload_has_canonical_fields() {
+        let payload = build_simple_signing_payload(
+            "ghcr.io/acme/app",
+            "sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        );
+        let s = std::str::from_utf8(&payload).unwrap();
+        assert!(s.contains("\"docker-reference\":\"ghcr.io/acme/app\""));
+        assert!(s.contains("\"docker-manifest-digest\":\"sha256:deadbeef"));
+        assert!(s.contains("\"type\":\"cosign container image signature\""));
+    }
+
+    #[test]
+    fn sign_then_verify_roundtrips() {
+        let (pub_pem, priv_pem) = keypair_fixture();
+        let digest = "sha256:f00";
+        let payload = build_simple_signing_payload("ghcr.io/acme/app", digest);
+        let signature = sign_keyed(&priv_pem, &payload).expect("sign");
+        verify_keyed(&pub_pem, &payload, &signature, digest).expect("verify");
+    }
+
+    #[test]
+    fn sign_rejects_malformed_private_key() {
+        let err = sign_keyed("not a pem", b"anything").unwrap_err();
+        assert!(matches!(err, CosignError::BadPrivateKey(_)), "got {err:?}");
     }
 }

@@ -150,6 +150,8 @@ enum Commands {
     /// Package the workspace and push it to an OCI registry as an
     /// akua Package artifact. Uploads the tarball + writes a manifest
     /// under `oci://<ref>:<tag>` (tag defaults to `[package].version`).
+    /// Signs by default when `akua.toml [signing].cosign_private_key`
+    /// is set; `--no-sign` skips signing explicitly.
     Publish {
         #[command(flatten)]
         args: UniversalArgs,
@@ -162,6 +164,11 @@ enum Commands {
         /// `[package].version`.
         #[arg(long)]
         tag: Option<String>,
+
+        /// Skip cosign signing even when a private key is configured
+        /// in `akua.toml`.
+        #[arg(long)]
+        no_sign: bool,
 
         /// Workspace root containing akua.toml.
         #[arg(long, default_value = ".")]
@@ -318,8 +325,9 @@ fn dispatch(command: Commands) -> ExitCode {
             args,
             oci_ref,
             tag,
+            no_sign,
             workspace,
-        } => run_publish(&args, &workspace, &oci_ref, tag.as_deref()),
+        } => run_publish(&args, &workspace, &oci_ref, tag.as_deref(), no_sign),
         Commands::Remove {
             args,
             name,
@@ -365,12 +373,14 @@ fn run_publish(
     workspace: &std::path::Path,
     oci_ref: &str,
     tag: Option<&str>,
+    no_sign: bool,
 ) -> ExitCode {
     let ctx = resolve_ctx(args);
     let verb_args = publish_verb::PublishArgs {
         workspace,
         oci_ref,
         tag,
+        no_sign,
     };
     let mut stdout = io::stdout().lock();
     match publish_verb::run(&ctx, &verb_args, &mut stdout) {
