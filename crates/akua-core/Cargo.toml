@@ -8,7 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-default = ["engine-kcl", "engine-helm", "engine-kustomize", "oci-fetch", "git-fetch", "cosign-verify"]
+default = ["engine-kcl", "engine-helm", "engine-kustomize", "oci-fetch", "git-fetch", "cosign-verify", "dev-watch"]
 # KCL engine — native Rust via kcl-lang/lib (git dep).
 engine-kcl = ["dep:kcl-lang", "dep:sha2", "dep:tempfile"]
 # Embedded Helm v4 template engine. Go source in crates/helm-engine-wasm/
@@ -36,6 +36,10 @@ git-fetch = ["dep:gix"]
 # the blob to the renderer. Phase 6 slice A — keyless (fulcio/rekor)
 # is deferred.
 cosign-verify = ["oci-fetch", "dep:p256", "dep:pem", "dep:signature"]
+# File-watch hot-reload. `akua dev` watches the workspace + re-renders
+# on change. Feature-gated so headless / CI builds skip the `notify`
+# dep tree (inotify/kqueue platform glue).
+dev-watch = ["engine-kcl", "dep:notify", "dep:notify-debouncer-mini"]
 
 [dependencies]
 serde = { workspace = true }
@@ -63,6 +67,8 @@ gix = { version = "0.66", default-features = false, features = ["blocking-http-t
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std", "pem"], optional = true }
 pem = { version = "3", optional = true }
 signature = { version = "2", optional = true }
+notify = { version = "6", optional = true }
+notify-debouncer-mini = { version = "0.4", optional = true, default-features = false }
 
 [dev-dependencies]
 tempfile = "3"

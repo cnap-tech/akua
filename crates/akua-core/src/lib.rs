@@ -33,6 +33,8 @@ pub mod package_tar;
 #[cfg(feature = "oci-fetch")]
 pub mod oci_transport;
 pub mod cli_contract;
+#[cfg(feature = "dev-watch")]
+pub mod dev;
 #[cfg(feature = "engine-kcl")]
 pub mod dir_diff;
 #[cfg(all(feature = "engine-kcl", feature = "engine-helm"))]
