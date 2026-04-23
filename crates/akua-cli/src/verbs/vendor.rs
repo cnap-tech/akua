@@ -15,18 +15,14 @@ use akua_core::AkuaManifest;
 /// (typically `vendor/`) and are packed via the workspace walk —
 /// don't re-vendor them or they'll appear twice in the tarball.
 ///
-/// A resolver failure here is *loud*: we emit a stderr warning naming
-/// the cause so the publisher doesn't ship an un-vendored artifact by
-/// accident. Returns the pairs the resolver *did* produce — a
-/// partial-vendor result is still better than nothing when one dep
-/// out of many is broken.
-///
-/// The `verb` argument is used only to prefix the warning ("akua
-/// publish" vs "akua pack") so operators can tell who emitted it.
+/// A resolver failure here is *loud*: we emit a stderr warning so
+/// the publisher doesn't ship an un-vendored artifact by accident.
+/// Returns the pairs the resolver *did* produce — a partial-vendor
+/// result is still better than nothing when one dep out of many is
+/// broken.
 pub fn collect_vendor_pairs(
     workspace: &Path,
     manifest: &AkuaManifest,
-    verb: &str,
 ) -> Vec<(String, PathBuf)> {
     use akua_core::chart_resolver::{self, ResolvedSource, ResolverOptions};
     use akua_core::AkuaLock;
@@ -50,7 +46,7 @@ pub fn collect_vendor_pairs(
         Ok(r) => r,
         Err(e) => {
             eprintln!(
-                "{verb}: warning: dep resolution failed, packed artifact will not render offline: {e}"
+                "warning: dep resolution failed, packed artifact will not render offline: {e}"
             );
             return Vec::new();
         }

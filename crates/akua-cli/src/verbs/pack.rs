@@ -102,7 +102,7 @@ pub fn run<W: Write>(
     let vendored_pairs = if args.no_vendor {
         Vec::new()
     } else {
-        crate::verbs::vendor::collect_vendor_pairs(args.workspace, &manifest, "akua pack")
+        crate::verbs::vendor::collect_vendor_pairs(args.workspace, &manifest)
     };
     let vendored_deps: Vec<String> = vendored_pairs.iter().map(|(n, _)| n.clone()).collect();
 

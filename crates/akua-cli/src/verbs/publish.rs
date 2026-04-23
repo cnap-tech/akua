@@ -160,8 +160,7 @@ pub fn run<W: Write>(
     // published artifact WILL NOT render offline — we emit a loud
     // stderr warning in that case rather than silently shipping an
     // un-vendored artifact.
-    let vendored_pairs =
-        crate::verbs::vendor::collect_vendor_pairs(args.workspace, &manifest, "akua publish");
+    let vendored_pairs = crate::verbs::vendor::collect_vendor_pairs(args.workspace, &manifest);
 
     let tar_gz =
         package_tar::pack_workspace_with_vendored_deps(args.workspace, &vendored_pairs)?;
