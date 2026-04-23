@@ -60,6 +60,7 @@ pub mod stdlib;
 pub mod test_runner;
 #[cfg(feature = "engine-kcl")]
 pub mod values_schema;
+pub(crate) mod walk;
 
 pub use cli_contract::{AgentContext, AgentSource, ExitCode, StructuredError};
 pub use lock_file::{

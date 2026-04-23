@@ -221,9 +221,12 @@ HTTP front end for concurrent render requests. Per-request `Store` with preopens
 
 ## Phase 8 — Author surface (`akua test`, `akua dev`, `akua repl`)
 
-Defer until 0-7 complete. These are signature-experience polish, not load-bearing for the sandbox story.
+Shipping incrementally alongside the core. `akua test` is live; the
+rest ship when demand justifies the surface.
 
-- [ ] `akua test` — `test_*.k` + `*_test.rego` runners; golden-file snapshot tests
+- [x] `akua test` — `test_*.k` / `*_test.k` runner. Files are evaluated via the same `PackageK` loader `akua render` uses; KCL `assert` + `check:` failures surface as per-file test failures. Structured JSON verdict + exit code 1 on any fail. (2026-04-22)
+- [ ] Rego test runner (`*_test.rego`) — paired with the policy engine phase
+- [ ] Golden-file snapshot support for render-output tests
 - [ ] `akua dev` — file-watch hot-reload per masterplan §12; <500ms edit-to-applied against local kind cluster
 - [ ] `akua repl` — interactive KCL / Rego shell
 

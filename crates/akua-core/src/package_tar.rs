@@ -72,12 +72,11 @@ pub fn pack_workspace(root: &Path) -> Result<Vec<u8>, PackageTarError> {
         });
     }
 
-    let mut entries = Vec::new();
-    collect(root, root, &mut entries).map_err(|source| PackageTarError::Io {
-        path: root.to_path_buf(),
-        source,
-    })?;
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    let entries = crate::walk::collect_files(root, |name| !should_skip_file(name))
+        .map_err(|source| PackageTarError::Io {
+            path: root.to_path_buf(),
+            source,
+        })?;
 
     let mut buf = Vec::new();
     {
@@ -105,58 +104,17 @@ pub fn pack_workspace(root: &Path) -> Result<Vec<u8>, PackageTarError> {
     Ok(buf)
 }
 
-/// Recursively collect files under `dir`, keeping paths relative to
-/// `root`. Hidden dotfiles and excluded top-level dirs are skipped.
-fn collect(
-    root: &Path,
-    dir: &Path,
-    out: &mut Vec<(PathBuf, PathBuf)>,
-) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-
-        if should_skip(&name_str) {
-            continue;
-        }
-
-        let ft = entry.file_type()?;
-        if ft.is_dir() {
-            collect(root, &path, out)?;
-        } else if ft.is_file() {
-            let rel = path
-                .strip_prefix(root)
-                .expect("walker stays under root")
-                .to_path_buf();
-            out.push((rel, path));
-        }
-        // Symlinks deliberately skipped — same reasoning as the helm
-        // chart-hash path: they break determinism + widen the sandbox
-        // surface.
-    }
-    Ok(())
-}
-
-/// Path-component-level exclusion list. Checked on both leaf file
-/// names and intermediate dir names.
-fn should_skip(name: &str) -> bool {
-    // Hidden files — exclude by default. Keeps build directories
-    // (`.akua/`, `.git/`, `.DS_Store`) out without enumerating.
+/// Per-file exclusions unique to publish. Directory-level skips
+/// (`deploy`, `target`, hidden dirs) are handled by the shared
+/// [`crate::walk`] module.
+fn should_skip_file(name: &str) -> bool {
+    // Hidden files — publish-time we want `.gitignore` / `.DS_Store`
+    // out even when they land in an otherwise-kept dir.
     if name.starts_with('.') {
         return true;
     }
-    matches!(
-        name,
-        // Render outputs — per-consumer, never part of the publish.
-        "deploy" | "rendered" | "out"
-        // Lock/state users don't want shipped (e.g. one-off renders).
-        | "inputs.yaml"
-        // Cargo/node/etc directories that might be in a workspace
-        // next to akua.toml but aren't part of the Package.
-        | "target" | "node_modules"
-    )
+    // Per-consumer / one-off state never part of a publish.
+    matches!(name, "inputs.yaml")
 }
 
 // ---------------------------------------------------------------------------

@@ -88,11 +88,10 @@ pub const E_PUBLISH_FAILED: &str = "E_PUBLISH_FAILED";
 /// `akua pull` couldn't retrieve / extract the requested artifact.
 pub const E_PULL_FAILED: &str = "E_PULL_FAILED";
 
-// ----- Test ----------------------------------------------------------------
-
-/// `akua test` — at least one test file's evaluation failed
-/// (assertion, `check:` block, or KCL parse / type error).
-pub const E_TEST_FAIL: &str = "E_TEST_FAIL";
+// Test failures surface via the JSON `status: "fail"` verdict +
+// exit code 1 (UserError). No structured stderr error — matches
+// the `render` / `verify` pattern where a valid-but-negative
+// verdict is an output, not an error.
 
 // ----- General -------------------------------------------------------------
 

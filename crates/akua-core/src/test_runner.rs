@@ -119,8 +119,12 @@ fn run_one(file: &Path, inputs: &serde_yaml::Value) -> Result<(), String> {
     let outcome = pkg.render(inputs);
     match outcome {
         Ok(_) => Ok(()),
-        // `MissingResources` is expected — a test isn't a Package.
-        // Treat it as a pass, matching `kcl test` semantics.
+        // A failing `assert` raises inside `exec_program` → surfaces
+        // as `KclEval` before `render` reaches the resources check,
+        // so this arm can't silently mask a test failure. It only
+        // fires on a clean-eval test file that doesn't emit
+        // `resources = [...]` — the "bare asserts" shape, which is
+        // exactly the pass case we want.
         Err(PackageKError::MissingResources) => Ok(()),
         Err(e) => Err(e.to_string()),
     }
@@ -128,62 +132,24 @@ fn run_one(file: &Path, inputs: &serde_yaml::Value) -> Result<(), String> {
 
 /// Walk `root` for files matching `test_*.k` or `*_test.k`. Sorts
 /// the result so test reports are byte-deterministic across
-/// filesystems. Hidden dirs, `deploy/`, `rendered/`, `.akua/`,
-/// `target/`, `node_modules/` are skipped — they're never where
-/// authors put tests, and walking them would be noise on large
-/// workspaces.
-pub fn discover_test_files(root: &Path) -> Result<Vec<PathBuf>, TestRunError> {
-    let mut out = Vec::new();
-    walk(root, &mut out).map_err(|source| TestRunError::Walk {
-        root: root.to_path_buf(),
-        source,
+/// filesystems. Hidden dirs + render outputs + language-ecosystem
+/// siblings are skipped via the shared [`crate::walk`] helper.
+pub(crate) fn discover_test_files(root: &Path) -> Result<Vec<PathBuf>, TestRunError> {
+    let pairs = crate::walk::collect_files(root, is_test_file).map_err(|source| {
+        TestRunError::Walk {
+            root: root.to_path_buf(),
+            source,
+        }
     })?;
-    out.sort();
-    Ok(out)
-}
-
-fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(r) => r,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e),
-    };
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.path();
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-
-        if should_skip(&name_str) {
-            continue;
-        }
-
-        let ft = entry.file_type()?;
-        if ft.is_dir() {
-            walk(&path, out)?;
-        } else if ft.is_file() && is_test_file(&name_str) {
-            out.push(path);
-        }
-    }
-    Ok(())
+    Ok(pairs.into_iter().map(|(_rel, abs)| abs).collect())
 }
 
 /// `test_*.k` or `*_test.k`. Case-sensitive — KCL itself is.
-pub fn is_test_file(name: &str) -> bool {
+pub(crate) fn is_test_file(name: &str) -> bool {
     let Some(stem) = name.strip_suffix(".k") else {
         return false;
     };
     stem.starts_with("test_") || stem.ends_with("_test")
-}
-
-fn should_skip(name: &str) -> bool {
-    if name.starts_with('.') {
-        return true;
-    }
-    matches!(
-        name,
-        "deploy" | "rendered" | "out" | "target" | "node_modules"
-    )
 }
 
 // ---------------------------------------------------------------------------

@@ -44,6 +44,10 @@ impl TestError {
     }
 
     pub fn exit_code(&self) -> ExitCode {
+        // Every variant here is system-level (disk walk failed, or
+        // writing to stdout failed). Test-failure user-errors go
+        // through the `Ok(ExitCode::UserError)` path in `run` —
+        // they're a valid verdict, not an error.
         ExitCode::SystemError
     }
 }
