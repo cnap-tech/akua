@@ -253,6 +253,7 @@ Glue that ships alongside the author loop but targets operators
 rather than authors. Small, composable, agent-friendly.
 
 - [x] `akua cache list | clear [--oci|--git] | path` — inventory + reclaim the content-addressed caches under `$XDG_CACHE_HOME/akua/{oci,git}` that `akua add` + `akua render` populate. Discriminated JSON shape `{action: list|clear|path, …}`. Ephemeral CI runners and disk-pressure triage without `rm -rf` guessing. (2026-04-23)
+- [x] `akua auth list | add | remove` — manage `$XDG_CONFIG_HOME/akua/auth.toml` without hand-editing TOML. `add --username`/`--token` reads the secret from stdin (mirrors `docker login --password-stdin` — no secret on argv, no TTY dependency). `list` tags each entry with source ("akua" / "docker" / "both") and auth_kind, never echoing secrets. (2026-04-23)
 
 ---
 
