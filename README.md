@@ -1,7 +1,16 @@
 <p align="center">
-  <a href="https://akua.dev"><img src="docs/mascot.png" alt="akua mascot" height="170"></a>
+  <img src="assets/logo.png" alt="the akua packaging toolkit" width="600">
 </p>
-<h1 align="center">akua</h1>
+
+<p align="center">
+  <b>The Unified Rendering Engine & K8s Config Packaging Toolkit</b>
+</p>
+
+<p align="center">
+  <audio controls src="assets/theme.mp3">
+    Your browser does not support the audio element.
+  </audio>
+</p>
 
 <p align="center">
   <a href="https://github.com/cnap-tech/akua/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/cnap-tech/akua/ci.yml?branch=main&label=CI&style=flat-square"></a>
@@ -9,6 +18,7 @@
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square"></a>
   <a href="#status"><img alt="Status" src="https://img.shields.io/badge/status-pre--alpha-orange?style=flat-square"></a>
 </p>
+
 
 ## What is akua?
 
