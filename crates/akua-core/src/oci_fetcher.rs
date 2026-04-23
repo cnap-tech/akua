@@ -101,6 +101,34 @@ pub enum OciFetchError {
     #[error("auth config parse error: {detail}")]
     AuthConfig { detail: String },
 
+    /// Cosign signature verification was requested (public key
+    /// configured) but failed. Distinct from `AuthRequired` — here
+    /// the registry talked to us just fine, but the signer check
+    /// didn't pan out.
+    #[cfg(feature = "cosign-verify")]
+    #[error("cosign verify failed for `{oci_ref}@{manifest_digest}`: {source}")]
+    CosignVerify {
+        oci_ref: String,
+        manifest_digest: String,
+        #[source]
+        source: crate::cosign::CosignError,
+    },
+
+    /// The cosign signature sidecar is missing on the registry.
+    /// Treated as a hard failure when a public key is configured:
+    /// opting into signing means "unsigned == unsafe."
+    #[cfg(feature = "cosign-verify")]
+    #[error(
+        "cosign signature for `{oci_ref}@{manifest_digest}` is missing or malformed at \
+         `{sig_tag}`: {detail}"
+    )]
+    CosignSignatureMissing {
+        oci_ref: String,
+        manifest_digest: String,
+        sig_tag: String,
+        detail: String,
+    },
+
     #[error("manifest for `{oci_ref}:{version}` has no helm chart layer (media type {HELM_CHART_LAYER_MEDIA_TYPE})")]
     NoChartLayer { oci_ref: String, version: String },
 
@@ -193,8 +221,29 @@ pub fn fetch_from_cache(cache_root: &Path, digest: &str) -> Option<FetchedChart>
     })
 }
 
+/// Knobs for [`fetch_with_opts`]. All fields named at the call-site
+/// so adding a new field isn't a breaking change for existing callers.
+#[derive(Debug)]
+pub struct FetchOpts<'a> {
+    /// Lockfile-pinned digest to verify against. `None` → accept
+    /// whatever the registry serves and record the digest for next
+    /// time (see `akua.lock`).
+    pub expected_digest: Option<&'a str>,
+
+    /// Auth source. Pass `&CredsStore::empty()` for anonymous pulls.
+    pub creds: &'a CredsStore,
+
+    /// Cosign public key (PEM-encoded) that must have signed this
+    /// chart's manifest. When `Some`, the fetcher also pulls the
+    /// `.sig` sidecar and verifies the signature — a mismatch fails
+    /// the pull hard with [`OciFetchError::CosignVerify`].
+    /// `None` → signing bypassed (current default for opt-in).
+    #[cfg(feature = "cosign-verify")]
+    pub cosign_public_key_pem: Option<&'a str>,
+}
+
 /// Fetch and extract a Helm OCI chart into `cache_root`. Convenience
-/// wrapper around [`fetch_with_creds`] that loads credentials from
+/// wrapper around [`fetch_with_opts`] that loads credentials from
 /// the standard config files (`~/.config/akua/auth.toml`,
 /// `~/.docker/config.json`). Credential parse errors bubble up as
 /// an `OciFetchError::AuthRequired` pointer at the config — better
@@ -209,12 +258,24 @@ pub fn fetch(
     let creds = oci_auth::CredsStore::load().map_err(|source| OciFetchError::AuthConfig {
         detail: source.to_string(),
     })?;
-    fetch_with_creds(oci_ref, version, cache_root, expected_digest, &creds)
+    fetch_with_opts(
+        oci_ref,
+        version,
+        cache_root,
+        &FetchOpts {
+            expected_digest,
+            creds: &creds,
+            #[cfg(feature = "cosign-verify")]
+            cosign_public_key_pem: None,
+        },
+    )
 }
 
 /// Like [`fetch`], but takes an explicit [`CredsStore`] so callers
 /// that build credentials programmatically (tests, `akua serve`
-/// tenants) don't pay the config-file round-trip per pull.
+/// tenants) don't pay the config-file round-trip per pull. Kept as
+/// a thin wrapper over [`fetch_with_opts`] for call-sites that
+/// don't care about cosign.
 pub fn fetch_with_creds(
     oci_ref: &str,
     version: &str,
@@ -222,6 +283,29 @@ pub fn fetch_with_creds(
     expected_digest: Option<&str>,
     creds: &CredsStore,
 ) -> Result<FetchedChart, OciFetchError> {
+    fetch_with_opts(
+        oci_ref,
+        version,
+        cache_root,
+        &FetchOpts {
+            expected_digest,
+            creds,
+            #[cfg(feature = "cosign-verify")]
+            cosign_public_key_pem: None,
+        },
+    )
+}
+
+/// Full-option variant. All the other `fetch*` entry points funnel
+/// through here.
+pub fn fetch_with_opts(
+    oci_ref: &str,
+    version: &str,
+    cache_root: &Path,
+    opts: &FetchOpts<'_>,
+) -> Result<FetchedChart, OciFetchError> {
+    let expected_digest = opts.expected_digest;
+    let creds = opts.creds;
     let parsed = parse_ref(oci_ref)?;
 
     // Fast path: if we know the digest (lockfile has it) and it's
@@ -261,6 +345,24 @@ pub fn fetch_with_creds(
         &mut token,
     )?;
     let manifest: OciManifest = serde_json::from_slice(&manifest_bytes)?;
+
+    // Cosign signs the manifest digest, so compute that up front.
+    // Registries may return a `Docker-Content-Digest` header with the
+    // same value; we compute from bytes for portability across
+    // registries (some proxies strip the header).
+    let manifest_digest = format!("sha256:{}", hex_encode(&Sha256::digest(&manifest_bytes)));
+
+    #[cfg(feature = "cosign-verify")]
+    if let Some(pub_key_pem) = opts.cosign_public_key_pem {
+        verify_cosign_signature(
+            &client,
+            &parsed,
+            &manifest_digest,
+            pub_key_pem,
+            registry_creds.as_ref(),
+            &mut token,
+        )?;
+    }
 
     let chart_layer = manifest
         .layers
@@ -361,6 +463,123 @@ fn find_chart_root(cache_dir: &Path) -> Result<PathBuf, OciFetchError> {
         "no Chart.yaml found under {}",
         cache_dir.display()
     )))
+}
+
+// --- Cosign signature pull + verify ---------------------------------------
+
+/// Cosign's signature manifest media types. The layer has its own
+/// distinct media type so we can pick it out reliably even on
+/// registries that hand back slightly different manifest shapes.
+#[cfg(feature = "cosign-verify")]
+const COSIGN_SIG_LAYER_MEDIA_TYPE: &str = "application/vnd.dev.cosign.simplesigning.v1+json";
+
+/// The annotation key cosign stashes the base64-encoded ECDSA
+/// signature under on the signature manifest's layer entry.
+#[cfg(feature = "cosign-verify")]
+const COSIGN_SIGNATURE_ANNOTATION: &str = "dev.cosignproject.cosign/signature";
+
+#[cfg(feature = "cosign-verify")]
+#[derive(Debug, Deserialize)]
+struct CosignSigManifest {
+    layers: Vec<CosignSigLayer>,
+}
+
+#[cfg(feature = "cosign-verify")]
+#[derive(Debug, Deserialize)]
+struct CosignSigLayer {
+    #[serde(rename = "mediaType")]
+    media_type: String,
+    digest: String,
+    #[serde(default)]
+    annotations: std::collections::HashMap<String, String>,
+}
+
+/// Pull `sha256-<hex>.sig` sidecar manifest + its payload blob and
+/// verify via [`crate::cosign::verify_keyed`]. All error paths funnel
+/// through `CosignSignatureMissing` or `CosignVerify` so the CLI can
+/// produce a distinct exit code.
+#[cfg(feature = "cosign-verify")]
+fn verify_cosign_signature(
+    client: &reqwest::blocking::Client,
+    parsed: &OciRef,
+    manifest_digest: &str,
+    public_key_pem: &str,
+    creds: Option<&Credentials>,
+    token: &mut TokenCache,
+) -> Result<(), OciFetchError> {
+    // Cosign's sig tag swaps `sha256:` for `sha256-` so it's a valid
+    // tag per the distribution spec (colons aren't allowed in tags).
+    let hex = manifest_digest
+        .strip_prefix("sha256:")
+        .unwrap_or(manifest_digest);
+    let sig_tag = format!("sha256-{hex}.sig");
+
+    let oci_ref = format!("oci://{}/{}", parsed.registry, parsed.repository);
+
+    let sig_manifest_url = format!(
+        "https://{}/v2/{}/manifests/{}",
+        parsed.registry, parsed.repository, sig_tag
+    );
+    let sig_manifest_bytes =
+        get_manifest(client, &sig_manifest_url, &parsed.registry, creds, token).map_err(
+            |source| OciFetchError::CosignSignatureMissing {
+                oci_ref: oci_ref.clone(),
+                manifest_digest: manifest_digest.to_string(),
+                sig_tag: sig_tag.clone(),
+                detail: source.to_string(),
+            },
+        )?;
+
+    let sig_manifest: CosignSigManifest = serde_json::from_slice(&sig_manifest_bytes).map_err(
+        |e| OciFetchError::CosignSignatureMissing {
+            oci_ref: oci_ref.clone(),
+            manifest_digest: manifest_digest.to_string(),
+            sig_tag: sig_tag.clone(),
+            detail: format!("manifest parse: {e}"),
+        },
+    )?;
+
+    let sig_layer = sig_manifest
+        .layers
+        .into_iter()
+        .find(|l| l.media_type == COSIGN_SIG_LAYER_MEDIA_TYPE)
+        .ok_or_else(|| OciFetchError::CosignSignatureMissing {
+            oci_ref: oci_ref.clone(),
+            manifest_digest: manifest_digest.to_string(),
+            sig_tag: sig_tag.clone(),
+            detail: format!("no layer with media type {COSIGN_SIG_LAYER_MEDIA_TYPE}"),
+        })?;
+
+    let signature_b64 = sig_layer
+        .annotations
+        .get(COSIGN_SIGNATURE_ANNOTATION)
+        .ok_or_else(|| OciFetchError::CosignSignatureMissing {
+            oci_ref: oci_ref.clone(),
+            manifest_digest: manifest_digest.to_string(),
+            sig_tag: sig_tag.clone(),
+            detail: format!("layer missing `{COSIGN_SIGNATURE_ANNOTATION}` annotation"),
+        })?
+        .clone();
+
+    let payload_url = format!(
+        "https://{}/v2/{}/blobs/{}",
+        parsed.registry, parsed.repository, sig_layer.digest
+    );
+    let payload_bytes = get_blob(client, &payload_url, &parsed.registry, creds, token).map_err(
+        |source| OciFetchError::CosignSignatureMissing {
+            oci_ref: oci_ref.clone(),
+            manifest_digest: manifest_digest.to_string(),
+            sig_tag: sig_tag.clone(),
+            detail: format!("payload blob: {source}"),
+        },
+    )?;
+
+    crate::cosign::verify_keyed(public_key_pem, &payload_bytes, &signature_b64, manifest_digest)
+        .map_err(|source| OciFetchError::CosignVerify {
+            oci_ref,
+            manifest_digest: manifest_digest.to_string(),
+            source,
+        })
 }
 
 // --- HTTP helpers ---------------------------------------------------------
