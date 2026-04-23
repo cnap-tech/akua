@@ -168,14 +168,23 @@ HTTP front end for concurrent render requests. Per-request `Store` with preopens
 
 ---
 
-## Phase 6 — Supply chain (2-3 weeks)
+## Phase 6 — Supply chain
 
-- [ ] cosign verification on OCI deps via `sigstore-rs`
-- [ ] SLSA v1 predicate generation on `akua publish`
+### Phase 6 slice A — keyed cosign verify (SHIPPED — 2026-04-22)
+
+- [x] `cosign` module: ECDSA P-256 keyed verification of simple-signing payloads, digest correlation with the fetched manifest.
+- [x] `oci_fetcher::fetch_with_opts` pulls the `sha256-<hex>.sig` sidecar + payload blob when a public key is configured; surfaces `CosignVerify` / `CosignSignatureMissing` distinctly.
+- [x] `akua.toml [signing] cosign_public_key = "./keys/cosign.pub"` config. `ResolverOptions.cosign_public_key_pem` threads through to the fetcher. `akua render` loads the key off disk.
+- [x] Typed CLI code `E_COSIGN_VERIFY` — agents branch on "bytes failed the supply-chain gate" separately from "couldn't resolve the chart."
+
+### Phase 6 slice B — deferred
+
+- [ ] Keyless verify via sigstore-rs (Fulcio cert chain + Rekor transparency log)
+- [ ] SLSA v1 predicate generation on `akua publish` (Phase 7 dependency)
 - [ ] `akua verify` walks the attestation chain — Package → deps → transitive deps
-- [ ] `akua.toml` `strictSigning: true` becomes default
+- [ ] `akua.toml` `strictSigning: true` makes the signing block mandatory on every OCI dep
 
-**Exit gate:** a published Package with a `charts.*` dep round-trips through `akua publish` → `akua pull` → `akua render` → `akua verify`, all signatures validated.
+**Exit gate (full phase):** A published Package with a `charts.*` dep round-trips through `akua publish` → `akua pull` → `akua render` → `akua verify`, all signatures validated. Slice A lands keyed verify; slice B closes the loop with keyless + SLSA once `akua publish` exists.
 
 ---
 

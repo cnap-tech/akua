@@ -35,6 +35,11 @@ pub const E_CHART_RESOLVE: &str = "E_CHART_RESOLVE";
 /// path instead of a typed `charts.*` import. Surfaces the Package
 /// authoring site that needs to migrate.
 pub const E_STRICT_UNTYPED_CHART: &str = "E_STRICT_UNTYPED_CHART";
+/// Cosign signature verification failed, or the sig sidecar was
+/// missing when a public key was configured. Distinct from
+/// `E_CHART_RESOLVE` so agents know "the chart is there but didn't
+/// pass the supply-chain gate."
+pub const E_COSIGN_VERIFY: &str = "E_COSIGN_VERIFY";
 
 // ----- Init ----------------------------------------------------------------
 

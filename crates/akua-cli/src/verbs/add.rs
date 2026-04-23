@@ -202,6 +202,7 @@ pub fn run<W: Write>(
         offline: false,
         cache_root: None,
         expected_digests,
+        cosign_public_key_pem: None, // akua add surfaces cosign via render / verify
     };
     // Best-effort: a dep pointing at a path that doesn't exist yet
     // (common in "add now, write chart later" flows) shouldn't block

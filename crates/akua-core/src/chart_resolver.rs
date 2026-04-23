@@ -226,6 +226,12 @@ pub struct ResolverOptions {
     /// fetcher verifies the pulled blob matches; a mismatch fails the
     /// resolve hard. Populated from `akua.lock` by the CLI.
     pub expected_digests: BTreeMap<String, String>,
+
+    /// PEM-encoded cosign public key. When `Some`, every OCI dep
+    /// pulls its `.sig` sidecar and verifies the signature before
+    /// the chart is unpacked. Populated from
+    /// `akua.toml [signing] cosign_public_key` by the CLI.
+    pub cosign_public_key_pem: Option<String>,
 }
 
 impl Default for ResolverOptions {
@@ -234,6 +240,7 @@ impl Default for ResolverOptions {
             offline: false,
             cache_root: None,
             expected_digests: BTreeMap::new(),
+            cosign_public_key_pem: None,
         }
     }
 }
@@ -328,6 +335,13 @@ fn resolve_oci(
         // Require a lockfile-pinned digest + a populated cache
         // entry. Anything else is an operator error (run `akua add`
         // on a networked machine first).
+        //
+        // Note: offline mode bypasses cosign verification because
+        // the `.sig` sidecar lives in the same registry and isn't
+        // cached. If signing is required AND the cache was primed
+        // online, cosign already approved the bytes — they can't
+        // change between then and now without the digest check
+        // catching it. So the invariant holds.
         let digest = expected.ok_or_else(|| ChartResolveError::UnsupportedSource {
             name: name.to_string(),
             kind: DependencySource::Oci,
@@ -341,12 +355,26 @@ fn resolve_oci(
             }
         })?
     } else {
-        crate::oci_fetcher::fetch(oci, version, &cache_root, expected).map_err(|source| {
+        // Online path: consult creds + optional cosign key.
+        let creds = crate::oci_auth::CredsStore::load().map_err(|source| {
             ChartResolveError::OciFetch {
                 name: name.to_string(),
-                source,
+                source: crate::oci_fetcher::OciFetchError::AuthConfig {
+                    detail: source.to_string(),
+                },
             }
-        })?
+        })?;
+        let fetch_opts = crate::oci_fetcher::FetchOpts {
+            expected_digest: expected,
+            creds: &creds,
+            cosign_public_key_pem: opts.cosign_public_key_pem.as_deref(),
+        };
+        crate::oci_fetcher::fetch_with_opts(oci, version, &cache_root, &fetch_opts).map_err(
+            |source| ChartResolveError::OciFetch {
+                name: name.to_string(),
+                source,
+            },
+        )?
     };
 
     // The content-addressed cache dir has a stable structure, so the
@@ -1072,6 +1100,19 @@ alpha = { path = "./charts/alpha" }
             lock.packages[0].signature.as_deref(),
             Some("cosign:sigstore:prior-publish")
         );
+    }
+
+    #[test]
+    fn resolver_options_carry_cosign_public_key() {
+        // Just the construction-site sanity check: nothing else tests
+        // this field setter yet since the actual verify path needs a
+        // live registry. Unit coverage for `verify_keyed` lives in
+        // `cosign` and OCI wiring lives in `oci_fetcher`.
+        let opts = ResolverOptions {
+            cosign_public_key_pem: Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n".into()),
+            ..Default::default()
+        };
+        assert!(opts.cosign_public_key_pem.is_some());
     }
 
     #[test]

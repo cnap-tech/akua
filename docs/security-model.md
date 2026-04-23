@@ -75,8 +75,9 @@ This is the current-state gap vs the target. See [docs/roadmap.md](roadmap.md) p
 | `akua verify` path-dep digest drift detection | Shipped — `PathDigestDrift` / `PathMissing` | ✅ Phase 2b C |
 | Render worker wrapped in wasmtime | Native binary — no sandbox | Phase 4 |
 | `akua serve` per-tenant isolation | Verb doesn't exist | Phase 5 |
-| cosign verification on OCI deps | Not implemented — lockfile digest verify only | Phase 6 |
-| SLSA attestation generation + chain walk | Not implemented | Phase 6 |
+| cosign keyed verification on OCI deps | Shipped — `[signing] cosign_public_key`, ECDSA P-256 | ✅ Phase 6 A |
+| cosign keyless (fulcio + rekor) verification | Not implemented | Phase 6 B |
+| SLSA attestation generation + chain walk | Not implemented — needs `akua publish` first | Phase 6 B |
 | Git dep checkout via `gix` | Shipped — pure Rust, no shell-out | ✅ Phase 2b C |
 | Private-repo OCI auth (docker config / akua auth.toml) | Shipped — Basic + bearer PAT | ✅ Phase 2b C |
 | Docker credential helpers | Not implemented — would require shell-out | Won't ship |

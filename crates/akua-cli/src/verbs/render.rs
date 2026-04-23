@@ -87,6 +87,13 @@ pub enum RenderError {
     #[error("resolving charts.*: {0}")]
     Charts(#[from] ChartResolveError),
 
+    #[error("reading cosign public key at {path}: {source}")]
+    CosignKeyIo {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+
     #[error("write to stdout failed: {0}")]
     StdoutWrite(#[source] std::io::Error),
 }
@@ -169,7 +176,25 @@ impl RenderError {
                 .to_structured()
                 .with_path(path.display().to_string()),
             RenderError::Charts(inner) => {
-                StructuredError::new(codes::E_CHART_RESOLVE, inner.to_string())
+                let code = match inner {
+                    ChartResolveError::OciFetch { source, .. } => match source {
+                        akua_core::oci_fetcher::OciFetchError::CosignVerify { .. }
+                        | akua_core::oci_fetcher::OciFetchError::CosignSignatureMissing { .. } => {
+                            codes::E_COSIGN_VERIFY
+                        }
+                        _ => codes::E_CHART_RESOLVE,
+                    },
+                    _ => codes::E_CHART_RESOLVE,
+                };
+                StructuredError::new(code, inner.to_string()).with_default_docs()
+            }
+            RenderError::CosignKeyIo { path, source } => {
+                StructuredError::new(codes::E_COSIGN_VERIFY, source.to_string())
+                    .with_path(path.display().to_string())
+                    .with_suggestion(
+                        "akua.toml [signing].cosign_public_key must resolve to a PEM-encoded \
+                         public key file, relative to the workspace.",
+                    )
                     .with_default_docs()
             }
             RenderError::StdoutWrite(e) => {
@@ -277,14 +302,38 @@ fn resolve_package_charts(
         Err(_) => Default::default(), // lock corruption surfaces via `akua verify`
     };
 
+    let cosign_public_key_pem = load_cosign_public_key(&manifest, workspace)?;
     let opts = ResolverOptions {
         offline,
         cache_root: None,
         expected_digests,
+        cosign_public_key_pem,
     };
     Ok(chart_resolver::resolve_with_options(
         &manifest, workspace, &opts,
     )?)
+}
+
+/// Read the cosign public key referenced by `[signing].cosign_public_key`
+/// off disk, relative to `workspace`. Returns `None` when no signing
+/// section or no key is configured — signing stays opt-in for
+/// back-compat.
+fn load_cosign_public_key(
+    manifest: &AkuaManifest,
+    workspace: &Path,
+) -> Result<Option<String>, RenderError> {
+    let Some(signing) = manifest.signing.as_ref() else {
+        return Ok(None);
+    };
+    let Some(rel) = signing.cosign_public_key.as_deref() else {
+        return Ok(None);
+    };
+    let key_path = workspace.join(rel);
+    let body = std::fs::read_to_string(&key_path).map_err(|source| RenderError::CosignKeyIo {
+        path: key_path.clone(),
+        source,
+    })?;
+    Ok(Some(body))
 }
 
 fn load_inputs(path: Option<&Path>) -> Result<serde_yaml::Value, RenderError> {

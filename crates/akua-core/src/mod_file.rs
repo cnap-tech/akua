@@ -21,11 +21,29 @@ pub struct AkuaManifest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<WorkspaceSection>,
 
+    /// Supply-chain signing policy. When `[signing].cosign_public_key`
+    /// is set, every OCI dep must pull with a matching cosign
+    /// signature or the resolver fails. Absent section → cosign
+    /// verification is off (Phase 2b B behavior preserved).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signing: Option<SigningSection>,
+
     /// Dependencies keyed by local alias (the name as it appears in `import`
     /// statements). `BTreeMap` canonicalizes order alphabetically on
     /// serialize — the on-disk order is not preserved across round-trip.
     #[serde(default)]
     pub dependencies: BTreeMap<String, Dependency>,
+}
+
+/// `[signing]` table. Phase 6 slice A exposes keyed cosign verification
+/// only. Keyless (fulcio + rekor) will land a sibling field.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SigningSection {
+    /// Filesystem path to a PEM-encoded P-256 cosign public key,
+    /// relative to the workspace root. Applies to every OCI dep in
+    /// this manifest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cosign_public_key: Option<String>,
 }
 
 /// `[package]` table.
