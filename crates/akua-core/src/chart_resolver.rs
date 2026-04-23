@@ -299,15 +299,119 @@ pub fn resolve_with_options(
                 entries.insert(name.clone(), resolve_path(name, path, workspace_root, src)?);
             }
             (None, Some(oci), None) => {
-                entries.insert(name.clone(), resolve_oci(name, dep, oci, opts)?);
+                // Vendor-first: if `akua publish` embedded this dep's
+                // chart tree at `.akua/vendor/<name>/`, resolve from
+                // there instead of pulling. `akua pull` populates
+                // that dir, so a pulled Package renders offline.
+                if let Some(chart) = resolve_from_vendor(name, workspace_root, oci, dep)? {
+                    entries.insert(name.clone(), chart);
+                } else {
+                    entries.insert(name.clone(), resolve_oci(name, dep, oci, opts)?);
+                }
             }
             (None, None, Some(git)) => {
-                entries.insert(name.clone(), resolve_git(name, dep, git, opts)?);
+                if let Some(chart) = resolve_from_vendor_git(name, workspace_root, git, dep)? {
+                    entries.insert(name.clone(), chart);
+                } else {
+                    entries.insert(name.clone(), resolve_git(name, dep, git, opts)?);
+                }
             }
             _ => unreachable!("manifest validation rejects ambiguous / empty sources"),
         }
     }
     Ok(ResolvedCharts { entries })
+}
+
+/// Name of the directory `akua publish` drops embedded dep content
+/// into. Convention — lives at `<workspace>/.akua/vendor/<dep-name>/`.
+pub const VENDOR_DIR: &str = ".akua/vendor";
+
+/// If a dep has been pre-vendored at `<workspace>/.akua/vendor/<name>/`,
+/// resolve from there instead of calling the network fetcher.
+/// Returns `Ok(None)` when the vendor dir is absent — the caller
+/// then falls through to the normal fetch path. Mirrors
+/// `ResolvedSource::Oci` so the lockfile shape is unchanged; the
+/// digest is the tree sha256 instead of the blob digest, which is
+/// the trade-off for offline pulls.
+fn resolve_from_vendor(
+    name: &str,
+    workspace_root: &Path,
+    oci: &str,
+    dep: &Dependency,
+) -> Result<Option<ResolvedChart>, ChartResolveError> {
+    let vendor_path = workspace_root.join(VENDOR_DIR).join(name);
+    if !vendor_path.is_dir() {
+        return Ok(None);
+    }
+    // Manifest validation guarantees `version` on OCI deps.
+    let version = dep
+        .version
+        .clone()
+        .unwrap_or_else(|| "vendored".to_string());
+    let chart = resolve_path(
+        name,
+        &vendor_path.to_string_lossy(),
+        workspace_root,
+        ResolvedSource::Oci {
+            oci: oci.to_string(),
+            version: version.clone(),
+            // `blob_digest` would be what the registry served; for
+            // a vendored Package we use the tree hash we just
+            // computed. Set to the same digest so lockfile checks
+            // still pin the bytes.
+            blob_digest: String::new(),
+        },
+    )?;
+    let sha = chart.sha256.clone();
+    Ok(Some(ResolvedChart {
+        source: ResolvedSource::Oci {
+            oci: oci.to_string(),
+            version,
+            blob_digest: sha,
+        },
+        ..chart
+    }))
+}
+
+fn resolve_from_vendor_git(
+    name: &str,
+    workspace_root: &Path,
+    git: &str,
+    dep: &Dependency,
+) -> Result<Option<ResolvedChart>, ChartResolveError> {
+    let vendor_path = workspace_root.join(VENDOR_DIR).join(name);
+    if !vendor_path.is_dir() {
+        return Ok(None);
+    }
+    let tag_or_rev = dep
+        .tag
+        .clone()
+        .or_else(|| dep.rev.clone())
+        .unwrap_or_else(|| "vendored".to_string());
+    let chart = resolve_path(
+        name,
+        &vendor_path.to_string_lossy(),
+        workspace_root,
+        ResolvedSource::Git {
+            git: git.to_string(),
+            tag_or_rev: tag_or_rev.clone(),
+            commit_sha: String::new(),
+        },
+    )?;
+    let commit = chart
+        .sha256
+        .strip_prefix("sha256:")
+        .unwrap_or(&chart.sha256)
+        .to_string();
+    Ok(Some(ResolvedChart {
+        sha256: format!("{}{}", crate::lock_file::GIT_DIGEST_PREFIX, commit),
+        source: ResolvedSource::Git {
+            git: git.to_string(),
+            tag_or_rev,
+            commit_sha: commit,
+        },
+        ..chart
+    }))
 }
 
 /// Resolve an OCI-sourced dep: fetch (or retrieve from cache) via
@@ -1113,6 +1217,76 @@ alpha = { path = "./charts/alpha" }
             ..Default::default()
         };
         assert!(opts.cosign_public_key_pem.is_some());
+    }
+
+    #[test]
+    fn vendored_oci_dep_resolves_locally_and_skips_network() {
+        let ws = tempfile::tempdir().unwrap();
+        // `akua publish` convention: chart content pre-populated at
+        // `.akua/vendor/<name>/`.
+        write_minimal_chart(&ws.path().join(".akua/vendor/nginx"));
+        let manifest = minimal_manifest(
+            r#"nginx = { oci = "oci://ghcr.io/acme/charts/nginx", version = "1.0.0" }"#,
+        );
+
+        // `resolve` defaults to `offline = true`, so a fetcher call
+        // would fail. If the vendor path works, no fetch attempt is
+        // made and we get a clean ResolvedChart.
+        let resolved = resolve(&manifest, ws.path()).expect("vendor resolves offline");
+        let nginx = resolved.entries.get("nginx").unwrap();
+        assert!(nginx.abs_path.ends_with(".akua/vendor/nginx"));
+        match &nginx.source {
+            ResolvedSource::Oci {
+                oci,
+                version,
+                blob_digest,
+            } => {
+                assert_eq!(oci, "oci://ghcr.io/acme/charts/nginx");
+                assert_eq!(version, "1.0.0");
+                // blob_digest is the recomputed tree sha, not empty.
+                assert!(blob_digest.starts_with("sha256:"));
+            }
+            other => panic!("expected ResolvedSource::Oci, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn vendored_git_dep_resolves_locally() {
+        let ws = tempfile::tempdir().unwrap();
+        write_minimal_chart(&ws.path().join(".akua/vendor/libs"));
+        let manifest = minimal_manifest(
+            r#"libs = { git = "https://github.com/foo/bar", tag = "v1.0.0" }"#,
+        );
+        let resolved = resolve(&manifest, ws.path()).expect("vendor resolves offline");
+        let libs = resolved.entries.get("libs").unwrap();
+        match &libs.source {
+            ResolvedSource::Git {
+                git,
+                tag_or_rev,
+                commit_sha,
+            } => {
+                assert_eq!(git, "https://github.com/foo/bar");
+                assert_eq!(tag_or_rev, "v1.0.0");
+                assert!(!commit_sha.is_empty());
+            }
+            other => panic!("expected ResolvedSource::Git, got {other:?}"),
+        }
+        assert!(libs.sha256.starts_with("git:"));
+    }
+
+    #[test]
+    fn missing_vendor_dir_falls_through_to_normal_resolver() {
+        // Without vendor + offline mode, the normal offline-mode
+        // OCI rejection fires.
+        let ws = tempfile::tempdir().unwrap();
+        let manifest = minimal_manifest(
+            r#"nginx = { oci = "oci://r/n", version = "1.0.0" }"#,
+        );
+        let err = resolve(&manifest, ws.path()).unwrap_err();
+        assert!(
+            matches!(err, ChartResolveError::UnsupportedSource { .. }),
+            "got: {err:?}"
+        );
     }
 
     #[test]
