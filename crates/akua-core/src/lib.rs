@@ -16,6 +16,8 @@
 
 #[cfg(feature = "engine-kcl")]
 pub mod chart_resolver;
+#[cfg(feature = "git-fetch")]
+pub mod git_fetcher;
 #[cfg(feature = "oci-fetch")]
 pub mod oci_auth;
 #[cfg(feature = "oci-fetch")]

@@ -117,7 +117,7 @@ pub enum LockError {
     #[error("package `{0}` appears multiple times at the same version")]
     DuplicatePackage(String),
 
-    #[error("package `{0}`: digest must start with `sha256:`")]
+    #[error("package `{0}`: digest must start with `sha256:` (OCI/path dep) or `git:` (git dep)")]
     BadDigest(String),
 }
 
@@ -228,9 +228,10 @@ impl AkuaLock {
             }
         }
         for pkg in &self.packages {
-            // Digest check: OCI + git sources use sha256. If we ever add a
-            // non-sha256 algorithm, this check grows.
-            if !pkg.digest.starts_with("sha256:") {
+            // Supported digest schemes: `sha256:` (OCI / path-dep
+            // content hash) and `git:` (git commit SHA-1 from
+            // `git_fetcher`). Adding more means extending this list.
+            if !(pkg.digest.starts_with("sha256:") || pkg.digest.starts_with("git:")) {
                 return Err(LockError::BadDigest(pkg.name.clone()));
             }
         }

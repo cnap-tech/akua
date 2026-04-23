@@ -8,7 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-default = ["engine-kcl", "engine-helm", "engine-kustomize", "oci-fetch"]
+default = ["engine-kcl", "engine-helm", "engine-kustomize", "oci-fetch", "git-fetch"]
 # KCL engine — native Rust via kcl-lang/lib (git dep).
 engine-kcl = ["dep:kcl-lang", "dep:sha2", "dep:tempfile"]
 # Embedded Helm v4 template engine. Go source in crates/helm-engine-wasm/
@@ -24,6 +24,12 @@ engine-kustomize = ["dep:kustomize-engine-wasm"]
 # for offline-only builds (lockfile-only, no resolution against
 # remote registries).
 oci-fetch = ["dep:reqwest", "dep:flate2", "dep:tar", "dep:base64"]
+# Git chart fetch. Pulls charts hosted in git repos via `gix` (pure
+# Rust, no shell-out). Disabled by default — the dep tree is large
+# and the feature is opt-in for ops who actually use git charts.
+# Public HTTPS + file:// URLs supported; ssh:// + private-repo auth
+# are follow-ups.
+git-fetch = ["dep:gix"]
 
 [dependencies]
 serde = { workspace = true }
@@ -44,6 +50,10 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
 base64 = { version = "0.22", optional = true }
+# `blocking-http-transport-reqwest-rust-tls` reuses the reqwest stack
+# we already pull in for oci-fetch; `max-performance-safe` keeps
+# compile time reasonable (skips `zlib-ng` optional perf wins).
+gix = { version = "0.66", default-features = false, features = ["blocking-http-transport-reqwest-rust-tls", "max-performance-safe", "worktree-mutation"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"

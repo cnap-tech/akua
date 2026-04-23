@@ -74,6 +74,16 @@ pub enum ResolvedSource {
         replace_path: String,
     },
 
+    /// Git-sourced dep, fetched via `git_fetcher`. `commit_sha` is
+    /// the resolved full 40-hex git SHA-1; lockfile stores it under
+    /// `digest` with a `git:` prefix so it doesn't collide with OCI's
+    /// `sha256:` scheme.
+    Git {
+        git: String,
+        tag_or_rev: String,
+        commit_sha: String,
+    },
+
     /// Git-sourced dep with a `replace` override. Same semantics as
     /// `OciReplaced`.
     GitReplaced {
@@ -109,6 +119,15 @@ impl ResolvedSource {
                 Some(Replaced {
                     path: replace_path.clone(),
                 }),
+            ),
+            ResolvedSource::Git {
+                git,
+                tag_or_rev,
+                ..
+            } => (
+                format!("git+{git}@{tag_or_rev}"),
+                tag_or_rev.clone(),
+                None,
             ),
             ResolvedSource::GitReplaced {
                 git,
@@ -172,6 +191,15 @@ pub enum ChartResolveError {
         name: String,
         #[source]
         source: crate::oci_fetcher::OciFetchError,
+    },
+
+    /// A `git_fetcher::fetch` call failed.
+    #[cfg(feature = "git-fetch")]
+    #[error("chart `{name}`: git fetch failed: {source}")]
+    GitFetch {
+        name: String,
+        #[source]
+        source: crate::git_fetcher::GitFetchError,
     },
 }
 
@@ -266,12 +294,8 @@ pub fn resolve_with_options(
             (None, Some(oci), None) => {
                 entries.insert(name.clone(), resolve_oci(name, dep, oci, opts)?);
             }
-            (None, None, Some(_)) => {
-                return Err(ChartResolveError::UnsupportedSource {
-                    name: name.clone(),
-                    kind: DependencySource::Git,
-                    reason: "git deps land Phase 2b slice C; use `replace = { path = \"...\" }` to source from a local clone in the meantime",
-                });
+            (None, None, Some(git)) => {
+                entries.insert(name.clone(), resolve_git(name, dep, git, opts)?);
             }
             _ => unreachable!("manifest validation rejects ambiguous / empty sources"),
         }
@@ -354,22 +378,126 @@ fn resolve_oci(
     })
 }
 
+/// Resolve a git-sourced dep: clone + checkout via `git_fetcher`,
+/// digest (commit SHA) written into [`ResolvedSource::Git`].
+#[cfg(feature = "git-fetch")]
+fn resolve_git(
+    name: &str,
+    dep: &Dependency,
+    git: &str,
+    opts: &ResolverOptions,
+) -> Result<ResolvedChart, ChartResolveError> {
+    use crate::git_fetcher::{self, RefSpec};
+
+    // tag wins over rev when both are set (matches the replace-path
+    // flow). Manifest validation guarantees at least one is present.
+    let ref_spec = if let Some(tag) = dep.tag.as_deref() {
+        RefSpec::Tag(tag.to_string())
+    } else if let Some(rev) = dep.rev.as_deref() {
+        RefSpec::Rev(rev.to_string())
+    } else {
+        unreachable!("manifest validation rejects git deps without tag or rev");
+    };
+    let tag_or_rev = match &ref_spec {
+        RefSpec::Tag(t) => t.clone(),
+        RefSpec::Rev(r) => r.clone(),
+    };
+
+    let cache_root = opts
+        .cache_root
+        .clone()
+        .unwrap_or_else(default_git_cache_root);
+
+    // The lockfile stores the commit SHA under `digest` with a `git:`
+    // prefix. Strip it back to raw hex for the fetcher; the prefix
+    // is a lock-layer concern.
+    let expected_commit = opts
+        .expected_digests
+        .get(name)
+        .and_then(|d| d.strip_prefix("git:").map(str::to_string));
+
+    let fetched = if opts.offline {
+        let expected = expected_commit.as_deref().ok_or_else(|| {
+            ChartResolveError::UnsupportedSource {
+                name: name.to_string(),
+                kind: DependencySource::Git,
+                reason: "offline mode needs a lockfile-pinned commit — run `akua add` first",
+            }
+        })?;
+        git_fetcher::fetch_from_cache(git, &cache_root, expected).ok_or_else(|| {
+            ChartResolveError::UnsupportedSource {
+                name: name.to_string(),
+                kind: DependencySource::Git,
+                reason: "offline mode and the git cache doesn't have this commit — run `akua add` online first",
+            }
+        })?
+    } else {
+        git_fetcher::fetch(git, &ref_spec, &cache_root, expected_commit.as_deref()).map_err(
+            |source| ChartResolveError::GitFetch {
+                name: name.to_string(),
+                source,
+            },
+        )?
+    };
+
+    let commit_sha = fetched.commit_sha.clone();
+    Ok(ResolvedChart {
+        name: name.to_string(),
+        abs_path: fetched.chart_dir,
+        // For git deps the lockfile digest is the commit SHA (git-
+        // native content-address). Prefixed `git:` so it doesn't
+        // collide with OCI `sha256:` in the digest-prefix validator.
+        sha256: format!("git:{commit_sha}"),
+        source: ResolvedSource::Git {
+            git: git.to_string(),
+            tag_or_rev,
+            commit_sha,
+        },
+    })
+}
+
+#[cfg(not(feature = "git-fetch"))]
+fn resolve_git(
+    name: &str,
+    _dep: &Dependency,
+    _git: &str,
+    _opts: &ResolverOptions,
+) -> Result<ResolvedChart, ChartResolveError> {
+    Err(ChartResolveError::UnsupportedSource {
+        name: name.to_string(),
+        kind: DependencySource::Git,
+        reason: "git-fetch feature disabled at compile time",
+    })
+}
+
 /// Default cache root: `$XDG_CACHE_HOME/akua/oci` with a fallback to
 /// `$HOME/.cache/akua/oci`, and finally `./.akua/cache/oci` when both
 /// env vars are absent (CI sandboxes, nix builds).
 #[cfg(feature = "oci-fetch")]
 fn default_oci_cache_root() -> PathBuf {
+    default_cache_root("oci")
+}
+
+/// Default git cache root. Same resolver as OCI, different subdir
+/// so the two caches don't mix.
+#[cfg(feature = "git-fetch")]
+fn default_git_cache_root() -> PathBuf {
+    default_cache_root("git")
+}
+
+#[cfg(any(feature = "oci-fetch", feature = "git-fetch"))]
+fn default_cache_root(subdir: &str) -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
         if !xdg.is_empty() {
-            return PathBuf::from(xdg).join("akua/oci");
+            return PathBuf::from(xdg).join("akua").join(subdir);
         }
     }
     if let Ok(home) = std::env::var("HOME") {
         if !home.is_empty() {
-            return PathBuf::from(home).join(".cache/akua/oci");
+            return PathBuf::from(home).join(".cache/akua").join(subdir);
         }
     }
-    PathBuf::from(".akua/cache/oci")
+    PathBuf::from(".akua/cache").join(subdir)
 }
 
 /// Build the `ResolvedSource::*Replaced` variant from a dep that has
