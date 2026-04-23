@@ -121,8 +121,11 @@ enum Commands {
 
     /// Run `test_*.k` / `*_test.k` files in the workspace. Each
     /// test is a standalone KCL program; `assert` / `check:`
-    /// failures are reported as test failures. Exits non-zero on
-    /// any failure.
+    /// failures are reported as test failures. `--golden` also runs
+    /// snapshot diffs of every package.k against
+    /// `snapshots/<pkg>/<inputs-stem>/`; `--update-snapshots`
+    /// regenerates those snapshots (implies `--golden`). Exits
+    /// non-zero on any failure.
     Test {
         #[command(flatten)]
         args: UniversalArgs,
@@ -130,6 +133,14 @@ enum Commands {
         /// Workspace root.
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
+
+        /// Run golden snapshot tests in addition to assertion tests.
+        #[arg(long)]
+        golden: bool,
+
+        /// Rewrite snapshot files rather than diff. Implies --golden.
+        #[arg(long)]
+        update_snapshots: bool,
     },
 
     /// Print the workspace's declared deps + lockfile entries.
@@ -353,7 +364,12 @@ fn dispatch(command: Commands) -> ExitCode {
             ignore_missing,
             workspace,
         } => run_remove(&args, &name, ignore_missing, &workspace),
-        Commands::Test { args, workspace } => run_test(&args, &workspace),
+        Commands::Test {
+            args,
+            workspace,
+            golden,
+            update_snapshots,
+        } => run_test(&args, &workspace, golden, update_snapshots),
         Commands::Tree { args, workspace } => run_tree(&args, &workspace),
         Commands::Add {
             args,
@@ -411,9 +427,18 @@ fn run_publish(
     }
 }
 
-fn run_test(args: &UniversalArgs, workspace: &std::path::Path) -> ExitCode {
+fn run_test(
+    args: &UniversalArgs,
+    workspace: &std::path::Path,
+    golden: bool,
+    update_snapshots: bool,
+) -> ExitCode {
     let ctx = resolve_ctx(args);
-    let verb_args = test_verb::TestArgs { workspace };
+    let verb_args = test_verb::TestArgs {
+        workspace,
+        golden,
+        update_snapshots,
+    };
     let mut stdout = io::stdout().lock();
     match test_verb::run(&ctx, &verb_args, &mut stdout) {
         Ok(code) => code,
