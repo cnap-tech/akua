@@ -220,9 +220,15 @@ HTTP front end for concurrent render requests. Per-request `Store` with preopens
 - [x] `akua publish` reads `$AKUA_COSIGN_PASSPHRASE`. No `--passphrase` CLI flag — argv leaks to `ps`.
 - [x] Missing passphrase on encrypted key surfaces a clear error naming the env var.
 
+### Phase 7 slice C — vendored deps (SHIPPED — 2026-04-22)
+
+- [x] `akua publish` resolves non-path deps + embeds each chart tree at `.akua/vendor/<name>/` in the tarball. Resolver failures print a loud stderr warning — no silent un-vendored publishes.
+- [x] Resolver consults `<workspace>/.akua/vendor/<name>/` before attempting network fetch. Offline-after-pull renders now succeed for a published Package with OCI or git deps.
+- [x] End-to-end round-trip integration test: pack-with-vendor → unpack → offline resolve → assert nginx resolved from `.akua/vendor/` with matching digest.
+
 ### Phase 7 slice C — still deferred
 
-- [ ] Vendor resolved deps into OCI layers so pull is network-free
+- (none — slice C complete)
 
 **Exit gate (full phase):** Published Package round-trips `akua publish` → `akua pull` → `akua render` with cosign signatures validated at each hop. ✅ slice A covers the core round-trip; slice B adds SLSA + offline-render-from-published-digests on top.
 

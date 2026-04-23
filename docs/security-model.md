@@ -83,6 +83,7 @@ This is the current-state gap vs the target. See [docs/roadmap.md](roadmap.md) p
 | `akua verify` attestation chain walk | Shipped — pulls `.att` sidecars + DSSE verify + subject-digest check for every OCI dep | ✅ Phase 7 C |
 | Recursive attestation walk over transitive deps | Not implemented — needs published Package to attest its own deps | Phase 7 C (follow-up) |
 | Encrypted cosign private keys — PKCS#8 PBES2 | Shipped — `$AKUA_COSIGN_PASSPHRASE` env var | ✅ Phase 7 C |
+| OCI-vendored deps → network-free `akua render` after pull | Shipped — `.akua/vendor/<name>/` convention | ✅ Phase 7 C |
 | HSM / cosign-native key format | Not implemented | Phase 7 D |
 | Git dep checkout via `gix` | Shipped — pure Rust, no shell-out | ✅ Phase 2b C |
 | Private-repo OCI auth (docker config / akua auth.toml) | Shipped — Basic + bearer PAT | ✅ Phase 2b C |

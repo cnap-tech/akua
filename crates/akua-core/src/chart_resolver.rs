@@ -303,14 +303,18 @@ pub fn resolve_with_options(
                 // chart tree at `.akua/vendor/<name>/`, resolve from
                 // there instead of pulling. `akua pull` populates
                 // that dir, so a pulled Package renders offline.
-                if let Some(chart) = resolve_from_vendor(name, workspace_root, oci, dep)? {
+                if let Some(chart) =
+                    resolve_from_vendor(name, workspace_root, dep, vendor_kind_oci(oci, dep))?
+                {
                     entries.insert(name.clone(), chart);
                 } else {
                     entries.insert(name.clone(), resolve_oci(name, dep, oci, opts)?);
                 }
             }
             (None, None, Some(git)) => {
-                if let Some(chart) = resolve_from_vendor_git(name, workspace_root, git, dep)? {
+                if let Some(chart) =
+                    resolve_from_vendor(name, workspace_root, dep, vendor_kind_git(git, dep))?
+                {
                     entries.insert(name.clone(), chart);
                 } else {
                     entries.insert(name.clone(), resolve_git(name, dep, git, opts)?);
@@ -326,92 +330,91 @@ pub fn resolve_with_options(
 /// into. Convention — lives at `<workspace>/.akua/vendor/<dep-name>/`.
 pub const VENDOR_DIR: &str = ".akua/vendor";
 
+/// Which flavor of vendored dep we're materializing. Carries the
+/// canonical-source metadata [`ResolvedSource`] needs post-hash.
+enum VendorKind<'a> {
+    Oci { oci: &'a str, version: String },
+    Git { git: &'a str, tag_or_rev: String },
+}
+
 /// If a dep has been pre-vendored at `<workspace>/.akua/vendor/<name>/`,
 /// resolve from there instead of calling the network fetcher.
 /// Returns `Ok(None)` when the vendor dir is absent — the caller
-/// then falls through to the normal fetch path. Mirrors
-/// `ResolvedSource::Oci` so the lockfile shape is unchanged; the
-/// digest is the tree sha256 instead of the blob digest, which is
-/// the trade-off for offline pulls.
+/// falls through to the normal fetch path. Mirrors
+/// `ResolvedSource::Oci` / `::Git` so the lockfile shape is
+/// unchanged; the digest is the recomputed tree sha256 (for Oci) or
+/// the `git:<tree-sha>` blend (for Git) — trade-off for offline pulls.
 fn resolve_from_vendor(
     name: &str,
     workspace_root: &Path,
-    oci: &str,
     dep: &Dependency,
+    kind: VendorKind<'_>,
 ) -> Result<Option<ResolvedChart>, ChartResolveError> {
+    let _ = dep; // reserved for future vendor-time consistency checks
     let vendor_path = workspace_root.join(VENDOR_DIR).join(name);
     if !vendor_path.is_dir() {
         return Ok(None);
     }
-    // Manifest validation guarantees `version` on OCI deps.
-    let version = dep
-        .version
-        .clone()
-        .unwrap_or_else(|| "vendored".to_string());
-    let chart = resolve_path(
-        name,
-        &vendor_path.to_string_lossy(),
-        workspace_root,
-        ResolvedSource::Oci {
-            oci: oci.to_string(),
+    // Seed source with a placeholder digest; resolve_path hashes the
+    // tree + assigns `sha256:<hex>`. We patch the source variant
+    // with that digest in-place so the ResolvedChart is built once.
+    let placeholder = match &kind {
+        VendorKind::Oci { oci, version } => ResolvedSource::Oci {
+            oci: (*oci).to_string(),
             version: version.clone(),
-            // `blob_digest` would be what the registry served; for
-            // a vendored Package we use the tree hash we just
-            // computed. Set to the same digest so lockfile checks
-            // still pin the bytes.
             blob_digest: String::new(),
         },
-    )?;
-    let sha = chart.sha256.clone();
-    Ok(Some(ResolvedChart {
-        source: ResolvedSource::Oci {
-            oci: oci.to_string(),
-            version,
-            blob_digest: sha,
-        },
-        ..chart
-    }))
-}
-
-fn resolve_from_vendor_git(
-    name: &str,
-    workspace_root: &Path,
-    git: &str,
-    dep: &Dependency,
-) -> Result<Option<ResolvedChart>, ChartResolveError> {
-    let vendor_path = workspace_root.join(VENDOR_DIR).join(name);
-    if !vendor_path.is_dir() {
-        return Ok(None);
-    }
-    let tag_or_rev = dep
-        .tag
-        .clone()
-        .or_else(|| dep.rev.clone())
-        .unwrap_or_else(|| "vendored".to_string());
-    let chart = resolve_path(
-        name,
-        &vendor_path.to_string_lossy(),
-        workspace_root,
-        ResolvedSource::Git {
-            git: git.to_string(),
+        VendorKind::Git { git, tag_or_rev } => ResolvedSource::Git {
+            git: (*git).to_string(),
             tag_or_rev: tag_or_rev.clone(),
             commit_sha: String::new(),
         },
+    };
+    let mut chart = resolve_path(
+        name,
+        &vendor_path.to_string_lossy(),
+        workspace_root,
+        placeholder,
     )?;
-    let commit = chart
-        .sha256
-        .strip_prefix("sha256:")
-        .unwrap_or(&chart.sha256)
-        .to_string();
-    Ok(Some(ResolvedChart {
-        sha256: format!("{}{}", crate::lock_file::GIT_DIGEST_PREFIX, commit),
-        source: ResolvedSource::Git {
-            git: git.to_string(),
-            tag_or_rev,
-            commit_sha: commit,
-        },
-        ..chart
-    }))
+    match &mut chart.source {
+        ResolvedSource::Oci { blob_digest, .. } => {
+            *blob_digest = chart.sha256.clone();
+        }
+        ResolvedSource::Git { commit_sha, .. } => {
+            // Commit SHA is stored raw hex (no prefix) in
+            // ResolvedSource; the lockfile digest re-prefixes it.
+            let raw = chart
+                .sha256
+                .strip_prefix("sha256:")
+                .unwrap_or(&chart.sha256)
+                .to_string();
+            *commit_sha = raw.clone();
+            chart.sha256 = format!("{}{}", crate::lock_file::GIT_DIGEST_PREFIX, raw);
+        }
+        _ => {}
+    }
+    Ok(Some(chart))
+}
+
+fn vendor_kind_oci<'a>(oci: &'a str, dep: &Dependency) -> VendorKind<'a> {
+    VendorKind::Oci {
+        oci,
+        version: dep
+            .version
+            .clone()
+            .unwrap_or_else(|| "vendored".to_string()),
+    }
+}
+
+fn vendor_kind_git<'a>(git: &'a str, dep: &Dependency) -> VendorKind<'a> {
+    VendorKind::Git {
+        git,
+        tag_or_rev: dep
+            .tag
+            .clone()
+            .or_else(|| dep.rev.clone())
+            .unwrap_or_else(|| "vendored".to_string()),
+    }
 }
 
 /// Resolve an OCI-sourced dep: fetch (or retrieve from cache) via

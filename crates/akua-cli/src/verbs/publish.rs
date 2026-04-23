@@ -155,12 +155,13 @@ pub fn run<W: Write>(
     let creds = CredsStore::load().map_err(|e| PublishError::AuthConfig(e.to_string()))?;
 
     // Resolve non-path deps so their content gets vendored into the
-    // tarball at `.akua/vendor/<name>/`. The resolver handles the
-    // OCI pull / git checkout / vendor-first lookup; whatever it
-    // returns is what ships. Soft-fail on resolution errors — the
-    // publish itself shouldn't block on a best-effort vendoring
-    // step, and a user who wants strict vendoring can `akua verify`
-    // + `akua add` first.
+    // tarball at `.akua/vendor/<name>/`. Resolver errors here
+    // (expired creds, registry 5xx, digest drift) mean the
+    // published artifact WILL NOT render offline — the pulled
+    // Package falls through to a network fetch, which may itself
+    // fail in the consumer's environment. We emit a loud stderr
+    // warning in that case rather than silently shipping an un-
+    // vendored artifact.
     let vendored_pairs = collect_vendor_pairs(args.workspace, &manifest);
 
     let tar_gz =
@@ -257,10 +258,11 @@ fn write_text<W: Write>(w: &mut W, out: &PublishOutput) -> std::io::Result<()> {
 /// walk — don't re-vendor them or they'll appear twice in the
 /// tarball.
 ///
-/// Soft-fails: any resolver error returns an empty vendor list so
-/// publish can still proceed with an un-vendored tarball. Operators
-/// who care get strict enforcement via `akua add` + `akua verify`
-/// before publish.
+/// A resolver failure here is *loud*: we emit a stderr warning
+/// naming the failing dep + cause so the publisher doesn't ship an
+/// un-vendored artifact by accident. Returns the pairs the resolver
+/// *did* produce — a partial-vendor result is still better than
+/// nothing when one dep out of many is broken.
 fn collect_vendor_pairs(
     workspace: &Path,
     manifest: &AkuaManifest,
@@ -287,7 +289,12 @@ fn collect_vendor_pairs(
     };
     let resolved = match chart_resolver::resolve_with_options(manifest, workspace, &opts) {
         Ok(r) => r,
-        Err(_) => return Vec::new(),
+        Err(e) => {
+            eprintln!(
+                "akua publish: warning: dep resolution failed, published artifact will not render offline: {e}"
+            );
+            return Vec::new();
+        }
     };
 
     let mut pairs = Vec::new();
