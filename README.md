@@ -1,7 +1,9 @@
+
 <p align="center">
-  <a href="https://akua.dev"><img src="docs/mascot.png" alt="akua mascot" height="170"></a>
+<img alt="akua mascot" height="256" src="https://github.com/user-attachments/assets/9a3635fa-2096-4c47-9fe9-542129012760" />
 </p>
-<h1 align="center">akua</h1>
+
+<h1 align="center">the Akua packaging toolkit</h1>
 
 <p align="center">
   <a href="https://github.com/cnap-tech/akua/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/cnap-tech/akua/ci.yml?branch=main&label=CI&style=flat-square"></a>
