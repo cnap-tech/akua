@@ -12,7 +12,7 @@ use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::{
     add as add_verb, check as check_verb, diff as diff_verb, fmt as fmt_verb, init as init_verb,
     inspect as inspect_verb, lint as lint_verb, publish as publish_verb, pull as pull_verb,
-    remove as remove_verb, render as render_verb,
+    remove as remove_verb, render as render_verb, test as test_verb,
     tree as tree_verb, verify as verify_verb, version as version_verb, whoami as whoami_verb,
 };
 use akua_core::cli_contract::{AgentContext, ExitCode, StructuredError};
@@ -115,6 +115,19 @@ enum Commands {
         force: bool,
 
         /// Workspace root containing akua.toml.
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
+    },
+
+    /// Run `test_*.k` / `*_test.k` files in the workspace. Each
+    /// test is a standalone KCL program; `assert` / `check:`
+    /// failures are reported as test failures. Exits non-zero on
+    /// any failure.
+    Test {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Workspace root.
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
     },
@@ -340,6 +353,7 @@ fn dispatch(command: Commands) -> ExitCode {
             ignore_missing,
             workspace,
         } => run_remove(&args, &name, ignore_missing, &workspace),
+        Commands::Test { args, workspace } => run_test(&args, &workspace),
         Commands::Tree { args, workspace } => run_tree(&args, &workspace),
         Commands::Add {
             args,
@@ -392,6 +406,16 @@ fn run_publish(
     };
     let mut stdout = io::stdout().lock();
     match publish_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
+    }
+}
+
+fn run_test(args: &UniversalArgs, workspace: &std::path::Path) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = test_verb::TestArgs { workspace };
+    let mut stdout = io::stdout().lock();
+    match test_verb::run(&ctx, &verb_args, &mut stdout) {
         Ok(code) => code,
         Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }

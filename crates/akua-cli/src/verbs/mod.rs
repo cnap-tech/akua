@@ -15,6 +15,7 @@ pub mod publish;
 pub mod pull;
 pub mod remove;
 pub mod render;
+pub mod test;
 pub mod tree;
 pub mod verify;
 pub mod version;

@@ -88,6 +88,12 @@ pub const E_PUBLISH_FAILED: &str = "E_PUBLISH_FAILED";
 /// `akua pull` couldn't retrieve / extract the requested artifact.
 pub const E_PULL_FAILED: &str = "E_PULL_FAILED";
 
+// ----- Test ----------------------------------------------------------------
+
+/// `akua test` — at least one test file's evaluation failed
+/// (assertion, `check:` block, or KCL parse / type error).
+pub const E_TEST_FAIL: &str = "E_TEST_FAIL";
+
 // ----- General -------------------------------------------------------------
 
 pub const E_IO: &str = "E_IO";
