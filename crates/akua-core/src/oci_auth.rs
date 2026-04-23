@@ -13,10 +13,10 @@
 //! First match wins. Both files are optional — absent files degrade
 //! to anonymous pulls, which is what Phase 2b slice B already shipped.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Credentials for a single registry host. Either basic (sent as
 /// `Authorization: Basic <b64>` on the manifest request) or a raw
@@ -159,20 +159,37 @@ pub enum ParseBackend {
 
 // --- File shapes -----------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 struct AkuaAuthFile {
-    #[serde(default)]
-    registries: HashMap<String, AkuaAuthEntry>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    registries: BTreeMap<String, AkuaAuthEntry>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct AkuaAuthEntry {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     username: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     password: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     token: Option<String>,
+}
+
+impl AkuaAuthEntry {
+    fn from_credentials(creds: &Credentials) -> Self {
+        match creds {
+            Credentials::Basic { username, password } => AkuaAuthEntry {
+                username: Some(username.clone()),
+                password: Some(password.clone()),
+                token: None,
+            },
+            Credentials::Bearer { token } => AkuaAuthEntry {
+                username: None,
+                password: None,
+                token: Some(token.clone()),
+            },
+        }
+    }
 }
 
 impl AkuaAuthEntry {
@@ -235,6 +252,157 @@ impl DockerAuthEntry {
             _ => None,
         }
     }
+}
+
+// --- Write helpers + enumeration -------------------------------------------
+
+/// Summary of one configured registry — returned by [`list_sources`].
+/// `secret` is deliberately elided; the only shape exposed is
+/// `auth_kind` ("basic" | "bearer") so tooling can display a table
+/// without pulling passwords into memory beyond the parse.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct RegistrySummary {
+    pub registry: String,
+    /// `"akua"`, `"docker"`, or `"both"` when the same registry
+    /// appears in both files.
+    pub source: &'static str,
+    /// `"basic"` or `"bearer"`.
+    pub auth_kind: &'static str,
+}
+
+/// List every configured registry across both sources with no
+/// secret material leaked. Missing files degrade to their own
+/// half of the merge — same as [`CredsStore::load`].
+pub fn list_sources() -> Result<Vec<RegistrySummary>, AuthLoadError> {
+    let mut by_registry: BTreeMap<String, (bool, bool, &'static str)> = BTreeMap::new();
+
+    if let Some(path) = akua_auth_path() {
+        if path.exists() {
+            let body = read_string(&path)?;
+            let parsed: AkuaAuthFile =
+                toml::from_str(&body).map_err(|source| AuthLoadError::Parse {
+                    path: path.clone(),
+                    source: ParseBackend::Toml(source),
+                })?;
+            for (registry, entry) in parsed.registries {
+                let kind = if entry.token.is_some() { "bearer" } else { "basic" };
+                by_registry
+                    .entry(registry)
+                    .and_modify(|v| {
+                        v.0 = true;
+                        v.2 = kind;
+                    })
+                    .or_insert((true, false, kind));
+            }
+        }
+    }
+    if let Some(path) = docker_config_path() {
+        if path.exists() {
+            let body = read_string(&path)?;
+            let parsed: DockerConfig =
+                serde_json::from_str(&body).map_err(|source| AuthLoadError::Parse {
+                    path: path.clone(),
+                    source: ParseBackend::Json(source),
+                })?;
+            for (registry, _entry) in parsed.auths.unwrap_or_default() {
+                // Docker's format is always basic auth — credsStore /
+                // credHelpers aren't supported (shell-out forbidden).
+                by_registry
+                    .entry(registry)
+                    .and_modify(|v| v.1 = true)
+                    .or_insert((false, true, "basic"));
+            }
+        }
+    }
+
+    Ok(by_registry
+        .into_iter()
+        .map(|(registry, (akua, docker, auth_kind))| RegistrySummary {
+            registry,
+            source: match (akua, docker) {
+                (true, true) => "both",
+                (true, false) => "akua",
+                (false, true) => "docker",
+                (false, false) => unreachable!("entry was inserted, must have one source"),
+            },
+            auth_kind,
+        })
+        .collect())
+}
+
+/// Insert or overwrite `registry` in `path`. Missing file creates a
+/// new one; parent dirs are created on demand. File write is
+/// best-effort atomic (write to sibling tempfile + rename).
+pub fn upsert_entry(
+    path: &Path,
+    registry: &str,
+    creds: &Credentials,
+) -> Result<(), AuthLoadError> {
+    let mut file = load_file(path)?;
+    file.registries
+        .insert(registry.to_string(), AkuaAuthEntry::from_credentials(creds));
+    write_file(path, &file)
+}
+
+/// Remove `registry` from `path`. Returns `true` when an entry was
+/// actually deleted, `false` when the registry was already absent
+/// (or the file didn't exist). Absent file is never an error.
+pub fn remove_entry(path: &Path, registry: &str) -> Result<bool, AuthLoadError> {
+    let mut file = load_file(path)?;
+    let removed = file.registries.remove(registry).is_some();
+    if removed {
+        write_file(path, &file)?;
+    }
+    Ok(removed)
+}
+
+/// Public accessor for the default `akua/auth.toml` location. The
+/// `akua auth` verb writes here.
+pub fn default_akua_auth_path() -> Option<PathBuf> {
+    akua_auth_path()
+}
+
+fn load_file(path: &Path) -> Result<AkuaAuthFile, AuthLoadError> {
+    if !path.exists() {
+        return Ok(AkuaAuthFile::default());
+    }
+    let body = read_string(path)?;
+    toml::from_str(&body).map_err(|source| AuthLoadError::Parse {
+        path: path.to_path_buf(),
+        source: ParseBackend::Toml(source),
+    })
+}
+
+fn write_file(path: &Path, file: &AkuaAuthFile) -> Result<(), AuthLoadError> {
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|source| AuthLoadError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+    }
+    let body = toml::to_string_pretty(file).map_err(|e| AuthLoadError::Io {
+        path: path.to_path_buf(),
+        source: std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
+    })?;
+    let tmp = path.with_extension("toml.tmp");
+    std::fs::write(&tmp, body).map_err(|source| AuthLoadError::Io {
+        path: tmp.clone(),
+        source,
+    })?;
+    std::fs::rename(&tmp, path).map_err(|source| AuthLoadError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    Ok(())
+}
+
+fn read_string(path: &Path) -> Result<String, AuthLoadError> {
+    std::fs::read_to_string(path).map_err(|source| AuthLoadError::Io {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 // --- Path discovery --------------------------------------------------------
@@ -447,5 +615,197 @@ token = "akua-wins"
         let mut store = CredsStore::empty();
         let err = store.merge_docker_config(&path).unwrap_err();
         assert!(matches!(err, AuthLoadError::Parse { .. }));
+    }
+
+    #[test]
+    fn upsert_creates_missing_file_and_round_trips() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("nested/auth.toml");
+        upsert_entry(
+            &path,
+            "ghcr.io",
+            &Credentials::Basic {
+                username: "alice".into(),
+                password: "s3cret".into(),
+            },
+        )
+        .unwrap();
+        let mut store = CredsStore::empty();
+        store.merge_akua_auth(&path).unwrap();
+        assert_eq!(
+            for_registry(&store, "ghcr.io"),
+            Some(Credentials::Basic {
+                username: "alice".into(),
+                password: "s3cret".into()
+            })
+        );
+    }
+
+    #[test]
+    fn upsert_overwrites_existing_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("auth.toml");
+        upsert_entry(
+            &path,
+            "ghcr.io",
+            &Credentials::Bearer {
+                token: "first".into(),
+            },
+        )
+        .unwrap();
+        upsert_entry(
+            &path,
+            "ghcr.io",
+            &Credentials::Bearer {
+                token: "second".into(),
+            },
+        )
+        .unwrap();
+        let mut store = CredsStore::empty();
+        store.merge_akua_auth(&path).unwrap();
+        assert_eq!(
+            for_registry(&store, "ghcr.io"),
+            Some(Credentials::Bearer {
+                token: "second".into()
+            })
+        );
+    }
+
+    #[test]
+    fn upsert_preserves_other_registries() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("auth.toml");
+        upsert_entry(
+            &path,
+            "ghcr.io",
+            &Credentials::Bearer { token: "a".into() },
+        )
+        .unwrap();
+        upsert_entry(
+            &path,
+            "quay.io",
+            &Credentials::Bearer { token: "b".into() },
+        )
+        .unwrap();
+
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("ghcr.io"), "body: {body}");
+        assert!(body.contains("quay.io"), "body: {body}");
+    }
+
+    #[test]
+    fn remove_returns_true_when_entry_existed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("auth.toml");
+        upsert_entry(
+            &path,
+            "ghcr.io",
+            &Credentials::Bearer { token: "t".into() },
+        )
+        .unwrap();
+        assert!(remove_entry(&path, "ghcr.io").unwrap());
+
+        let mut store = CredsStore::empty();
+        store.merge_akua_auth(&path).unwrap();
+        assert_eq!(for_registry(&store, "ghcr.io"), None);
+    }
+
+    #[test]
+    fn remove_returns_false_when_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("auth.toml");
+        // Absent file.
+        assert!(!remove_entry(&path, "ghcr.io").unwrap());
+
+        // Present file without the registry.
+        upsert_entry(
+            &path,
+            "quay.io",
+            &Credentials::Bearer { token: "x".into() },
+        )
+        .unwrap();
+        assert!(!remove_entry(&path, "ghcr.io").unwrap());
+    }
+
+    #[test]
+    fn upsert_serialization_is_deterministic() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path_a = tmp.path().join("a.toml");
+        let path_b = tmp.path().join("b.toml");
+        for path in [&path_a, &path_b] {
+            upsert_entry(
+                path,
+                "z.example",
+                &Credentials::Bearer { token: "t".into() },
+            )
+            .unwrap();
+            upsert_entry(
+                path,
+                "a.example",
+                &Credentials::Basic {
+                    username: "u".into(),
+                    password: "p".into(),
+                },
+            )
+            .unwrap();
+        }
+        let a = std::fs::read_to_string(&path_a).unwrap();
+        let b = std::fs::read_to_string(&path_b).unwrap();
+        assert_eq!(a, b, "TOML output diverged:\n--a--\n{a}\n--b--\n{b}");
+        assert!(
+            a.find("a.example").unwrap() < a.find("z.example").unwrap(),
+            "BTreeMap should sort: {a}"
+        );
+    }
+
+    #[test]
+    fn list_sources_tags_akua_docker_and_both() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("XDG_CONFIG_HOME", tmp.path());
+        std::env::set_var("DOCKER_CONFIG", tmp.path().join("docker-root"));
+        std::env::remove_var("HOME");
+
+        let akua_path = tmp.path().join("akua/auth.toml");
+        upsert_entry(
+            &akua_path,
+            "only-akua.example",
+            &Credentials::Bearer { token: "t".into() },
+        )
+        .unwrap();
+        upsert_entry(
+            &akua_path,
+            "both.example",
+            &Credentials::Basic {
+                username: "u".into(),
+                password: "p".into(),
+            },
+        )
+        .unwrap();
+
+        let docker_path = tmp.path().join("docker-root/config.json");
+        std::fs::create_dir_all(docker_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &docker_path,
+            r#"{ "auths": { "only-docker.example": { "auth": "WDpY" }, "both.example": { "auth": "WDpY" } } }"#,
+        )
+        .unwrap();
+
+        let mut summaries = list_sources().unwrap();
+        summaries.sort_by(|a, b| a.registry.cmp(&b.registry));
+
+        let find = |host: &str| {
+            summaries
+                .iter()
+                .find(|s| s.registry == host)
+                .expect(host)
+                .clone()
+        };
+        assert_eq!(find("only-akua.example").source, "akua");
+        assert_eq!(find("only-akua.example").auth_kind, "bearer");
+        assert_eq!(find("only-docker.example").source, "docker");
+        assert_eq!(find("both.example").source, "both");
+
+        std::env::remove_var("XDG_CONFIG_HOME");
+        std::env::remove_var("DOCKER_CONFIG");
     }
 }
