@@ -65,6 +65,30 @@ fn walk(
     Ok(())
 }
 
+/// Recursively copy `src` into `dst`. Creates `dst` if absent;
+/// overwrites existing files. Skips symlinks + other non-regular
+/// file types, same as the walker above. Used by anyone who needs
+/// to materialize an extracted tree somewhere else:
+///
+/// - `oci_fetcher::extract_blob` when `rename` fails across
+///   filesystems.
+/// - `test_runner::run_one_golden` when updating snapshots.
+pub(crate) fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ft = entry.file_type()?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if ft.is_dir() {
+            copy_tree(&from, &to)?;
+        } else if ft.is_file() {
+            std::fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
 /// Directory names we never descend into. Catches build outputs,
 /// akua-internal caches, VCS metadata, language-ecosystem siblings,
 /// and all hidden dotfiles.

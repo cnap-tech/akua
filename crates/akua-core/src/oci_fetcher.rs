@@ -593,29 +593,13 @@ fn extract_blob(bytes: &[u8], dest: &Path) -> Result<(), OciFetchError> {
             Ok(())
         }
         Err(_) if dest.exists() => Ok(()), // racing pull won
-        Err(_) => copy_tree(staging.path(), dest).map_err(|source| OciFetchError::Io {
+        Err(_) => crate::walk::copy_tree(staging.path(), dest).map_err(|source| OciFetchError::Io {
             path: dest.to_path_buf(),
             source,
         }),
     }
 }
 
-/// Simple recursive copy — cross-device rename fallback.
-fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let ty = entry.file_type()?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if ty.is_dir() {
-            copy_tree(&from, &to)?;
-        } else {
-            std::fs::copy(&from, &to)?;
-        }
-    }
-    Ok(())
-}
 
 // ---------------------------------------------------------------------------
 // Tests

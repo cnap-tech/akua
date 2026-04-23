@@ -199,6 +199,12 @@ pub struct GoldenOutcome {
 /// inputs file, and dir-diff the output against `./snapshots/<rel>/<inputs-stem>/`.
 /// `update == true` rewrites the snapshot tree instead of diffing.
 ///
+/// Package discovery walks the workspace via [`crate::walk::collect_files`];
+/// directories in [`crate::walk::should_skip_dir`] (`target/`,
+/// `node_modules/`, `deploy/`, `rendered/`, dotdirs…) are silently
+/// skipped. A `package.k` nested under any of those won't be
+/// tested — relocate it or rename the parent if the skip is wrong.
+///
 /// Snapshots root is `<workspace>/snapshots/<pkg-dir>/<inputs-stem>/`,
 /// matching the "snapshots/" convention most ecosystems standardize
 /// on (Jest, insta, pytest-snapshot). An `inputs.yaml` at the
@@ -326,7 +332,7 @@ fn run_one_golden(
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
         }
-        copy_dir_all(&out_dir, snapshot_dir)
+        crate::walk::copy_tree(&out_dir, snapshot_dir)
             .map_err(|e| format!("write snapshot at {}: {e}", snapshot_dir.display()))?;
         return Ok(GoldenVerdict::Updated);
     }
@@ -373,22 +379,6 @@ fn load_inputs_or_empty(path: Option<&Path>) -> Result<serde_yaml::Value, String
             serde_yaml::from_slice(&bytes).map_err(|e| format!("parsing {}: {e}", p.display()))
         }
     }
-}
-
-fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let ft = entry.file_type()?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if ft.is_dir() {
-            copy_dir_all(&from, &to)?;
-        } else if ft.is_file() {
-            std::fs::copy(&from, &to)?;
-        }
-    }
-    Ok(())
 }
 
 /// Discover `package.k` files throughout the workspace. Same walk
