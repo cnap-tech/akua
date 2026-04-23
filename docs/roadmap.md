@@ -214,10 +214,15 @@ HTTP front end for concurrent render requests. Per-request `Store` with preopens
 - [x] `oci_puller::pull_attestation`: fetches the `.att` sidecar from a registry + returns the DSSE envelope bytes. 404 → Ok(None) so consumers can distinguish "publisher didn't attest" from transport errors.
 - [x] `akua verify` attestation chain walk: for every OCI dep in `akua.lock`, when a cosign public key is configured, pulls + verifies the sidecar, asserts the SLSA subject digest matches the lockfile-pinned digest. Three new typed violations: `AttestationMissing`, `AttestationInvalid`, `AttestationSubjectMismatch`.
 
+### Phase 7 slice C — encrypted keys (SHIPPED — 2026-04-22)
+
+- [x] `cosign::sign_keyed_with_passphrase` + `sign_dsse_with_passphrase`: encrypted PKCS#8 PEM (`-----BEGIN ENCRYPTED PRIVATE KEY-----`) supported. Unencrypted path unchanged.
+- [x] `akua publish` reads `$AKUA_COSIGN_PASSPHRASE`. No `--passphrase` CLI flag — argv leaks to `ps`.
+- [x] Missing passphrase on encrypted key surfaces a clear error naming the env var.
+
 ### Phase 7 slice C — still deferred
 
 - [ ] Vendor resolved deps into OCI layers so pull is network-free
-- [ ] Encrypted private keys (passphrase / cosign native format)
 
 **Exit gate (full phase):** Published Package round-trips `akua publish` → `akua pull` → `akua render` with cosign signatures validated at each hop. ✅ slice A covers the core round-trip; slice B adds SLSA + offline-render-from-published-digests on top.
 

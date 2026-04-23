@@ -167,10 +167,18 @@ pub fn run<W: Write>(
         load_signing_key(args.workspace, &manifest)?
     };
 
+    // Passphrase for encrypted private keys. Read from the env
+    // (never argv). Empty string → `None` so an unset var behaves
+    // identically to an intentionally-set-empty var.
+    let passphrase = std::env::var("AKUA_COSIGN_PASSPHRASE")
+        .ok()
+        .filter(|s| !s.is_empty());
+
     let signature_tag = if let Some(pem) = &private_pem {
         Some(sign_published_artifact(
             args.oci_ref,
             pem,
+            passphrase.as_deref(),
             &pushed.manifest_digest,
             &creds,
         )?)
@@ -193,6 +201,7 @@ pub fn run<W: Write>(
                 &pushed.tag,
                 &pushed.manifest_digest,
                 pem,
+                passphrase.as_deref(),
                 &creds,
             )?)
         }
@@ -252,10 +261,12 @@ fn load_signing_key(
 }
 
 /// Build the simple-signing payload for `manifest_digest`, sign with
-/// `private_pem`, push the `.sig` sidecar.
+/// `private_pem` (`passphrase` decrypts an encrypted PKCS#8 key),
+/// push the `.sig` sidecar.
 fn sign_published_artifact(
     oci_ref: &str,
     private_pem: &str,
+    passphrase: Option<&str>,
     manifest_digest: &str,
     creds: &CredsStore,
 ) -> Result<String, PublishError> {
@@ -263,8 +274,8 @@ fn sign_published_artifact(
     // matching what cosign-cli records for `cosign sign oci://...`.
     let docker_reference = oci_ref.strip_prefix("oci://").unwrap_or(oci_ref);
     let payload = akua_core::cosign::build_simple_signing_payload(docker_reference, manifest_digest);
-    let signature =
-        akua_core::cosign::sign_keyed(private_pem, &payload).map_err(PublishError::Crypto)?;
+    let signature = akua_core::cosign::sign_keyed_with_passphrase(private_pem, &payload, passphrase)
+        .map_err(PublishError::Crypto)?;
     Ok(oci_pusher::push_cosign_signature(
         oci_ref,
         manifest_digest,
@@ -283,6 +294,7 @@ fn attest_published_artifact(
     tag: &str,
     manifest_digest: &str,
     private_pem: &str,
+    passphrase: Option<&str>,
     creds: &CredsStore,
 ) -> Result<String, PublishError> {
     // Lockfile is best-effort: absent → no materials in the
@@ -307,10 +319,11 @@ fn attest_published_artifact(
         slsa::statement_bytes(&statement).map_err(|e| PublishError::Crypto(
             akua_core::cosign::CosignError::BadPayload(e),
         ))?;
-    let envelope = akua_core::cosign::sign_dsse(
+    let envelope = akua_core::cosign::sign_dsse_with_passphrase(
         private_pem,
         "application/vnd.in-toto+json",
         &statement_bytes,
+        passphrase,
     )
     .map_err(PublishError::Crypto)?;
     Ok(oci_pusher::push_attestation(
