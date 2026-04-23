@@ -127,19 +127,52 @@ pub fn build_simple_signing_payload(docker_reference: &str, manifest_digest: &st
 
 /// Sign `payload_bytes` with a P-256 ECDSA private key, returning a
 /// base64-encoded DER signature. Matches what cosign emits + what
-/// [`verify_keyed`] accepts.
+/// [`verify_keyed`] accepts. Accepts unencrypted PKCS#8 PEM only;
+/// for passphrase-protected keys use [`sign_keyed_with_passphrase`].
 pub fn sign_keyed(
     private_key_pem: &str,
     payload_bytes: &[u8],
+) -> Result<String, CosignError> {
+    sign_keyed_with_passphrase(private_key_pem, payload_bytes, None)
+}
+
+/// Like [`sign_keyed`], but tries the encrypted-PKCS#8 path when the
+/// PEM block is `ENCRYPTED PRIVATE KEY` and `passphrase` is `Some`.
+/// Unencrypted input → `passphrase` ignored.
+///
+/// Stored passphrases should come from env vars (
+/// `$AKUA_COSIGN_PASSPHRASE`) or an OS keychain. Passing via CLI
+/// argv leaks the secret to `ps` + shell history, so there's no
+/// `--passphrase` flag.
+pub fn sign_keyed_with_passphrase(
+    private_key_pem: &str,
+    payload_bytes: &[u8],
+    passphrase: Option<&str>,
 ) -> Result<String, CosignError> {
     use base64::Engine as _;
     use p256::ecdsa::{signature::Signer, SigningKey};
     use p256::pkcs8::DecodePrivateKey;
 
-    let signing = SigningKey::from_pkcs8_pem(private_key_pem)
-        .map_err(|e: p256::pkcs8::Error| CosignError::BadPrivateKey(e.to_string()))?;
+    let signing = if is_encrypted_pem(private_key_pem) {
+        let pass = passphrase.ok_or_else(|| {
+            CosignError::BadPrivateKey(
+                "private key is encrypted; set `$AKUA_COSIGN_PASSPHRASE` or an equivalent and re-run".to_string(),
+            )
+        })?;
+        SigningKey::from_pkcs8_encrypted_pem(private_key_pem, pass.as_bytes())
+            .map_err(|e| CosignError::BadPrivateKey(format!("decrypt: {e}")))?
+    } else {
+        SigningKey::from_pkcs8_pem(private_key_pem)
+            .map_err(|e: p256::pkcs8::Error| CosignError::BadPrivateKey(e.to_string()))?
+    };
     let signature: Signature = signing.sign(payload_bytes);
     Ok(base64::engine::general_purpose::STANDARD.encode(signature.to_der().as_bytes()))
+}
+
+/// Heuristic match on the PEM header. `ENCRYPTED PRIVATE KEY` is
+/// the PKCS#8 encrypted block type per RFC 5958.
+fn is_encrypted_pem(pem: &str) -> bool {
+    pem.contains("-----BEGIN ENCRYPTED PRIVATE KEY-----")
 }
 
 // --- DSSE envelope --------------------------------------------------------
@@ -185,14 +218,27 @@ pub struct DsseSignature {
 pub const DSSE_ENVELOPE_MEDIA_TYPE: &str = "application/vnd.dsse.envelope.v1+json";
 
 /// Build + sign a DSSE envelope. Returns the envelope JSON bytes —
-/// ready for `oci_pusher::push_attestation`.
+/// ready for `oci_pusher::push_attestation`. Delegates to
+/// [`sign_dsse_with_passphrase`]; use that variant directly when
+/// the private key is passphrase-protected.
 pub fn sign_dsse(
     private_key_pem: &str,
     payload_type: &str,
     payload_bytes: &[u8],
 ) -> Result<Vec<u8>, CosignError> {
+    sign_dsse_with_passphrase(private_key_pem, payload_type, payload_bytes, None)
+}
+
+/// Passphrase-aware variant. Same PEM selection rule as
+/// [`sign_keyed_with_passphrase`].
+pub fn sign_dsse_with_passphrase(
+    private_key_pem: &str,
+    payload_type: &str,
+    payload_bytes: &[u8],
+    passphrase: Option<&str>,
+) -> Result<Vec<u8>, CosignError> {
     let pae = dsse_pae(payload_type, payload_bytes);
-    let sig_b64 = sign_keyed(private_key_pem, &pae)?;
+    let sig_b64 = sign_keyed_with_passphrase(private_key_pem, &pae, passphrase)?;
 
     use base64::Engine as _;
     let envelope = DsseEnvelope {
@@ -460,6 +506,81 @@ mod tests {
     fn sign_rejects_malformed_private_key() {
         let err = sign_keyed("not a pem", b"anything").unwrap_err();
         assert!(matches!(err, CosignError::BadPrivateKey(_)), "got {err:?}");
+    }
+
+    /// Generate an encrypted PKCS#8 PEM via `to_pkcs8_encrypted_pem`.
+    /// Produces the same `-----BEGIN ENCRYPTED PRIVATE KEY-----`
+    /// shape cosign-cli / openssl emit.
+    fn encrypted_key_fixture(pass: &str) -> (String, String) {
+        use p256::ecdsa::SigningKey;
+        use p256::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
+
+        let mut rng = rand::rngs::OsRng;
+        let signing = SigningKey::random(&mut rng);
+        let verifying = signing.verifying_key();
+
+        let pub_pem = verifying.to_public_key_pem(LineEnding::LF).unwrap();
+        let priv_pem = signing
+            .to_pkcs8_encrypted_pem(&mut rng, pass.as_bytes(), LineEnding::LF)
+            .expect("encrypt pkcs8");
+        (pub_pem, priv_pem.to_string())
+    }
+
+    #[test]
+    fn sign_with_encrypted_key_and_correct_passphrase_verifies() {
+        let pass = "correct horse battery staple";
+        let (pub_pem, priv_pem) = encrypted_key_fixture(pass);
+        let payload = payload_for("sha256:deadbeef");
+        let sig = sign_keyed_with_passphrase(&priv_pem, &payload, Some(pass)).expect("sign");
+        verify_keyed(&pub_pem, &payload, &sig, "sha256:deadbeef").expect("verify");
+    }
+
+    #[test]
+    fn sign_encrypted_key_without_passphrase_errors() {
+        let (_pub_pem, priv_pem) = encrypted_key_fixture("anything");
+        let err = sign_keyed(&priv_pem, b"x").unwrap_err();
+        match err {
+            CosignError::BadPrivateKey(msg) => {
+                assert!(
+                    msg.contains("AKUA_COSIGN_PASSPHRASE"),
+                    "expected env-var hint in error: {msg}"
+                );
+            }
+            other => panic!("expected BadPrivateKey, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sign_encrypted_key_with_wrong_passphrase_errors() {
+        let (_pub_pem, priv_pem) = encrypted_key_fixture("right");
+        let err = sign_keyed_with_passphrase(&priv_pem, b"x", Some("wrong")).unwrap_err();
+        match err {
+            CosignError::BadPrivateKey(msg) => {
+                assert!(msg.contains("decrypt"), "got {msg}");
+            }
+            other => panic!("expected BadPrivateKey, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn passphrase_is_ignored_for_unencrypted_key() {
+        let (pub_pem, priv_pem) = keypair_fixture();
+        let payload = payload_for("sha256:abc");
+        // Supplying a passphrase on a plain key must not fail —
+        // falls back to the unencrypted path.
+        let sig = sign_keyed_with_passphrase(&priv_pem, &payload, Some("ignored")).expect("sign");
+        verify_keyed(&pub_pem, &payload, &sig, "sha256:abc").expect("verify");
+    }
+
+    #[test]
+    fn is_encrypted_pem_detects_header() {
+        assert!(is_encrypted_pem(
+            "-----BEGIN ENCRYPTED PRIVATE KEY-----\nfoo\n-----END ENCRYPTED PRIVATE KEY-----\n"
+        ));
+        assert!(!is_encrypted_pem(
+            "-----BEGIN PRIVATE KEY-----\nbar\n-----END PRIVATE KEY-----\n"
+        ));
+        assert!(!is_encrypted_pem("not a pem"));
     }
 
     // --- DSSE envelope round-trip -----------------------------------------

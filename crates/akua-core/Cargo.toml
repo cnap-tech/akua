@@ -35,7 +35,7 @@ git-fetch = ["dep:gix"]
 # cosign `.sig` sidecar and verifies the signature before handing
 # the blob to the renderer. Phase 6 slice A — keyless (fulcio/rekor)
 # is deferred.
-cosign-verify = ["oci-fetch", "dep:p256", "dep:pem", "dep:signature"]
+cosign-verify = ["oci-fetch", "dep:p256", "dep:pem", "dep:signature", "dep:pkcs8"]
 # File-watch hot-reload. `akua dev` watches the workspace + re-renders
 # on change. Feature-gated so headless / CI builds skip the `notify`
 # dep tree (inotify/kqueue platform glue).
@@ -64,7 +64,8 @@ base64 = { version = "0.22", optional = true }
 # we already pull in for oci-fetch; `max-performance-safe` keeps
 # compile time reasonable (skips `zlib-ng` optional perf wins).
 gix = { version = "0.66", default-features = false, features = ["blocking-http-transport-reqwest-rust-tls", "max-performance-safe", "worktree-mutation"], optional = true }
-p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std", "pem"], optional = true }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std", "pem", "pkcs8"], optional = true }
+pkcs8 = { version = "0.10", default-features = false, features = ["pem", "pkcs5", "encryption", "alloc"], optional = true }
 pem = { version = "3", optional = true }
 signature = { version = "2", optional = true }
 notify = { version = "6", optional = true }
