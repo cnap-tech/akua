@@ -188,15 +188,28 @@ HTTP front end for concurrent render requests. Per-request `Store` with preopens
 
 ---
 
-## Phase 7 — Publishing + distribution (1-2 weeks)
+## Phase 7 — Publishing + distribution
 
-With Phase 6 landing the crypto primitives, publishing is short work.
+### Phase 7 slice A (SHIPPED — 2026-04-22)
 
-- [ ] `akua publish` — OCI push with cosign sig + SLSA attestation; vendor resolved deps into OCI layers
-- [ ] `akua pull` — pull + verify + cache locally
-- [ ] Dep resolver honors published digests
+- [x] `oci_transport` module: shared HTTP + bearer-challenge auth. Fetcher + puller + pusher all funnel through it.
+- [x] `oci_pusher` module: monolithic upload of blob + config + manifest under akua-specific media types (`application/vnd.akua.package.content.v1.tar+gzip`).
+- [x] `akua publish --ref <oci://…> [--tag] [--no-sign]`: deterministic workspace tarball → OCI artifact. `package_tar::pack_workspace` excludes render outputs + hidden dirs + per-consumer `inputs.yaml`.
+- [x] `oci_puller` module: inverse of pusher, enforces akua media type + manifest-declared digest.
+- [x] `akua pull --ref <oci://…> --tag <v> --out <dir>`: fetches + `package_tar::unpack_to` into a target directory.
+- [x] Cosign signing primitive: `cosign::build_simple_signing_payload` + `sign_keyed` (P-256 ECDSA), round-trip proven against the verify primitive Phase 6 A shipped.
+- [x] `oci_pusher::push_cosign_signature`: pushes the `.sig` sidecar at `sha256-<hex>.sig` with `dev.cosignproject.cosign/signature` annotation.
+- [x] `akua.toml [signing].cosign_private_key`: `akua publish` signs by default when set. `--no-sign` CLI override.
+- [x] Typed exit codes `E_PUBLISH_FAILED` / `E_PULL_FAILED`.
 
-**Exit gate:** Packages publishable to any OCI registry, verifiable offline by `akua verify`, consumable by `akua render` with no network at render time.
+### Phase 7 slice B — deferred
+
+- [ ] SLSA v1 predicate generation on `akua publish` (Phase 6 B chain-walk dep)
+- [ ] Vendor resolved deps into OCI layers so pull is network-free
+- [ ] Encrypted private keys (passphrase / cosign native format)
+- [ ] `akua verify` recursively walks a pulled Package's `charts.*` deps
+
+**Exit gate (full phase):** Published Package round-trips `akua publish` → `akua pull` → `akua render` with cosign signatures validated at each hop. ✅ slice A covers the core round-trip; slice B adds SLSA + offline-render-from-published-digests on top.
 
 ---
 

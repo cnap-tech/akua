@@ -76,8 +76,11 @@ This is the current-state gap vs the target. See [docs/roadmap.md](roadmap.md) p
 | Render worker wrapped in wasmtime | Native binary — no sandbox | Phase 4 |
 | `akua serve` per-tenant isolation | Verb doesn't exist | Phase 5 |
 | cosign keyed verification on OCI deps | Shipped — `[signing] cosign_public_key`, ECDSA P-256 | ✅ Phase 6 A |
+| `akua publish` with cosign sign-by-default | Shipped — P-256 PKCS#8 PEM private keys | ✅ Phase 7 A |
+| `akua pull` with manifest digest verify | Shipped | ✅ Phase 7 A |
 | cosign keyless (fulcio + rekor) verification | Not implemented | Phase 6 B |
-| SLSA attestation generation + chain walk | Not implemented — needs `akua publish` first | Phase 6 B |
+| SLSA attestation generation + chain walk | Not implemented | Phase 6 B / Phase 7 B |
+| Encrypted cosign private keys (passphrase / HSM) | Not implemented | Phase 7 B |
 | Git dep checkout via `gix` | Shipped — pure Rust, no shell-out | ✅ Phase 2b C |
 | Private-repo OCI auth (docker config / akua auth.toml) | Shipped — Basic + bearer PAT | ✅ Phase 2b C |
 | Docker credential helpers | Not implemented — would require shell-out | Won't ship |

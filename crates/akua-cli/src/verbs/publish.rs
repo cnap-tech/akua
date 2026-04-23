@@ -209,7 +209,3 @@ fn sign_published_artifact(
         oci_pusher::push_cosign_signature(oci_ref, manifest_digest, &payload, &signature, creds)?;
     Ok(Some(sig_tag))
 }
-
-// Silence unused-import warning when only some paths use PathBuf.
-#[allow(dead_code)]
-const _: fn(&PathBuf) = |_| {};

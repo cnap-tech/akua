@@ -45,8 +45,7 @@ use sha2::{Digest, Sha256};
 use crate::hex::hex_encode;
 use crate::oci_auth::{self, Credentials, CredsStore};
 use crate::oci_transport::{
-    apply_bearer, build_client, ensure_ok, fetch_token, parse_ref, BearerChallenge, OciRef,
-    TokenCache, TransportError,
+    build_client, get_with_auth, parse_ref, OciRef, TokenCache, TransportError,
 };
 
 /// Media type the helm-v3+ OCI chart format uses for the chart blob.
@@ -524,13 +523,13 @@ fn get_manifest(
     creds: Option<&Credentials>,
     token: &mut TokenCache,
 ) -> Result<Vec<u8>, OciFetchError> {
-    get_with_auth(client, url, registry, creds, token, |req| {
+    Ok(get_with_auth(client, url, registry, creds, token, |req| {
         let mut req = req;
         for media in OCI_MANIFEST_MEDIA_TYPES {
             req = req.header("Accept", *media);
         }
         req
-    })
+    })?)
 }
 
 fn get_blob(
@@ -540,50 +539,9 @@ fn get_blob(
     creds: Option<&Credentials>,
     token: &mut TokenCache,
 ) -> Result<Vec<u8>, OciFetchError> {
-    get_with_auth(client, url, registry, creds, token, |req| req)
+    Ok(get_with_auth(client, url, registry, creds, token, |req| req)?)
 }
 
-/// GET with the retry-on-401-bearer-challenge pattern all the major
-/// public registries use. Delegates to the shared transport helpers;
-/// kept as a thin wrapper so `get_manifest` / `get_blob` stay
-/// readable + `decorate` pairs with the right HTTP verb.
-fn get_with_auth(
-    client: &reqwest::blocking::Client,
-    url: &str,
-    registry: &str,
-    creds: Option<&Credentials>,
-    token_cache: &mut TokenCache,
-    decorate: impl Fn(reqwest::blocking::RequestBuilder) -> reqwest::blocking::RequestBuilder,
-) -> Result<Vec<u8>, OciFetchError> {
-    let req = apply_bearer(decorate(client.get(url)), token_cache, creds);
-    let resp = req.send().map_err(|source| TransportError::Http {
-        url: url.to_string(),
-        source,
-    })?;
-
-    if resp.status().as_u16() != 401 {
-        return Ok(ensure_ok(resp, url)?);
-    }
-
-    let challenge = BearerChallenge::from_resp(&resp).ok_or_else(|| TransportError::AuthRequired {
-        registry: registry.to_string(),
-    })?;
-    let token = fetch_token(client, &challenge, creds)?;
-    token_cache.token = Some(token.clone());
-
-    let retry_req = decorate(client.get(url)).bearer_auth(&token);
-    let retry = retry_req.send().map_err(|source| TransportError::Http {
-        url: url.to_string(),
-        source,
-    })?;
-    if retry.status().as_u16() == 401 {
-        return Err(TransportError::AuthRequired {
-            registry: registry.to_string(),
-        }
-        .into());
-    }
-    Ok(ensure_ok(retry, url)?)
-}
 
 // --- Tarball extraction ---------------------------------------------------
 

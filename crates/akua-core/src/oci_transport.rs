@@ -200,6 +200,46 @@ pub(crate) fn apply_bearer(
     req
 }
 
+/// GET with the retry-on-401-bearer-challenge pattern. Shared
+/// between `oci_fetcher` and `oci_puller` — both need the same
+/// auth + decorate shape for pulls. The `decorate` closure lets
+/// callers add `Accept:` headers per request type.
+pub(crate) fn get_with_auth(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    registry: &str,
+    creds: Option<&Credentials>,
+    token_cache: &mut TokenCache,
+    decorate: impl Fn(reqwest::blocking::RequestBuilder) -> reqwest::blocking::RequestBuilder,
+) -> Result<Vec<u8>, TransportError> {
+    let req = apply_bearer(decorate(client.get(url)), token_cache, creds);
+    let resp = req.send().map_err(|source| TransportError::Http {
+        url: url.to_string(),
+        source,
+    })?;
+    if resp.status().as_u16() != 401 {
+        return ensure_ok(resp, url);
+    }
+
+    let challenge = BearerChallenge::from_resp(&resp).ok_or_else(|| TransportError::AuthRequired {
+        registry: registry.to_string(),
+    })?;
+    let token = fetch_token(client, &challenge, creds)?;
+    token_cache.token = Some(token.clone());
+
+    let retry_req = decorate(client.get(url)).bearer_auth(&token);
+    let retry = retry_req.send().map_err(|source| TransportError::Http {
+        url: url.to_string(),
+        source,
+    })?;
+    if retry.status().as_u16() == 401 {
+        return Err(TransportError::AuthRequired {
+            registry: registry.to_string(),
+        });
+    }
+    ensure_ok(retry, url)
+}
+
 /// Success-path unwrap: on 2xx pull the body as bytes, on anything
 /// else capture a short body for diagnostics.
 pub(crate) fn ensure_ok(

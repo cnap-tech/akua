@@ -18,8 +18,7 @@ use crate::hex::hex_encode;
 use crate::oci_auth::{self, CredsStore};
 use crate::oci_pusher::{AKUA_PACKAGE_LAYER_MEDIA_TYPE, OCI_MANIFEST_MEDIA_TYPE};
 use crate::oci_transport::{
-    apply_bearer, build_client, ensure_ok, fetch_token, parse_ref, BearerChallenge, OciRef,
-    TokenCache, TransportError,
+    build_client, get_with_auth, parse_ref, TokenCache, TransportError,
 };
 
 /// Result of a successful pull. `tarball` is the raw `.tar.gz` bytes
@@ -57,8 +56,9 @@ struct Layer {
     #[serde(rename = "mediaType")]
     media_type: String,
     digest: String,
-    #[serde(default)]
-    size: u64,
+    // `size` is advertised in the manifest but we verify via the
+    // sha256 recompute below, so we don't read it — dropping the
+    // field avoids the false signal that it's checked.
 }
 
 /// Fetch the akua Package published at `oci_ref:tag`. Returns the
@@ -121,48 +121,11 @@ pub fn pull(
         });
     }
 
-    let _ = layer.size; // available on the Layer struct; unused.
     Ok(PulledPackage {
         tarball: blob,
         manifest_digest,
         layer_digest: layer.digest,
     })
-}
-
-/// GET with bearer-challenge auth retry. Local copy of the fetcher's
-/// helper because threading `decorate` + the shared code back into
-/// `oci_fetcher` would mean exporting another pub(crate) symbol; a
-/// future simplify pass can unify.
-fn get_with_auth(
-    client: &reqwest::blocking::Client,
-    url: &str,
-    registry: &str,
-    creds: Option<&oci_auth::Credentials>,
-    token_cache: &mut TokenCache,
-    decorate: impl Fn(reqwest::blocking::RequestBuilder) -> reqwest::blocking::RequestBuilder,
-) -> Result<Vec<u8>, OciPullError> {
-    let req = apply_bearer(decorate(client.get(url)), token_cache, creds);
-    let resp = req.send().map_err(|source| TransportError::Http {
-        url: url.to_string(),
-        source,
-    })?;
-
-    if resp.status().as_u16() != 401 {
-        return Ok(ensure_ok(resp, url)?);
-    }
-
-    let challenge = BearerChallenge::from_resp(&resp).ok_or_else(|| TransportError::AuthRequired {
-        registry: registry.to_string(),
-    })?;
-    let token = fetch_token(client, &challenge, creds)?;
-    token_cache.token = Some(token.clone());
-
-    let retry_req = decorate(client.get(url)).bearer_auth(&token);
-    let retry = retry_req.send().map_err(|source| TransportError::Http {
-        url: url.to_string(),
-        source,
-    })?;
-    Ok(ensure_ok(retry, url)?)
 }
 
 // ---------------------------------------------------------------------------

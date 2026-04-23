@@ -14,7 +14,6 @@
 //! The shape is intentionally flat + standard: anyone with `tar -xzf`
 //! can inspect a published Package. No akua-specific framing.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, thiserror::Error)]
@@ -39,10 +38,11 @@ pub enum PackageTarError {
 /// re-pull, consistent with how `git checkout` handles worktree
 /// state).
 ///
-/// Rejects entries whose paths have `..` components or absolute
-/// prefixes — the host tar crate already does this by default, but
-/// the explicit check above makes the invariant load-bearing even
-/// on a tar crate revision that flips the default.
+/// The `tar` crate strips `..` components and rejects absolute paths
+/// by default (since ~0.4.30), so a crafted archive can't write
+/// outside `target`. We rely on that invariant rather than a
+/// pre-extraction pass — a tar-crate regression would be flagged by
+/// the crate's own test suite before it reached us.
 pub fn unpack_to(tar_gz: &[u8], target: &Path) -> Result<(), PackageTarError> {
     std::fs::create_dir_all(target).map_err(|source| PackageTarError::Io {
         path: target.to_path_buf(),
