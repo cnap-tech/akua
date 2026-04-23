@@ -15,6 +15,8 @@ use akua_cli::verbs::{
     remove as remove_verb, render as render_verb, test as test_verb,
     tree as tree_verb, verify as verify_verb, version as version_verb, whoami as whoami_verb,
 };
+#[cfg(feature = "dev-watch")]
+use akua_cli::verbs::dev as dev_verb;
 use akua_core::cli_contract::{AgentContext, ExitCode, StructuredError};
 
 #[derive(Parser)]
@@ -117,6 +119,37 @@ enum Commands {
         /// Workspace root containing akua.toml.
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
+    },
+
+    /// Watch the workspace + re-render on save. Blocks until Ctrl-C.
+    /// Each debounced save batch emits one event (JSON line when
+    /// `--json`, one-line status otherwise) carrying the render
+    /// duration + summary.
+    #[cfg(feature = "dev-watch")]
+    Dev {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Path to the Package.k.
+        #[arg(long, default_value = "./package.k")]
+        package: PathBuf,
+
+        /// Inputs file (JSON or YAML). Defaults to auto-discovery
+        /// next to the Package.
+        #[arg(long)]
+        inputs: Option<PathBuf>,
+
+        /// Render output dir.
+        #[arg(long, default_value = "./deploy")]
+        out: PathBuf,
+
+        /// Workspace root to watch.
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
+
+        /// Debounce window for batching rapid saves (ms).
+        #[arg(long, default_value = "200")]
+        debounce_ms: u64,
     },
 
     /// Run `test_*.k` / `*_test.k` files in the workspace. Each
@@ -364,6 +397,15 @@ fn dispatch(command: Commands) -> ExitCode {
             ignore_missing,
             workspace,
         } => run_remove(&args, &name, ignore_missing, &workspace),
+        #[cfg(feature = "dev-watch")]
+        Commands::Dev {
+            args,
+            package,
+            inputs,
+            out,
+            workspace,
+            debounce_ms,
+        } => run_dev(&args, &workspace, &package, inputs.as_deref(), &out, debounce_ms),
         Commands::Test {
             args,
             workspace,
@@ -422,6 +464,30 @@ fn run_publish(
     };
     let mut stdout = io::stdout().lock();
     match publish_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
+    }
+}
+
+#[cfg(feature = "dev-watch")]
+fn run_dev(
+    args: &UniversalArgs,
+    workspace: &std::path::Path,
+    package: &std::path::Path,
+    inputs: Option<&std::path::Path>,
+    out: &std::path::Path,
+    debounce_ms: u64,
+) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = dev_verb::DevArgs {
+        workspace,
+        package_path: package.to_path_buf(),
+        inputs_path: inputs.map(|p| p.to_path_buf()),
+        out_dir: out.to_path_buf(),
+        debounce: std::time::Duration::from_millis(debounce_ms),
+    };
+    let mut stdout = io::stdout().lock();
+    match dev_verb::run(&ctx, &verb_args, &mut stdout) {
         Ok(code) => code,
         Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }

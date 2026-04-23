@@ -6,6 +6,8 @@
 
 pub mod add;
 pub mod check;
+#[cfg(feature = "dev-watch")]
+pub mod dev;
 pub mod diff;
 pub mod fmt;
 pub mod init;

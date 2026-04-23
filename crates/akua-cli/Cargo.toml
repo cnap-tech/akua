@@ -20,9 +20,10 @@ path = "src/main.rs"
 # tree `#[cfg(feature = "cosign-verify")]` their own bits (e.g. the
 # attestation chain walker in `akua verify`) rather than leaking the
 # toggle through the core-only feature.
-default = ["oci-fetch", "cosign-verify"]
+default = ["oci-fetch", "cosign-verify", "dev-watch"]
 oci-fetch = ["akua-core/oci-fetch"]
 cosign-verify = ["akua-core/cosign-verify"]
+dev-watch = ["akua-core/dev-watch", "dep:ctrlc"]
 
 [dependencies]
 akua-core = { path = "../akua-core", default-features = false, features = ["engine-kcl", "engine-helm", "engine-kustomize", "git-fetch"] }
@@ -31,6 +32,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
+# `akua dev` SIGINT handler. Lightweight, zero transitive deps beyond
+# libc. Feature-gated under `dev-watch` so headless builds don't
+# pull it.
+ctrlc = { version = "3", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
