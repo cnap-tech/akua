@@ -18,6 +18,7 @@ pub mod lint;
 pub mod pack;
 pub mod publish;
 pub mod pull;
+pub mod push;
 pub mod remove;
 pub mod render;
 pub mod test;

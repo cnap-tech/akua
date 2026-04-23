@@ -13,8 +13,8 @@ use akua_cli::verbs::{
     add as add_verb, auth as auth_verb, cache as cache_verb, check as check_verb,
     diff as diff_verb, fmt as fmt_verb, init as init_verb, inspect as inspect_verb,
     lint as lint_verb, pack as pack_verb, publish as publish_verb, pull as pull_verb,
-    remove as remove_verb, render as render_verb, test as test_verb, tree as tree_verb,
-    verify as verify_verb, version as version_verb, whoami as whoami_verb,
+    push as push_verb, remove as remove_verb, render as render_verb, test as test_verb,
+    tree as tree_verb, verify as verify_verb, version as version_verb, whoami as whoami_verb,
 };
 #[cfg(feature = "dev-watch")]
 use akua_cli::verbs::dev as dev_verb;
@@ -236,6 +236,28 @@ enum Commands {
         /// Workspace root containing akua.toml.
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
+    },
+
+    /// Upload a pre-packed `.tar.gz` (from `akua pack`) to an OCI
+    /// registry. The push half of `akua publish`, decomposed so
+    /// air-gap flows work: pack on one host, transfer the tarball,
+    /// push from another.
+    Push {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Pre-packed tarball on disk.
+        #[arg(long)]
+        tarball: PathBuf,
+
+        /// Target repository — `oci://<registry>/<repo>`.
+        #[arg(long = "ref")]
+        oci_ref: String,
+
+        /// Tag to publish under. Required — no workspace-local
+        /// default; the tarball is just bytes.
+        #[arg(long)]
+        tag: String,
     },
 
     /// Pack the workspace into a local `.tar.gz` — same shape as the
@@ -551,6 +573,12 @@ fn dispatch(command: Commands) -> ExitCode {
             out,
             no_vendor,
         } => run_pack(&args, &workspace, out.as_deref(), no_vendor),
+        Commands::Push {
+            args,
+            tarball,
+            oci_ref,
+            tag,
+        } => run_push(&args, &tarball, &oci_ref, &tag),
     }
 }
 
@@ -568,6 +596,25 @@ fn run_pack(
     };
     let mut stdout = io::stdout().lock();
     match pack_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
+    }
+}
+
+fn run_push(
+    args: &UniversalArgs,
+    tarball: &std::path::Path,
+    oci_ref: &str,
+    tag: &str,
+) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = push_verb::PushArgs {
+        tarball,
+        oci_ref,
+        tag,
+    };
+    let mut stdout = io::stdout().lock();
+    match push_verb::run(&ctx, &verb_args, &mut stdout) {
         Ok(code) => code,
         Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
@@ -1108,6 +1155,48 @@ mod tests {
             .err()
             .expect("should fail");
         assert!(err.to_string().contains("cannot be used"));
+    }
+
+    #[test]
+    fn parses_push_with_tarball_ref_and_tag() {
+        let cli = Cli::parse_from([
+            "akua",
+            "push",
+            "--tarball",
+            "./dist/p.tgz",
+            "--ref",
+            "oci://ghcr.io/x/y",
+            "--tag",
+            "0.1.0",
+        ]);
+        match cli.command {
+            Commands::Push {
+                tarball,
+                oci_ref,
+                tag,
+                ..
+            } => {
+                assert_eq!(tarball, PathBuf::from("./dist/p.tgz"));
+                assert_eq!(oci_ref, "oci://ghcr.io/x/y");
+                assert_eq!(tag, "0.1.0");
+            }
+            _ => panic!("expected push"),
+        }
+    }
+
+    #[test]
+    fn push_requires_tag() {
+        let err = Cli::try_parse_from([
+            "akua",
+            "push",
+            "--tarball",
+            "./p.tgz",
+            "--ref",
+            "oci://ghcr.io/x/y",
+        ])
+        .err()
+        .expect("should fail");
+        assert!(err.to_string().contains("--tag"));
     }
 
     #[test]
