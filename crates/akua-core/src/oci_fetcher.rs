@@ -223,6 +223,8 @@ pub fn fetch_from_cache(cache_root: &Path, digest: &str) -> Option<FetchedChart>
 
 /// Knobs for [`fetch_with_opts`]. All fields named at the call-site
 /// so adding a new field isn't a breaking change for existing callers.
+/// Field is present unconditionally; the verify *call* is cfg'd so
+/// offline-only builds still compile against `FetchOpts`.
 #[derive(Debug)]
 pub struct FetchOpts<'a> {
     /// Lockfile-pinned digest to verify against. `None` → accept
@@ -234,11 +236,11 @@ pub struct FetchOpts<'a> {
     pub creds: &'a CredsStore,
 
     /// Cosign public key (PEM-encoded) that must have signed this
-    /// chart's manifest. When `Some`, the fetcher also pulls the
-    /// `.sig` sidecar and verifies the signature — a mismatch fails
-    /// the pull hard with [`OciFetchError::CosignVerify`].
-    /// `None` → signing bypassed (current default for opt-in).
-    #[cfg(feature = "cosign-verify")]
+    /// chart's manifest. When `Some` *and* the `cosign-verify`
+    /// feature is built, the fetcher pulls the `.sig` sidecar and
+    /// verifies the signature — a mismatch fails the pull hard with
+    /// [`OciFetchError::CosignVerify`]. With the feature off, this
+    /// field is silently ignored so binary callers keep working.
     pub cosign_public_key_pem: Option<&'a str>,
 }
 
@@ -265,32 +267,6 @@ pub fn fetch(
         &FetchOpts {
             expected_digest,
             creds: &creds,
-            #[cfg(feature = "cosign-verify")]
-            cosign_public_key_pem: None,
-        },
-    )
-}
-
-/// Like [`fetch`], but takes an explicit [`CredsStore`] so callers
-/// that build credentials programmatically (tests, `akua serve`
-/// tenants) don't pay the config-file round-trip per pull. Kept as
-/// a thin wrapper over [`fetch_with_opts`] for call-sites that
-/// don't care about cosign.
-pub fn fetch_with_creds(
-    oci_ref: &str,
-    version: &str,
-    cache_root: &Path,
-    expected_digest: Option<&str>,
-    creds: &CredsStore,
-) -> Result<FetchedChart, OciFetchError> {
-    fetch_with_opts(
-        oci_ref,
-        version,
-        cache_root,
-        &FetchOpts {
-            expected_digest,
-            creds,
-            #[cfg(feature = "cosign-verify")]
             cosign_public_key_pem: None,
         },
     )

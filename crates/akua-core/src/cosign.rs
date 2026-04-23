@@ -98,9 +98,11 @@ pub fn verify_keyed(
         .or_else(|_| Signature::from_slice(&sig_bytes))
         .map_err(|e| CosignError::BadSignature(e.to_string()))?;
 
-    key.verify(payload_bytes, &signature)
-        .map_err(|e: p256::ecdsa::Error| CosignError::VerifyFailed(e.to_string()))?;
-
+    // Parse + digest-correlate before the ECDSA verify. Garbage
+    // payloads fail fast without spending CPU on the crypto step,
+    // and a malformed payload is operationally closer to "sig for a
+    // different artifact" than "wrong signer" — the ordering lines
+    // up with how users debug failures.
     let payload: SimpleSigningPayload = serde_json::from_slice(payload_bytes)?;
     if payload.critical.image.docker_manifest_digest != expected_digest {
         return Err(CosignError::DigestMismatch {
@@ -108,6 +110,9 @@ pub fn verify_keyed(
             actual: expected_digest.to_string(),
         });
     }
+
+    key.verify(payload_bytes, &signature)
+        .map_err(|e: p256::ecdsa::Error| CosignError::VerifyFailed(e.to_string()))?;
     Ok(())
 }
 
@@ -168,7 +173,10 @@ mod tests {
         let payload = payload_for(digest);
         let (pem, sig) = sign_fixture(&payload);
         let mut tampered = payload.clone();
-        // Flip one byte in the middle.
+        // Flip one byte. Depending on where in the JSON the flip
+        // lands, we either end up with a JSON parse failure (fast-path
+        // before the ECDSA verify) or an ECDSA mismatch — both are
+        // acceptable outcomes for "someone tampered with the payload."
         tampered[10] ^= 0xff;
         let err = verify_keyed(&pem, &tampered, &sig, digest).unwrap_err();
         assert!(

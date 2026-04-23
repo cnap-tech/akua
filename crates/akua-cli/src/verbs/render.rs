@@ -176,14 +176,18 @@ impl RenderError {
                 .to_structured()
                 .with_path(path.display().to_string()),
             RenderError::Charts(inner) => {
+                // Distinguish the two cosign failure modes so agents
+                // (and humans) branch on the right thing: consumer-
+                // vs publisher-actionable.
                 let code = match inner {
-                    ChartResolveError::OciFetch { source, .. } => match source {
-                        akua_core::oci_fetcher::OciFetchError::CosignVerify { .. }
-                        | akua_core::oci_fetcher::OciFetchError::CosignSignatureMissing { .. } => {
-                            codes::E_COSIGN_VERIFY
-                        }
-                        _ => codes::E_CHART_RESOLVE,
-                    },
+                    ChartResolveError::OciFetch {
+                        source: akua_core::oci_fetcher::OciFetchError::CosignVerify { .. },
+                        ..
+                    } => codes::E_COSIGN_VERIFY,
+                    ChartResolveError::OciFetch {
+                        source: akua_core::oci_fetcher::OciFetchError::CosignSignatureMissing { .. },
+                        ..
+                    } => codes::E_COSIGN_SIG_MISSING,
                     _ => codes::E_CHART_RESOLVE,
                 };
                 StructuredError::new(code, inner.to_string()).with_default_docs()
