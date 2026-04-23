@@ -1,6 +1,6 @@
 
 <p align="center">
-<img alt="akua mascot" height="256" src="https://github.com/user-attachments/assets/9a3635fa-2096-4c47-9fe9-542129012760" />
+<img alt="akua mascot" height="256" src="assets/logo.png" />
 </p>
 
 <h1 align="center">the Akua packaging toolkit</h1>
