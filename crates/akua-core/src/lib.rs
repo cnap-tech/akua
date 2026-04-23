@@ -27,6 +27,8 @@ pub mod oci_fetcher;
 #[cfg(feature = "oci-fetch")]
 pub mod oci_pusher;
 #[cfg(feature = "oci-fetch")]
+pub mod package_tar;
+#[cfg(feature = "oci-fetch")]
 pub mod oci_transport;
 pub mod cli_contract;
 #[cfg(feature = "engine-kcl")]

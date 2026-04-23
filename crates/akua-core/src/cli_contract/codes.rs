@@ -80,6 +80,14 @@ pub const E_ADD_INVALID_DEP: &str = "E_ADD_INVALID_DEP";
 
 pub const E_REMOVE_NOT_FOUND: &str = "E_REMOVE_NOT_FOUND";
 
+// ----- Publish / Pull ------------------------------------------------------
+
+/// `akua publish` failed to upload the artifact. Wraps every registry-
+/// side failure (auth rejected, upload PUT non-2xx, manifest malformed).
+pub const E_PUBLISH_FAILED: &str = "E_PUBLISH_FAILED";
+/// `akua pull` couldn't retrieve / extract the requested artifact.
+pub const E_PULL_FAILED: &str = "E_PULL_FAILED";
+
 // ----- General -------------------------------------------------------------
 
 pub const E_IO: &str = "E_IO";

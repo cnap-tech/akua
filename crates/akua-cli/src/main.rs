@@ -11,7 +11,8 @@ use clap::{ArgGroup, Args, Parser, Subcommand};
 use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::{
     add as add_verb, check as check_verb, diff as diff_verb, fmt as fmt_verb, init as init_verb,
-    inspect as inspect_verb, lint as lint_verb, remove as remove_verb, render as render_verb,
+    inspect as inspect_verb, lint as lint_verb, publish as publish_verb, remove as remove_verb,
+    render as render_verb,
     tree as tree_verb, verify as verify_verb, version as version_verb, whoami as whoami_verb,
 };
 use akua_core::cli_contract::{AgentContext, ExitCode, StructuredError};
@@ -123,6 +124,27 @@ enum Commands {
         #[command(flatten)]
         args: UniversalArgs,
 
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
+    },
+
+    /// Package the workspace and push it to an OCI registry as an
+    /// akua Package artifact. Uploads the tarball + writes a manifest
+    /// under `oci://<ref>:<tag>` (tag defaults to `[package].version`).
+    Publish {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Target repository — `oci://<registry>/<repo>`.
+        #[arg(long = "ref")]
+        oci_ref: String,
+
+        /// Tag to publish under. Defaults to the workspace's
+        /// `[package].version`.
+        #[arg(long)]
+        tag: Option<String>,
+
+        /// Workspace root containing akua.toml.
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
     },
@@ -267,6 +289,12 @@ fn dispatch(command: Commands) -> ExitCode {
             package,
         } => run_check(&args, &workspace, &package),
         Commands::Diff { args, before, after } => run_diff(&args, &before, &after),
+        Commands::Publish {
+            args,
+            oci_ref,
+            tag,
+            workspace,
+        } => run_publish(&args, &workspace, &oci_ref, tag.as_deref()),
         Commands::Remove {
             args,
             name,
@@ -289,6 +317,25 @@ fn dispatch(command: Commands) -> ExitCode {
             &args, &name, oci.as_deref(), git.as_deref(), path.as_deref(),
             version.as_deref(), tag.as_deref(), rev.as_deref(), force, &workspace,
         ),
+    }
+}
+
+fn run_publish(
+    args: &UniversalArgs,
+    workspace: &std::path::Path,
+    oci_ref: &str,
+    tag: Option<&str>,
+) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = publish_verb::PublishArgs {
+        workspace,
+        oci_ref,
+        tag,
+    };
+    let mut stdout = io::stdout().lock();
+    match publish_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
 }
 
