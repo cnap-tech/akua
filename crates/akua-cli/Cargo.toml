@@ -15,8 +15,17 @@ path = "src/lib.rs"
 name = "akua"
 path = "src/main.rs"
 
+[features]
+# Pass-through gates mirroring akua-core. Lets call-sites in the CLI
+# tree `#[cfg(feature = "cosign-verify")]` their own bits (e.g. the
+# attestation chain walker in `akua verify`) rather than leaking the
+# toggle through the core-only feature.
+default = ["oci-fetch", "cosign-verify"]
+oci-fetch = ["akua-core/oci-fetch"]
+cosign-verify = ["akua-core/cosign-verify"]
+
 [dependencies]
-akua-core = { path = "../akua-core" }
+akua-core = { path = "../akua-core", default-features = false, features = ["engine-kcl", "engine-helm", "engine-kustomize", "git-fetch"] }
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -25,3 +34,5 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std", "pem"] }
+rand = "0.8"

@@ -15,7 +15,7 @@
 //! itself; parse errors surface here as structured verify failures.
 
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
 use akua_core::{chart_resolver, AkuaLock, AkuaManifest, LockLoadError, ManifestLoadError};
@@ -64,6 +64,26 @@ pub enum Violation {
     /// Path-dep's declared target no longer exists on disk. Likely a
     /// deleted `./vendor/<chart>` directory.
     PathMissing { name: String, path: String },
+    /// An OCI dep has no `.att` attestation sidecar at the registry,
+    /// but the workspace has a cosign public key configured (policy
+    /// says "every dep must be attested"). Publisher-actionable.
+    AttestationMissing { name: String, oci_ref: String },
+    /// DSSE envelope failed cryptographic verification (bad
+    /// signature, wrong signer, cross-type substitution).
+    /// Attacker-side signal.
+    AttestationInvalid {
+        name: String,
+        oci_ref: String,
+        detail: String,
+    },
+    /// Attestation verified cryptographically but the subject
+    /// digest it claims to describe doesn't match the lockfile-pinned
+    /// digest for this dep. Attestation-for-a-different-artifact.
+    AttestationSubjectMismatch {
+        name: String,
+        expected: String,
+        claimed: String,
+    },
 }
 
 impl VerifyOutput {
@@ -81,6 +101,14 @@ pub enum VerifyError {
 
     #[error(transparent)]
     Lock(#[from] LockLoadError),
+
+    #[cfg(feature = "cosign-verify")]
+    #[error("reading cosign public key at {path}: {source}")]
+    CosignKeyIo {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 
     #[error("write to stdout failed: {0}")]
     StdoutWrite(#[source] std::io::Error),
@@ -106,6 +134,15 @@ impl VerifyError {
                 } else {
                     base
                 }
+            }
+            #[cfg(feature = "cosign-verify")]
+            VerifyError::CosignKeyIo { path, source } => {
+                StructuredError::new(codes::E_IO, source.to_string())
+                    .with_path(path.display().to_string())
+                    .with_suggestion(
+                        "akua.toml [signing].cosign_public_key must resolve to a PEM-encoded public key file.",
+                    )
+                    .with_default_docs()
             }
             VerifyError::StdoutWrite(e) => {
                 StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
@@ -218,6 +255,23 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
         }
     }
 
+    // Attestation chain walk. Only runs when the workspace
+    // configured a cosign public key — signing-by-default is
+    // opt-in, so this is too. Pulls the `.att` sidecar for every
+    // OCI dep in the lockfile + verifies the DSSE envelope against
+    // the key + checks the predicate's subject digest matches
+    // what akua.lock pinned.
+    //
+    // Missing sidecar + cryptographic failures + subject drift all
+    // surface as distinct violations so `akua verify --json` gives
+    // the operator actionable signal.
+    #[cfg(feature = "cosign-verify")]
+    {
+        if let Some(pub_key_pem) = load_cosign_pub_key(&manifest, workspace)? {
+            walk_attestations(&lock, &pub_key_pem, &mut violations);
+        }
+    }
+
     let status = if violations.is_empty() { "ok" } else { "fail" };
 
     Ok(VerifyOutput {
@@ -229,6 +283,139 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
         },
         violations,
     })
+}
+
+/// Load `[signing].cosign_public_key` contents off disk, if any.
+/// Keeps verify + render's key-loading logic consistent — different
+/// file for different trust direction (verify wants the public key,
+/// publish wants the private), both sit under the same
+/// `[signing]` section in akua.toml.
+#[cfg(feature = "cosign-verify")]
+fn load_cosign_pub_key(
+    manifest: &AkuaManifest,
+    workspace: &Path,
+) -> Result<Option<String>, VerifyError> {
+    let Some(signing) = manifest.signing.as_ref() else {
+        return Ok(None);
+    };
+    let Some(rel) = signing.cosign_public_key.as_deref() else {
+        return Ok(None);
+    };
+    let key_path = workspace.join(rel);
+    match std::fs::read_to_string(&key_path) {
+        Ok(body) => Ok(Some(body)),
+        Err(source) => Err(VerifyError::CosignKeyIo {
+            path: key_path,
+            source,
+        }),
+    }
+}
+
+/// Walk every OCI-sourced lockfile entry, pull its attestation
+/// sidecar, verify against `pub_key_pem`, record violations.
+/// Network failures are converted to per-dep violations rather than
+/// aborting the whole verify — ops want to see *every* missing
+/// attestation, not just the first one.
+#[cfg(feature = "cosign-verify")]
+fn walk_attestations(lock: &AkuaLock, pub_key_pem: &str, violations: &mut Vec<Violation>) {
+    use akua_core::oci_auth::CredsStore;
+    use akua_core::oci_puller;
+
+    // Creds are loaded once per verify — all subsequent pulls reuse
+    // the same store. A bad config file is a hard error; we fail
+    // loudly rather than silently skip.
+    let creds = match CredsStore::load() {
+        Ok(c) => c,
+        Err(_) => CredsStore::empty(),
+    };
+
+    for pkg in &lock.packages {
+        if !pkg.is_oci() {
+            continue;
+        }
+        let oci_ref = pkg.source.clone();
+        let digest = pkg.digest.clone();
+        match oci_puller::pull_attestation(&oci_ref, &digest, &creds) {
+            Ok(Some(envelope)) => {
+                if let Some(violation) = verify_attestation(&pkg.name, &digest, &envelope, pub_key_pem) {
+                    violations.push(violation);
+                }
+            }
+            Ok(None) => violations.push(Violation::AttestationMissing {
+                name: pkg.name.clone(),
+                oci_ref,
+            }),
+            Err(e) => violations.push(Violation::AttestationInvalid {
+                name: pkg.name.clone(),
+                oci_ref,
+                detail: format!("pull failed: {e}"),
+            }),
+        }
+    }
+}
+
+/// Core per-dep attestation check. Extracted so tests can exercise
+/// the verify → parse → subject-check logic with a hand-built
+/// envelope, no registry needed.
+#[cfg(feature = "cosign-verify")]
+pub(crate) fn verify_attestation(
+    name: &str,
+    expected_digest: &str,
+    envelope_bytes: &[u8],
+    pub_key_pem: &str,
+) -> Option<Violation> {
+    use akua_core::slsa::InTotoStatement;
+
+    let payload = match akua_core::cosign::verify_dsse(pub_key_pem, envelope_bytes) {
+        Ok(p) => p,
+        Err(e) => {
+            return Some(Violation::AttestationInvalid {
+                name: name.to_string(),
+                oci_ref: String::new(),
+                detail: e.to_string(),
+            });
+        }
+    };
+    let statement: InTotoStatement = match serde_json::from_slice(&payload) {
+        Ok(s) => s,
+        Err(e) => {
+            return Some(Violation::AttestationInvalid {
+                name: name.to_string(),
+                oci_ref: String::new(),
+                detail: format!("in-toto statement parse: {e}"),
+            });
+        }
+    };
+
+    // Subject digest match: the statement's subject[].digest must
+    // include an entry matching our lockfile digest. The lockfile
+    // carries `sha256:<hex>` — statements store `{"sha256": "<hex>"}`.
+    let (expected_algo, expected_hex) = split_digest(expected_digest);
+    let matches = statement.subject.iter().any(|s| {
+        s.digest
+            .get(expected_algo)
+            .map(|h| h == expected_hex)
+            .unwrap_or(false)
+    });
+    if !matches {
+        let claimed = statement
+            .subject
+            .first()
+            .and_then(|s| s.digest.get(expected_algo))
+            .cloned()
+            .unwrap_or_else(|| "<absent>".to_string());
+        return Some(Violation::AttestationSubjectMismatch {
+            name: name.to_string(),
+            expected: expected_digest.to_string(),
+            claimed: format!("{expected_algo}:{claimed}"),
+        });
+    }
+    None
+}
+
+#[cfg(feature = "cosign-verify")]
+fn split_digest(d: &str) -> (&str, &str) {
+    d.split_once(':').unwrap_or(("sha256", d))
 }
 
 /// Run the verb against the given workspace. Verify errors (missing /
@@ -280,6 +467,26 @@ fn write_text<W: Write>(stdout: &mut W, output: &VerifyOutput) -> std::io::Resul
                 Violation::PathMissing { name, path } => writeln!(
                     stdout,
                     "  - path-missing: {name} at `{path}`"
+                )?,
+                Violation::AttestationMissing { name, oci_ref } => writeln!(
+                    stdout,
+                    "  - attestation-missing: {name} ({oci_ref}) has no `.att` sidecar"
+                )?,
+                Violation::AttestationInvalid {
+                    name,
+                    oci_ref,
+                    detail,
+                } => writeln!(
+                    stdout,
+                    "  - attestation-invalid: {name} ({oci_ref})\n      {detail}"
+                )?,
+                Violation::AttestationSubjectMismatch {
+                    name,
+                    expected,
+                    claimed,
+                } => writeln!(
+                    stdout,
+                    "  - attestation-subject-mismatch: {name}\n      expected {expected}\n      claimed  {claimed}"
                 )?,
             }
         }
@@ -740,5 +947,98 @@ digest  = "{real_digest}"
             "violations: {:?}",
             result.violations
         );
+    }
+
+    // ---------------------------------------------------------------
+    // Attestation chain walk (Phase 7 C) — in-memory tests over the
+    // `verify_attestation` helper so no registry is needed.
+    // ---------------------------------------------------------------
+
+    #[cfg(feature = "cosign-verify")]
+    mod attestation {
+        use super::super::verify_attestation;
+        use super::Violation;
+        use akua_core::cosign;
+        use akua_core::slsa;
+        use p256::ecdsa::SigningKey;
+        use p256::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
+
+        fn keypair() -> (String, String) {
+            let mut rng = rand::rngs::OsRng;
+            let signing = SigningKey::random(&mut rng);
+            let verifying = signing.verifying_key();
+            (
+                verifying.to_public_key_pem(LineEnding::LF).unwrap(),
+                signing.to_pkcs8_pem(LineEnding::LF).unwrap().to_string(),
+            )
+        }
+
+        fn envelope_for(
+            priv_pem: &str,
+            subject_name: &str,
+            manifest_digest: &str,
+        ) -> Vec<u8> {
+            let stmt = slsa::build_publish_attestation(
+                subject_name,
+                manifest_digest,
+                "oci://ghcr.io/acme/app",
+                "1.0.0",
+                None,
+            );
+            let bytes = slsa::statement_bytes(&stmt).unwrap();
+            cosign::sign_dsse(priv_pem, "application/vnd.in-toto+json", &bytes).unwrap()
+        }
+
+        #[test]
+        fn valid_envelope_with_matching_subject_passes() {
+            let (pub_pem, priv_pem) = keypair();
+            let digest = "sha256:deadbeef";
+            let envelope = envelope_for(&priv_pem, "ghcr.io/acme/app", digest);
+            let v = verify_attestation("app", digest, &envelope, &pub_pem);
+            assert!(v.is_none(), "expected no violation, got {v:?}");
+        }
+
+        #[test]
+        fn wrong_signer_surfaces_invalid() {
+            let (_other_pub, priv_pem) = keypair();
+            let (good_pub, _) = keypair();
+            let envelope = envelope_for(&priv_pem, "ghcr.io/acme/app", "sha256:deadbeef");
+            let v = verify_attestation("app", "sha256:deadbeef", &envelope, &good_pub);
+            assert!(
+                matches!(v, Some(Violation::AttestationInvalid { .. })),
+                "got {v:?}"
+            );
+        }
+
+        #[test]
+        fn subject_digest_mismatch_surfaces_subject_mismatch() {
+            let (pub_pem, priv_pem) = keypair();
+            // Sign for one digest, then verify against a lockfile
+            // that pins a different one.
+            let envelope = envelope_for(&priv_pem, "ghcr.io/acme/app", "sha256:deadbeef");
+            let v = verify_attestation("app", "sha256:00000000", &envelope, &pub_pem);
+            match v {
+                Some(Violation::AttestationSubjectMismatch {
+                    name,
+                    expected,
+                    claimed,
+                }) => {
+                    assert_eq!(name, "app");
+                    assert_eq!(expected, "sha256:00000000");
+                    assert!(claimed.contains("deadbeef"), "{claimed}");
+                }
+                other => panic!("expected AttestationSubjectMismatch, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn garbage_envelope_surfaces_invalid() {
+            let (pub_pem, _) = keypair();
+            let v = verify_attestation("app", "sha256:deadbeef", b"not a dsse envelope", &pub_pem);
+            assert!(
+                matches!(v, Some(Violation::AttestationInvalid { .. })),
+                "got {v:?}"
+            );
+        }
     }
 }

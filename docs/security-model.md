@@ -80,7 +80,8 @@ This is the current-state gap vs the target. See [docs/roadmap.md](roadmap.md) p
 | `akua pull` with manifest digest verify | Shipped | ✅ Phase 7 A |
 | cosign keyless (fulcio + rekor) verification | Not implemented | Phase 6 B |
 | SLSA v1 attestation generation on publish | Shipped — DSSE envelope, in-toto v1 statement | ✅ Phase 7 B |
-| SLSA attestation chain walk on verify | Not implemented — needs keyless + `akua verify` recursion | Phase 7 C |
+| `akua verify` attestation chain walk | Shipped — pulls `.att` sidecars + DSSE verify + subject-digest check for every OCI dep | ✅ Phase 7 C |
+| Recursive attestation walk over transitive deps | Not implemented — needs published Package to attest its own deps | Phase 7 C (follow-up) |
 | Encrypted cosign private keys (passphrase / HSM) | Not implemented | Phase 7 C |
 | Git dep checkout via `gix` | Shipped — pure Rust, no shell-out | ✅ Phase 2b C |
 | Private-repo OCI auth (docker config / akua auth.toml) | Shipped — Basic + bearer PAT | ✅ Phase 2b C |

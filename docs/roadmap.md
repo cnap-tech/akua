@@ -209,11 +209,15 @@ HTTP front end for concurrent render requests. Per-request `Store` with preopens
 - [x] `oci_pusher::push_attestation`: pushes the DSSE envelope as a `.att` sidecar at `sha256-<hex>.att` with media type `application/vnd.dsse.envelope.v1+json`.
 - [x] `akua publish` auto-attests when signing is active; `--no-attest` disables independently of `--no-sign`. `PublishOutput.attestation_tag` surfaces the sidecar ref.
 
+### Phase 7 slice C (partial — SHIPPED 2026-04-22)
+
+- [x] `oci_puller::pull_attestation`: fetches the `.att` sidecar from a registry + returns the DSSE envelope bytes. 404 → Ok(None) so consumers can distinguish "publisher didn't attest" from transport errors.
+- [x] `akua verify` attestation chain walk: for every OCI dep in `akua.lock`, when a cosign public key is configured, pulls + verifies the sidecar, asserts the SLSA subject digest matches the lockfile-pinned digest. Three new typed violations: `AttestationMissing`, `AttestationInvalid`, `AttestationSubjectMismatch`.
+
 ### Phase 7 slice C — still deferred
 
 - [ ] Vendor resolved deps into OCI layers so pull is network-free
 - [ ] Encrypted private keys (passphrase / cosign native format)
-- [ ] `akua verify` recursively walks a pulled Package's `charts.*` deps + verifies attestation chain
 
 **Exit gate (full phase):** Published Package round-trips `akua publish` → `akua pull` → `akua render` with cosign signatures validated at each hop. ✅ slice A covers the core round-trip; slice B adds SLSA + offline-render-from-published-digests on top.
 

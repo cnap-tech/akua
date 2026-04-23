@@ -72,8 +72,14 @@ pub struct BuildDefinition {
     pub external_parameters: ExternalParameters,
 
     /// Resolved dependencies that materially affected the artifact.
-    /// Populated from `akua.lock` at publish time.
-    #[serde(rename = "resolvedDependencies", skip_serializing_if = "Vec::is_empty")]
+    /// Populated from `akua.lock` at publish time. `default` on
+    /// deserialize so an attestation that came from a pre-lockfile
+    /// workspace still parses.
+    #[serde(
+        rename = "resolvedDependencies",
+        default,
+        skip_serializing_if = "Vec::is_empty"
+    )]
     pub resolved_dependencies: Vec<ResourceDescriptor>,
 }
 
