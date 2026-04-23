@@ -44,6 +44,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::hex::hex_encode;
+use crate::oci_auth::{self, Credentials, CredsStore};
 
 /// Media type the helm-v3+ OCI chart format uses for the chart blob.
 const HELM_CHART_LAYER_MEDIA_TYPE: &str =
@@ -87,10 +88,18 @@ pub enum OciFetchError {
         body: String,
     },
 
-    /// Registry returned 401/WWW-Authenticate; the caller hit a repo
-    /// that needs Docker Hub-style token auth. Slice B+.
-    #[error("registry `{registry}` requires authentication; Phase 2b slice B supports public repos only")]
+    /// Registry returned 401 after we exhausted every credential the
+    /// caller gave us. Distinct from a malformed config (see
+    /// [`OciFetchError::AuthConfig`]) — this is "credentials are
+    /// valid but the registry rejected them / we have none".
+    #[error("registry `{registry}` rejected auth. Configure credentials in `~/.config/akua/auth.toml` or `docker login` for `~/.docker/config.json`.")]
     AuthRequired { registry: String },
+
+    /// Auth config file exists but couldn't be parsed. Surfaced
+    /// separately so `fetch` doesn't silently fall through to an
+    /// anonymous pull when a user clearly intended to authenticate.
+    #[error("auth config parse error: {detail}")]
+    AuthConfig { detail: String },
 
     #[error("manifest for `{oci_ref}:{version}` has no helm chart layer (media type {HELM_CHART_LAYER_MEDIA_TYPE})")]
     NoChartLayer { oci_ref: String, version: String },
@@ -184,17 +193,34 @@ pub fn fetch_from_cache(cache_root: &Path, digest: &str) -> Option<FetchedChart>
     })
 }
 
-/// Fetch and extract a Helm OCI chart into `cache_root`. If the chart
-/// is already cached (content-addressed under its digest), skip the
-/// network call entirely. When `expected_digest` is `Some`, verify
-/// the pulled blob matches before unpacking — lockfile-integrity guard
-/// that prevents a drift between what `akua add` pinned and what's
-/// now served at the registry.
+/// Fetch and extract a Helm OCI chart into `cache_root`. Convenience
+/// wrapper around [`fetch_with_creds`] that loads credentials from
+/// the standard config files (`~/.config/akua/auth.toml`,
+/// `~/.docker/config.json`). Credential parse errors bubble up as
+/// an `OciFetchError::AuthRequired` pointer at the config — better
+/// than silently falling through to an anonymous pull, which would
+/// leak the fact that a user intended to authenticate.
 pub fn fetch(
     oci_ref: &str,
     version: &str,
     cache_root: &Path,
     expected_digest: Option<&str>,
+) -> Result<FetchedChart, OciFetchError> {
+    let creds = oci_auth::CredsStore::load().map_err(|source| OciFetchError::AuthConfig {
+        detail: source.to_string(),
+    })?;
+    fetch_with_creds(oci_ref, version, cache_root, expected_digest, &creds)
+}
+
+/// Like [`fetch`], but takes an explicit [`CredsStore`] so callers
+/// that build credentials programmatically (tests, `akua serve`
+/// tenants) don't pay the config-file round-trip per pull.
+pub fn fetch_with_creds(
+    oci_ref: &str,
+    version: &str,
+    cache_root: &Path,
+    expected_digest: Option<&str>,
+    creds: &CredsStore,
 ) -> Result<FetchedChart, OciFetchError> {
     let parsed = parse_ref(oci_ref)?;
 
@@ -221,12 +247,19 @@ pub fn fetch(
             source: e,
         })?;
 
+    let registry_creds = oci_auth::for_registry(creds, &parsed.registry);
     let mut token = TokenCache::default();
     let manifest_url = format!(
         "https://{}/v2/{}/manifests/{}",
         parsed.registry, parsed.repository, version
     );
-    let manifest_bytes = get_manifest(&client, &manifest_url, &parsed.registry, &mut token)?;
+    let manifest_bytes = get_manifest(
+        &client,
+        &manifest_url,
+        &parsed.registry,
+        registry_creds.as_ref(),
+        &mut token,
+    )?;
     let manifest: OciManifest = serde_json::from_slice(&manifest_bytes)?;
 
     let chart_layer = manifest
@@ -242,7 +275,13 @@ pub fn fetch(
         "https://{}/v2/{}/blobs/{}",
         parsed.registry, parsed.repository, chart_layer.digest
     );
-    let blob_bytes = get_blob(&client, &blob_url, &parsed.registry, &mut token)?;
+    let blob_bytes = get_blob(
+        &client,
+        &blob_url,
+        &parsed.registry,
+        registry_creds.as_ref(),
+        &mut token,
+    )?;
 
     // Verify: what the registry handed us must match the layer's
     // self-declared digest, AND (if the lockfile pins one) match that.
@@ -338,9 +377,10 @@ fn get_manifest(
     client: &reqwest::blocking::Client,
     url: &str,
     registry: &str,
+    creds: Option<&Credentials>,
     token: &mut TokenCache,
 ) -> Result<Vec<u8>, OciFetchError> {
-    get_with_auth(client, url, registry, token, |req| {
+    get_with_auth(client, url, registry, creds, token, |req| {
         let mut req = req;
         for media in OCI_MANIFEST_MEDIA_TYPES {
             req = req.header("Accept", *media);
@@ -353,27 +393,38 @@ fn get_blob(
     client: &reqwest::blocking::Client,
     url: &str,
     registry: &str,
+    creds: Option<&Credentials>,
     token: &mut TokenCache,
 ) -> Result<Vec<u8>, OciFetchError> {
-    get_with_auth(client, url, registry, token, |req| req)
+    get_with_auth(client, url, registry, creds, token, |req| req)
 }
 
 /// GET with the retry-on-401-bearer-challenge pattern all the major
 /// public registries use. On a 401 we parse the `WWW-Authenticate`
-/// header, trade a scope for a token at the realm endpoint, cache it,
-/// and retry once.
+/// header, trade a scope for a token at the realm endpoint (sending
+/// user creds if we have them), cache it, and retry once.
+///
+/// Ordering: if the caller supplied `creds` AND it's a raw bearer PAT,
+/// we attach it to the initial request directly — that skips the
+/// anonymous-token exchange for registries that accept PATs in-band
+/// (ghcr.io with a `read:packages` PAT, for example). For Basic auth
+/// creds we still go through the challenge flow because registries
+/// typically want the Basic header *at the realm endpoint* rather
+/// than on the /v2/ request itself.
 fn get_with_auth(
     client: &reqwest::blocking::Client,
     url: &str,
     registry: &str,
+    creds: Option<&Credentials>,
     token_cache: &mut TokenCache,
     decorate: impl Fn(reqwest::blocking::RequestBuilder) -> reqwest::blocking::RequestBuilder,
 ) -> Result<Vec<u8>, OciFetchError> {
-    // Cached token → use it first. Still handle 401 in case the token
-    // is scope-mismatched (different repo on the same registry).
     let mut req = decorate(client.get(url));
     if let Some(tok) = &token_cache.token {
         req = req.bearer_auth(tok);
+    } else if let Some(Credentials::Bearer { token }) = creds {
+        // Skip the challenge round-trip for raw PATs.
+        req = req.bearer_auth(token);
     }
     let resp = req.send().map_err(|source| OciFetchError::Http {
         url: url.to_string(),
@@ -390,7 +441,7 @@ fn get_with_auth(
             registry: registry.to_string(),
         }
     })?;
-    let token = fetch_token(client, &challenge)?;
+    let token = fetch_token(client, &challenge, creds)?;
     token_cache.token = Some(token.clone());
 
     let retry_req = decorate(client.get(url)).bearer_auth(&token);
@@ -443,14 +494,19 @@ impl BearerChallenge {
     }
 }
 
-/// Exchange a `BearerChallenge` for an anonymous token. Registries
-/// serve the token endpoint at the `realm` URL with `service` + `scope`
-/// as query params; we follow that spec.
+/// Exchange a `BearerChallenge` for a token. When `creds` is `Some`,
+/// send them to the realm endpoint — Basic auth for `username/password`,
+/// Bearer for a raw PAT. Anonymous (no creds) fetches a public-scope
+/// token, the path we shipped in slice B.
 fn fetch_token(
     client: &reqwest::blocking::Client,
     challenge: &BearerChallenge,
+    creds: Option<&Credentials>,
 ) -> Result<String, OciFetchError> {
     let mut req = client.get(&challenge.realm);
+    if let Some(c) = creds {
+        req = req.header("Authorization", c.to_authorization_header());
+    }
     let mut query: Vec<(&str, &str)> = Vec::new();
     if let Some(service) = &challenge.service {
         query.push(("service", service));
