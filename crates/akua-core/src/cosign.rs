@@ -142,6 +142,126 @@ pub fn sign_keyed(
     Ok(base64::engine::general_purpose::STANDARD.encode(signature.to_der().as_bytes()))
 }
 
+// --- DSSE envelope --------------------------------------------------------
+
+/// DSSE (Dead Simple Signature Envelope) v1. Wraps a signed payload
+/// for in-toto attestations the way cosign's `.att` sidecars carry
+/// SLSA provenance. Output JSON:
+///
+/// ```json
+/// {
+///   "payloadType": "application/vnd.in-toto+json",
+///   "payload":     "<base64 of raw statement bytes>",
+///   "signatures":  [{"sig": "<base64 of ECDSA(payloadType, payload)>"}]
+/// }
+/// ```
+///
+/// The signature covers the **PAE** (Pre-Auth Encoding), not the
+/// raw payload:
+///
+/// ```text
+/// DSSEv1 <type_len> <type> <payload_len> <payload>
+/// ```
+///
+/// PAE prevents signature substitution between envelope types —
+/// a signature over a JSON blob can't be re-wrapped as a signature
+/// over the same blob with a different `payloadType`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DsseEnvelope {
+    #[serde(rename = "payloadType")]
+    pub payload_type: String,
+    pub payload: String,
+    pub signatures: Vec<DsseSignature>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DsseSignature {
+    pub sig: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keyid: Option<String>,
+}
+
+/// Media type DSSE envelopes carry inside cosign's `.att` sidecar.
+pub const DSSE_ENVELOPE_MEDIA_TYPE: &str = "application/vnd.dsse.envelope.v1+json";
+
+/// Build + sign a DSSE envelope. Returns the envelope JSON bytes —
+/// ready for `oci_pusher::push_attestation`.
+pub fn sign_dsse(
+    private_key_pem: &str,
+    payload_type: &str,
+    payload_bytes: &[u8],
+) -> Result<Vec<u8>, CosignError> {
+    let pae = dsse_pae(payload_type, payload_bytes);
+    let sig_b64 = sign_keyed(private_key_pem, &pae)?;
+
+    use base64::Engine as _;
+    let envelope = DsseEnvelope {
+        payload_type: payload_type.to_string(),
+        payload: base64::engine::general_purpose::STANDARD.encode(payload_bytes),
+        signatures: vec![DsseSignature {
+            sig: sig_b64,
+            keyid: None,
+        }],
+    };
+    Ok(serde_json::to_vec(&envelope)?)
+}
+
+/// Verify a DSSE envelope: parse, reconstruct PAE, ECDSA-verify any
+/// of the contained signatures against the public key. Returns the
+/// raw decoded payload on success — callers then parse it as the
+/// `payloadType` indicates.
+pub fn verify_dsse(
+    public_key_pem: &str,
+    envelope_bytes: &[u8],
+) -> Result<Vec<u8>, CosignError> {
+    use base64::Engine as _;
+    use p256::ecdsa::signature::Verifier;
+
+    let envelope: DsseEnvelope =
+        serde_json::from_slice(envelope_bytes).map_err(CosignError::BadPayload)?;
+    let payload = base64::engine::general_purpose::STANDARD
+        .decode(envelope.payload.as_bytes())
+        .map_err(|e| CosignError::BadSignature(e.to_string()))?;
+    let pae = dsse_pae(&envelope.payload_type, &payload);
+
+    let key = VerifyingKey::from_public_key_pem(public_key_pem)
+        .map_err(|e: p256::pkcs8::spki::Error| CosignError::BadPublicKey(e.to_string()))?;
+
+    // Any one signature verifying is enough — matches DSSE spec's
+    // "at least one signature must verify" semantic for consumer-
+    // side verification with a known key.
+    for sig_entry in &envelope.signatures {
+        let sig_bytes = match base64::engine::general_purpose::STANDARD.decode(sig_entry.sig.as_bytes()) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let Ok(signature) = Signature::from_der(&sig_bytes).or_else(|_| Signature::from_slice(&sig_bytes)) else {
+            continue;
+        };
+        if key.verify(&pae, &signature).is_ok() {
+            return Ok(payload);
+        }
+    }
+    Err(CosignError::VerifyFailed(
+        "no DSSE signature verified against the supplied public key".to_string(),
+    ))
+}
+
+/// DSSE Pre-Auth Encoding. Binding the payload type + length into
+/// what gets signed is what prevents cross-type signature reuse.
+fn dsse_pae(payload_type: &str, payload: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(payload.len() + 64);
+    out.extend_from_slice(b"DSSEv1 ");
+    out.extend_from_slice(payload_type.len().to_string().as_bytes());
+    out.push(b' ');
+    out.extend_from_slice(payload_type.as_bytes());
+    out.push(b' ');
+    out.extend_from_slice(payload.len().to_string().as_bytes());
+    out.push(b' ');
+    out.extend_from_slice(payload);
+    out
+}
+
 /// Verify a cosign signature end-to-end:
 ///
 /// 1. Parse `public_key_pem` as a P-256 ECDSA verifying key.
@@ -340,5 +460,58 @@ mod tests {
     fn sign_rejects_malformed_private_key() {
         let err = sign_keyed("not a pem", b"anything").unwrap_err();
         assert!(matches!(err, CosignError::BadPrivateKey(_)), "got {err:?}");
+    }
+
+    // --- DSSE envelope round-trip -----------------------------------------
+
+    #[test]
+    fn dsse_pae_matches_spec_layout() {
+        // DSSEv1 <type_len> <type> <payload_len> <payload>
+        let pae = dsse_pae("application/x-demo", b"hello");
+        let expected =
+            b"DSSEv1 18 application/x-demo 5 hello";
+        assert_eq!(pae, expected);
+    }
+
+    #[test]
+    fn dsse_sign_then_verify_roundtrips() {
+        let (pub_pem, priv_pem) = keypair_fixture();
+        let payload = br#"{"_type":"https://in-toto.io/Statement/v1"}"#;
+        let envelope = sign_dsse(&priv_pem, "application/vnd.in-toto+json", payload).unwrap();
+        let recovered = verify_dsse(&pub_pem, &envelope).expect("verify");
+        assert_eq!(recovered, payload);
+    }
+
+    #[test]
+    fn dsse_verify_rejects_tampered_payload() {
+        let (pub_pem, priv_pem) = keypair_fixture();
+        let payload = b"original";
+        let envelope_bytes =
+            sign_dsse(&priv_pem, "application/test", payload).unwrap();
+
+        // Tamper with the base64 payload inside the envelope — the
+        // signature was over the *original* bytes.
+        let mut envelope: DsseEnvelope = serde_json::from_slice(&envelope_bytes).unwrap();
+        use base64::Engine as _;
+        envelope.payload = base64::engine::general_purpose::STANDARD.encode(b"tampered");
+        let tampered = serde_json::to_vec(&envelope).unwrap();
+
+        let err = verify_dsse(&pub_pem, &tampered).unwrap_err();
+        assert!(matches!(err, CosignError::VerifyFailed(_)), "got {err:?}");
+    }
+
+    #[test]
+    fn dsse_verify_rejects_cross_type_substitution() {
+        // Sign under one payloadType, swap the type on the envelope.
+        // PAE prevents the signature from verifying against the
+        // swapped type.
+        let (pub_pem, priv_pem) = keypair_fixture();
+        let payload = b"cross-type";
+        let envelope_bytes = sign_dsse(&priv_pem, "type/a", payload).unwrap();
+        let mut envelope: DsseEnvelope = serde_json::from_slice(&envelope_bytes).unwrap();
+        envelope.payload_type = "type/b".to_string();
+        let tampered = serde_json::to_vec(&envelope).unwrap();
+        let err = verify_dsse(&pub_pem, &tampered).unwrap_err();
+        assert!(matches!(err, CosignError::VerifyFailed(_)), "got {err:?}");
     }
 }
