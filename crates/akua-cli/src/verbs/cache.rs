@@ -98,7 +98,7 @@ pub fn run<W: Write>(
         CacheAction::Clear { scope } => {
             let report = cache_inventory::clear(scope)?;
             CacheOutput::Clear(ClearOutputBody {
-                scope: scope_label(scope),
+                scope: scope.as_str(),
                 oci_root: oci_root.clone(),
                 git_root: git_root.clone(),
                 removed: report.removed,
@@ -114,14 +114,6 @@ pub fn run<W: Write>(
     emit_output(stdout, ctx, &output, |w| write_text(w, &output))
         .map_err(CacheVerbError::StdoutWrite)?;
     Ok(ExitCode::Success)
-}
-
-fn scope_label(scope: ClearScope) -> &'static str {
-    match scope {
-        ClearScope::Both => "both",
-        ClearScope::OciOnly => "oci",
-        ClearScope::GitOnly => "git",
-    }
 }
 
 fn write_text<W: Write>(w: &mut W, output: &CacheOutput) -> std::io::Result<()> {
@@ -253,10 +245,4 @@ mod tests {
         assert_eq!(human_bytes(5 * 1024 * 1024), "5.0 MiB");
     }
 
-    #[test]
-    fn scope_label_round_trips() {
-        assert_eq!(scope_label(ClearScope::Both), "both");
-        assert_eq!(scope_label(ClearScope::OciOnly), "oci");
-        assert_eq!(scope_label(ClearScope::GitOnly), "git");
-    }
 }

@@ -105,29 +105,38 @@ pub fn clear_at(
         removed: 0,
         freed_bytes: 0,
     };
-    if scope.includes_oci() && oci_root.exists() {
-        let entries = list_at(oci_root, Path::new("/dev/null-git"))?;
-        for e in &entries.entries {
-            report.removed += 1;
-            report.freed_bytes += e.size_bytes;
-        }
-        std::fs::remove_dir_all(oci_root).map_err(|source| CacheError::Io {
-            path: oci_root.to_path_buf(),
-            source,
-        })?;
+    if scope.includes_oci() {
+        let mut entries = Vec::new();
+        collect_oci(oci_root, &mut entries)?;
+        reap(oci_root, &entries, &mut report)?;
     }
-    if scope.includes_git() && git_root.exists() {
-        let entries = list_at(Path::new("/dev/null-oci"), git_root)?;
-        for e in &entries.entries {
-            report.removed += 1;
-            report.freed_bytes += e.size_bytes;
-        }
-        std::fs::remove_dir_all(git_root).map_err(|source| CacheError::Io {
-            path: git_root.to_path_buf(),
-            source,
-        })?;
+    if scope.includes_git() {
+        let mut entries = Vec::new();
+        collect_git(git_root, &mut entries)?;
+        reap(git_root, &entries, &mut report)?;
     }
     Ok(report)
+}
+
+/// Sum the entry sizes into the report, then `rm -rf` the root.
+/// No-op when the root is absent. Avoids a second recursive walk by
+/// reusing the inventory we already did.
+fn reap(
+    root: &Path,
+    entries: &[CacheEntry],
+    report: &mut CacheClearReport,
+) -> Result<(), CacheError> {
+    if !root.exists() {
+        return Ok(());
+    }
+    for e in entries {
+        report.removed += 1;
+        report.freed_bytes += e.size_bytes;
+    }
+    std::fs::remove_dir_all(root).map_err(|source| CacheError::Io {
+        path: root.to_path_buf(),
+        source,
+    })
 }
 
 /// Which cache branches to reap.
@@ -144,6 +153,15 @@ impl ClearScope {
     }
     fn includes_git(self) -> bool {
         matches!(self, ClearScope::Both | ClearScope::GitOnly)
+    }
+
+    /// Stable JSON label. Pinned by consumers.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ClearScope::Both => "both",
+            ClearScope::OciOnly => "oci",
+            ClearScope::GitOnly => "git",
+        }
     }
 }
 
