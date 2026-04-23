@@ -7,8 +7,7 @@
 #   akua render --inputs inputs.yaml      # render to ./rendered by default
 
 import akua.ctx
-import akua.helm
-import charts.nginx as nginx    # Phase 2a: resolved from akua.toml; .path + .sha256
+import charts.nginx as nginx    # Phase 2a: resolved from akua.toml
 
 schema Input:
     """Public inputs for the hello-webapp Package."""
@@ -24,13 +23,13 @@ schema Input:
 
 input: Input = ctx.input()
 
-_nginx = helm.template(helm.Template {
-    chart = nginx.path                  # absolute path resolved by akua
-    release = input.name
+# Phase 2b slice C: the generated `charts.nginx` module exposes a
+# `template()` callable pre-filled with the resolved chart path, so
+# the Package only restates the options that matter.
+resources = nginx.template(nginx.TemplateOpts {
     values = {
         replicaCount = input.replicas
         fullnameOverride = input.name
     }
+    release = input.name
 })
-
-resources = _nginx

@@ -66,35 +66,74 @@ pub fn materialize_charts(
         "[package]\nname = \"charts\"\nedition = \"0.0.1\"\nversion = \"0.0.1\"\n";
     std::fs::write(dir.path().join("kcl.mod"), CHARTS_KCL_MOD)?;
     for (name, chart) in &resolved.entries {
-        // Two fields, both typed as `str`, so callers can do
-        //   helm.template({ chart = charts.nginx.path, ... })
-        // without pulling in schemas. KCL string literals take care of
-        // any path escaping — we only ever emit `"..."` around the
-        // debug-formatted PathBuf display.
-        //
-        // Phase 2b slice C: when the chart directory has a
-        // `values.schema.json`, we also emit a typed `Values` schema
-        // (plus any nested support schemas) mirroring the JSON Schema
-        // shape. Authors writing `nginx.Values { replicaCount = 3 }`
-        // get IDE autocomplete, KCL type-checks the structure, and
-        // the chart's own helm --validate is still the source of
-        // truth at render time.
-        let mut body = format!(
-            "# Auto-generated per-render from akua.toml dep `{name}`.\n\
-             # Points at a resolved chart directory on disk.\n\
-             \n\
-             path: str = {path_literal}\n\
-             sha256: str = \"{digest}\"\n",
-            path_literal = kcl_str_literal(&chart.abs_path.to_string_lossy()),
-            digest = chart.sha256,
+        let values_schema = load_values_schema(&chart.abs_path);
+        let body = build_chart_module(
+            name,
+            &kcl_str_literal(&chart.abs_path.to_string_lossy()),
+            &chart.sha256,
+            values_schema.as_deref(),
         );
-        if let Some(schema_src) = load_values_schema(&chart.abs_path) {
-            body.push_str("\n# Typed Values schema, generated from values.schema.json.\n");
-            body.push_str(&schema_src);
-        }
         std::fs::write(dir.path().join(format!("{name}.k")), body)?;
     }
     Ok(dir)
+}
+
+/// Compose the generated `charts/<name>.k` source: the two data
+/// constants, the optional typed `Values` schema, plus a `template`
+/// lambda that pre-fills `chart = path` so authors write
+///
+/// ```kcl
+/// import charts.nginx
+/// resources = nginx.template(nginx.Values { replicaCount = 3 })
+/// ```
+///
+/// instead of the longer `helm.template(helm.Template { chart = nginx.path, ... })`
+/// boilerplate. When the chart has no values.schema.json we fall
+/// back to a `{str:}` passthrough so the same entry-point works.
+fn build_chart_module(
+    dep_name: &str,
+    path_literal: &str,
+    digest: &str,
+    values_schema_src: Option<&str>,
+) -> String {
+    let mut body = format!(
+        "# Auto-generated per-render from akua.toml dep `{dep_name}`.\n\
+         # Phase 2b slice C: exposes `path`, `sha256`, `Values`, and a\n\
+         # pre-filled `template` callable. Regenerated every render.\n\
+         \n\
+         import akua.helm as _helm\n\
+         \n\
+         path: str = {path_literal}\n\
+         sha256: str = \"{digest}\"\n\
+         \n"
+    );
+    let values_type = if let Some(schema) = values_schema_src {
+        body.push_str("# Typed Values schema, generated from values.schema.json.\n");
+        body.push_str(schema);
+        body.push('\n');
+        "Values"
+    } else {
+        // No schema — accept any dict at the callsite. Keeps the
+        // API shape consistent with typed-Values charts.
+        "{str:}"
+    };
+    // Convenience wrapper: pre-fills `chart = path` so the callsite
+    // is the values the author actually cares about. Single-argument
+    // Options-schema-style call form (matches `akua.helm.template`) —
+    // KCL's lambda parser is happiest when the parameter is a named
+    // schema rather than a dict-with-defaults.
+    let opts_default = if values_type == "Values" {
+        "Values {}"
+    } else {
+        "{}"
+    };
+    body.push_str(&format!(
+        "schema TemplateOpts:\n    values: {values_type} = {opts_default}\n    release: str = \"release\"\n    namespace: str = \"default\"\n\n"
+    ));
+    body.push_str(
+        "template = lambda opts: TemplateOpts = TemplateOpts {} -> [{str:}] {\n    _helm.template(_helm.Template {\n        chart = path\n        values = opts.values\n        release = opts.release\n        namespace = opts.namespace\n    })\n}\n",
+    );
+    body
 }
 
 /// Read `values.schema.json` from the chart root, convert it to KCL,
@@ -222,6 +261,11 @@ mod tests {
         let nginx_k = std::fs::read_to_string(root.join("nginx.k")).unwrap();
         assert!(nginx_k.contains("path: str = \"/tmp/charts/nginx\""));
         assert!(nginx_k.contains("sha256: str = \"sha256:abc123\""));
+        // Slice-C addition: `template` lambda pre-filled with `chart = path`.
+        assert!(nginx_k.contains("template = lambda"), "module: {nginx_k}");
+        assert!(nginx_k.contains("schema TemplateOpts:"), "module: {nginx_k}");
+        // No values.schema.json → values type is the passthrough dict.
+        assert!(nginx_k.contains("values: {str:}"), "module: {nginx_k}");
     }
 
     #[test]
@@ -303,6 +347,11 @@ mod tests {
         assert!(body.contains("schema Values:"), "{}", body);
         assert!(body.contains("replicaCount: int = 1"), "{}", body);
         assert!(body.contains("schema ValuesImage:"), "{}", body);
+        // template() lambda typed on the generated Values schema
+        // via the TemplateOpts wrapper.
+        assert!(body.contains("schema TemplateOpts:"), "{}", body);
+        assert!(body.contains("values: Values"), "{}", body);
+        assert!(body.contains("Values {}"), "{}", body);
     }
 
     #[test]
