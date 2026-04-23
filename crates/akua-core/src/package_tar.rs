@@ -148,6 +148,15 @@ pub fn pack_workspace_with_vendored_deps(
     Ok(buf)
 }
 
+/// Compute the `sha256:<hex>` digest of a packed tarball. Same
+/// shape as the OCI layer digest the registry would assign — so a
+/// locally-packed artifact and its published counterpart carry
+/// matching identifiers. Pin this in downstream automation.
+pub fn layer_digest(tar_gz: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    format!("sha256:{}", crate::hex::hex_encode(&Sha256::digest(tar_gz)))
+}
+
 /// Per-file exclusions unique to publish. Directory-level skips
 /// (`deploy`, `target`, hidden dirs) are handled by the shared
 /// [`crate::walk`] module.

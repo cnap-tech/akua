@@ -137,7 +137,7 @@ pub(crate) fn should_skip_dir(name: &str) -> bool {
     }
     matches!(
         name,
-        "deploy" | "rendered" | "out" | "target" | "node_modules"
+        "deploy" | "rendered" | "out" | "target" | "node_modules" | "dist"
     )
 }
 
@@ -162,6 +162,7 @@ mod tests {
         assert!(should_skip_dir("deploy"));
         assert!(should_skip_dir("target"));
         assert!(should_skip_dir("node_modules"));
+        assert!(should_skip_dir("dist"));
         assert!(!should_skip_dir("src"));
         assert!(!should_skip_dir("vendor"));
     }

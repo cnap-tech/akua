@@ -157,12 +157,11 @@ pub fn run<W: Write>(
     // Resolve non-path deps so their content gets vendored into the
     // tarball at `.akua/vendor/<name>/`. Resolver errors here
     // (expired creds, registry 5xx, digest drift) mean the
-    // published artifact WILL NOT render offline — the pulled
-    // Package falls through to a network fetch, which may itself
-    // fail in the consumer's environment. We emit a loud stderr
-    // warning in that case rather than silently shipping an un-
-    // vendored artifact.
-    let vendored_pairs = collect_vendor_pairs(args.workspace, &manifest);
+    // published artifact WILL NOT render offline — we emit a loud
+    // stderr warning in that case rather than silently shipping an
+    // un-vendored artifact.
+    let vendored_pairs =
+        crate::verbs::vendor::collect_vendor_pairs(args.workspace, &manifest, "akua publish");
 
     let tar_gz =
         package_tar::pack_workspace_with_vendored_deps(args.workspace, &vendored_pairs)?;
@@ -250,63 +249,6 @@ fn write_text<W: Write>(w: &mut W, out: &PublishOutput) -> std::io::Result<()> {
         writeln!(w, "  attested  {}", att_tag)?;
     }
     Ok(())
-}
-
-/// Resolve non-path deps so their chart content can be vendored into
-/// the published tarball. Path deps already live in the workspace
-/// tree (typically `vendor/`) and are packed via the workspace
-/// walk — don't re-vendor them or they'll appear twice in the
-/// tarball.
-///
-/// A resolver failure here is *loud*: we emit a stderr warning
-/// naming the failing dep + cause so the publisher doesn't ship an
-/// un-vendored artifact by accident. Returns the pairs the resolver
-/// *did* produce — a partial-vendor result is still better than
-/// nothing when one dep out of many is broken.
-fn collect_vendor_pairs(
-    workspace: &Path,
-    manifest: &AkuaManifest,
-) -> Vec<(String, PathBuf)> {
-    use akua_core::chart_resolver::{self, ResolvedSource, ResolverOptions};
-    use akua_core::AkuaLock;
-
-    // Consult lockfile-pinned digests so OCI pulls reuse the
-    // existing cache without re-verifying on the network.
-    let expected_digests = AkuaLock::load(workspace)
-        .map(|lock| {
-            lock.packages
-                .into_iter()
-                .filter(|p| p.is_oci())
-                .map(|p| (p.name, p.digest))
-                .collect()
-        })
-        .unwrap_or_default();
-    let opts = ResolverOptions {
-        offline: false,
-        cache_root: None,
-        expected_digests,
-        cosign_public_key_pem: None,
-    };
-    let resolved = match chart_resolver::resolve_with_options(manifest, workspace, &opts) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!(
-                "akua publish: warning: dep resolution failed, published artifact will not render offline: {e}"
-            );
-            return Vec::new();
-        }
-    };
-
-    let mut pairs = Vec::new();
-    for chart in resolved.entries.values() {
-        // Path / replace → already in the workspace walk; don't
-        // double-vendor.
-        let include = matches!(chart.source, ResolvedSource::Oci { .. } | ResolvedSource::Git { .. });
-        if include {
-            pairs.push((chart.name.clone(), chart.abs_path.clone()));
-        }
-    }
-    pairs
 }
 
 /// Load `[signing].cosign_private_key` contents relative to the

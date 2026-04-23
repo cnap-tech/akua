@@ -12,9 +12,9 @@ use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::{
     add as add_verb, auth as auth_verb, cache as cache_verb, check as check_verb,
     diff as diff_verb, fmt as fmt_verb, init as init_verb, inspect as inspect_verb,
-    lint as lint_verb, publish as publish_verb, pull as pull_verb, remove as remove_verb,
-    render as render_verb, test as test_verb, tree as tree_verb, verify as verify_verb,
-    version as version_verb, whoami as whoami_verb,
+    lint as lint_verb, pack as pack_verb, publish as publish_verb, pull as pull_verb,
+    remove as remove_verb, render as render_verb, test as test_verb, tree as tree_verb,
+    verify as verify_verb, version as version_verb, whoami as whoami_verb,
 };
 #[cfg(feature = "dev-watch")]
 use akua_cli::verbs::dev as dev_verb;
@@ -236,6 +236,31 @@ enum Commands {
         /// Workspace root containing akua.toml.
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
+    },
+
+    /// Pack the workspace into a local `.tar.gz` — same shape as the
+    /// tarball `akua publish` uploads, but written to disk instead of
+    /// pushed. Use for air-gap transfers, offline signing, or
+    /// archival diff.
+    Pack {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Workspace root containing akua.toml.
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
+
+        /// Output tarball path. Defaults to
+        /// `./dist/<name>-<version>.tar.gz` under the workspace
+        /// (the `dist/` dir is walker-skipped, so re-packing is
+        /// idempotent).
+        #[arg(long)]
+        out: Option<PathBuf>,
+
+        /// Don't embed resolved OCI/git deps under `.akua/vendor/`.
+        /// Produces a smaller tarball that won't render offline.
+        #[arg(long)]
+        no_vendor: bool,
     },
 
     /// Remove a dependency from akua.toml.
@@ -520,6 +545,31 @@ fn dispatch(command: Commands) -> ExitCode {
         ),
         Commands::Cache { sub } => run_cache(sub),
         Commands::Auth { sub } => run_auth(sub),
+        Commands::Pack {
+            args,
+            workspace,
+            out,
+            no_vendor,
+        } => run_pack(&args, &workspace, out.as_deref(), no_vendor),
+    }
+}
+
+fn run_pack(
+    args: &UniversalArgs,
+    workspace: &std::path::Path,
+    out: Option<&std::path::Path>,
+    no_vendor: bool,
+) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = pack_verb::PackArgs {
+        workspace,
+        out,
+        no_vendor,
+    };
+    let mut stdout = io::stdout().lock();
+    match pack_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
 }
 
@@ -1058,6 +1108,50 @@ mod tests {
             .err()
             .expect("should fail");
         assert!(err.to_string().contains("cannot be used"));
+    }
+
+    #[test]
+    fn parses_pack_with_out_and_no_vendor() {
+        let cli = Cli::parse_from([
+            "akua",
+            "pack",
+            "--workspace",
+            "./ws",
+            "--out",
+            "./dist/p.tgz",
+            "--no-vendor",
+        ]);
+        match cli.command {
+            Commands::Pack {
+                workspace,
+                out,
+                no_vendor,
+                ..
+            } => {
+                assert_eq!(workspace, PathBuf::from("./ws"));
+                assert_eq!(out, Some(PathBuf::from("./dist/p.tgz")));
+                assert!(no_vendor);
+            }
+            _ => panic!("expected pack"),
+        }
+    }
+
+    #[test]
+    fn pack_defaults_workspace_and_omits_out() {
+        let cli = Cli::parse_from(["akua", "pack"]);
+        match cli.command {
+            Commands::Pack {
+                workspace,
+                out,
+                no_vendor,
+                ..
+            } => {
+                assert_eq!(workspace, PathBuf::from("."));
+                assert!(out.is_none());
+                assert!(!no_vendor);
+            }
+            _ => panic!("expected pack"),
+        }
     }
 
     #[test]
