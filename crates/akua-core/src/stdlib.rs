@@ -71,7 +71,15 @@ pub fn materialize_charts(
         // without pulling in schemas. KCL string literals take care of
         // any path escaping — we only ever emit `"..."` around the
         // debug-formatted PathBuf display.
-        let body = format!(
+        //
+        // Phase 2b slice C: when the chart directory has a
+        // `values.schema.json`, we also emit a typed `Values` schema
+        // (plus any nested support schemas) mirroring the JSON Schema
+        // shape. Authors writing `nginx.Values { replicaCount = 3 }`
+        // get IDE autocomplete, KCL type-checks the structure, and
+        // the chart's own helm --validate is still the source of
+        // truth at render time.
+        let mut body = format!(
             "# Auto-generated per-render from akua.toml dep `{name}`.\n\
              # Points at a resolved chart directory on disk.\n\
              \n\
@@ -80,9 +88,27 @@ pub fn materialize_charts(
             path_literal = kcl_str_literal(&chart.abs_path.to_string_lossy()),
             digest = chart.sha256,
         );
+        if let Some(schema_src) = load_values_schema(&chart.abs_path) {
+            body.push_str("\n# Typed Values schema, generated from values.schema.json.\n");
+            body.push_str(&schema_src);
+        }
         std::fs::write(dir.path().join(format!("{name}.k")), body)?;
     }
     Ok(dir)
+}
+
+/// Read `values.schema.json` from the chart root, convert it to KCL,
+/// and return the source. `None` when the file is absent or malformed
+/// — the latter is intentional: we don't want a stale schema in a
+/// vendored chart to block the whole render. Author-visible lint
+/// surfaces via the separate `akua check` path.
+fn load_values_schema(chart_dir: &std::path::Path) -> Option<String> {
+    let schema_path = chart_dir.join("values.schema.json");
+    let bytes = std::fs::read(&schema_path).ok()?;
+    match crate::values_schema::generate_from_bytes(&bytes) {
+        Ok(gen) if !gen.source.is_empty() => Some(gen.source),
+        _ => None,
+    }
 }
 
 /// Quote a string as a KCL double-quoted literal, escaping `\` and `"`.
@@ -221,6 +247,96 @@ mod tests {
         let tmp = materialize_charts(&resolved).unwrap();
         let body = std::fs::read_to_string(tmp.path().join("win.k")).unwrap();
         assert!(body.contains(r#"path: str = "C:\\charts\\w\"ei\"rd""#));
+    }
+
+    #[test]
+    fn materialize_charts_embeds_values_schema_when_present() {
+        use crate::chart_resolver::{ResolvedChart, ResolvedCharts};
+        use std::collections::BTreeMap;
+
+        // Build a real chart dir with a values.schema.json so the
+        // stdlib generator picks it up end-to-end.
+        let chart_root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(chart_root.path().join("templates")).unwrap();
+        std::fs::write(
+            chart_root.path().join("Chart.yaml"),
+            "apiVersion: v2\nname: demo\nversion: 0.1.0\n",
+        )
+        .unwrap();
+        std::fs::write(
+            chart_root.path().join("values.schema.json"),
+            r#"{
+                "type": "object",
+                "properties": {
+                    "replicaCount": { "type": "integer", "default": 1 },
+                    "image": {
+                        "type": "object",
+                        "properties": {
+                            "repository": { "type": "string" }
+                        },
+                        "required": ["repository"]
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            "nginx".to_string(),
+            ResolvedChart {
+                name: "nginx".to_string(),
+                abs_path: chart_root.path().canonicalize().unwrap(),
+                sha256: "sha256:deadbeef".to_string(),
+                source: crate::chart_resolver::ResolvedSource::Path {
+                    declared: "./vendor/nginx".to_string(),
+                },
+            },
+        );
+        let resolved = ResolvedCharts { entries };
+
+        let tmp = materialize_charts(&resolved).unwrap();
+        let body = std::fs::read_to_string(tmp.path().join("nginx.k")).unwrap();
+        // Existing fields still present.
+        assert!(body.contains("path: str ="), "{}", body);
+        // New: typed Values schema inlined.
+        assert!(body.contains("schema Values:"), "{}", body);
+        assert!(body.contains("replicaCount: int = 1"), "{}", body);
+        assert!(body.contains("schema ValuesImage:"), "{}", body);
+    }
+
+    #[test]
+    fn materialize_charts_skips_missing_values_schema() {
+        use crate::chart_resolver::{ResolvedChart, ResolvedCharts};
+        use std::collections::BTreeMap;
+
+        // Chart dir without values.schema.json. Materialization still
+        // produces path + sha256 and *no* schema block.
+        let chart_root = tempfile::tempdir().unwrap();
+        std::fs::write(
+            chart_root.path().join("Chart.yaml"),
+            "apiVersion: v2\nname: demo\nversion: 0.1.0\n",
+        )
+        .unwrap();
+
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            "nginx".to_string(),
+            ResolvedChart {
+                name: "nginx".to_string(),
+                abs_path: chart_root.path().canonicalize().unwrap(),
+                sha256: "sha256:abc".to_string(),
+                source: crate::chart_resolver::ResolvedSource::Path {
+                    declared: "./vendor/nginx".to_string(),
+                },
+            },
+        );
+        let resolved = ResolvedCharts { entries };
+
+        let tmp = materialize_charts(&resolved).unwrap();
+        let body = std::fs::read_to_string(tmp.path().join("nginx.k")).unwrap();
+        assert!(body.contains("path: str ="), "{}", body);
+        assert!(!body.contains("schema Values"), "schema unexpectedly emitted: {}", body);
     }
 
     #[test]
