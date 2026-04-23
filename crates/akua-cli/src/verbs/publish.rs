@@ -154,7 +154,17 @@ pub fn run<W: Write>(
 
     let creds = CredsStore::load().map_err(|e| PublishError::AuthConfig(e.to_string()))?;
 
-    let tar_gz = package_tar::pack_workspace(args.workspace)?;
+    // Resolve non-path deps so their content gets vendored into the
+    // tarball at `.akua/vendor/<name>/`. The resolver handles the
+    // OCI pull / git checkout / vendor-first lookup; whatever it
+    // returns is what ships. Soft-fail on resolution errors — the
+    // publish itself shouldn't block on a best-effort vendoring
+    // step, and a user who wants strict vendoring can `akua verify`
+    // + `akua add` first.
+    let vendored_pairs = collect_vendor_pairs(args.workspace, &manifest);
+
+    let tar_gz =
+        package_tar::pack_workspace_with_vendored_deps(args.workspace, &vendored_pairs)?;
 
     let pushed = oci_pusher::push(args.oci_ref, &tag, &tar_gz, &creds)?;
 
@@ -239,6 +249,57 @@ fn write_text<W: Write>(w: &mut W, out: &PublishOutput) -> std::io::Result<()> {
         writeln!(w, "  attested  {}", att_tag)?;
     }
     Ok(())
+}
+
+/// Resolve non-path deps so their chart content can be vendored into
+/// the published tarball. Path deps already live in the workspace
+/// tree (typically `vendor/`) and are packed via the workspace
+/// walk — don't re-vendor them or they'll appear twice in the
+/// tarball.
+///
+/// Soft-fails: any resolver error returns an empty vendor list so
+/// publish can still proceed with an un-vendored tarball. Operators
+/// who care get strict enforcement via `akua add` + `akua verify`
+/// before publish.
+fn collect_vendor_pairs(
+    workspace: &Path,
+    manifest: &AkuaManifest,
+) -> Vec<(String, PathBuf)> {
+    use akua_core::chart_resolver::{self, ResolvedSource, ResolverOptions};
+    use akua_core::AkuaLock;
+
+    // Consult lockfile-pinned digests so OCI pulls reuse the
+    // existing cache without re-verifying on the network.
+    let expected_digests = AkuaLock::load(workspace)
+        .map(|lock| {
+            lock.packages
+                .into_iter()
+                .filter(|p| p.is_oci())
+                .map(|p| (p.name, p.digest))
+                .collect()
+        })
+        .unwrap_or_default();
+    let opts = ResolverOptions {
+        offline: false,
+        cache_root: None,
+        expected_digests,
+        cosign_public_key_pem: None,
+    };
+    let resolved = match chart_resolver::resolve_with_options(manifest, workspace, &opts) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut pairs = Vec::new();
+    for chart in resolved.entries.values() {
+        // Path / replace → already in the workspace walk; don't
+        // double-vendor.
+        let include = matches!(chart.source, ResolvedSource::Oci { .. } | ResolvedSource::Git { .. });
+        if include {
+            pairs.push((chart.name.clone(), chart.abs_path.clone()));
+        }
+    }
+    pairs
 }
 
 /// Load `[signing].cosign_private_key` contents relative to the

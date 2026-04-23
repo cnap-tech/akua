@@ -60,7 +60,30 @@ pub fn unpack_to(tar_gz: &[u8], target: &Path) -> Result<(), PackageTarError> {
 }
 
 /// Build a deterministic `.tar.gz` of the workspace for publish.
+/// Convenience wrapper that doesn't vendor any deps — use
+/// [`pack_workspace_with_vendored_deps`] when the publisher wants
+/// the pulled artifact to render offline.
 pub fn pack_workspace(root: &Path) -> Result<Vec<u8>, PackageTarError> {
+    pack_workspace_with_vendored_deps(root, &[])
+}
+
+/// Like [`pack_workspace`] but also embeds each entry in
+/// `vendored` under `.akua/vendor/<name>/` in the output tarball.
+/// Used by `akua publish` to include OCI / git dep chart trees
+/// alongside the Package source so `akua pull` lands a workspace
+/// that renders without network access.
+///
+/// `vendored` is a list of `(dep_name, chart_dir)` pairs. The
+/// content of each `chart_dir` is copied in recursively — same
+/// walk + skip rules as `pack_workspace` itself.
+///
+/// Path deps already live in the workspace tree (usually under
+/// `vendor/`) and are packed via the normal walk; don't include
+/// them here or they'll double-vendor.
+pub fn pack_workspace_with_vendored_deps(
+    root: &Path,
+    vendored: &[(String, PathBuf)],
+) -> Result<Vec<u8>, PackageTarError> {
     if !root.is_dir() {
         return Err(PackageTarError::NotADirectory {
             path: root.to_path_buf(),
@@ -78,13 +101,34 @@ pub fn pack_workspace(root: &Path) -> Result<Vec<u8>, PackageTarError> {
             source,
         })?;
 
+    // Collect vendored-dep files upfront so the tarball is packed in
+    // one sorted stream. Each (dep_name, chart_dir) contributes a
+    // sub-tree at `.akua/vendor/<dep_name>/`. Skip rules match the
+    // workspace walk — no `target/` / `node_modules/` / hidden dirs
+    // leak into published artifacts even if a chart cache contains
+    // them.
+    let mut vendor_entries: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for (name, chart_dir) in vendored {
+        let pairs = crate::walk::collect_files(chart_dir, |_| true).map_err(|source| {
+            PackageTarError::Io {
+                path: chart_dir.clone(),
+                source,
+            }
+        })?;
+        for (rel, abs) in pairs {
+            let tar_path = PathBuf::from(".akua/vendor").join(name).join(rel);
+            vendor_entries.push((tar_path, abs));
+        }
+    }
+    vendor_entries.sort_by(|a, b| a.0.cmp(&b.0));
+
     let mut buf = Vec::new();
     {
         let gz = flate2::write::GzEncoder::new(&mut buf, flate2::Compression::default());
         let mut tar_b = tar::Builder::new(gz);
         tar_b.follow_symlinks(false);
 
-        for (rel, abs) in &entries {
+        for (rel, abs) in entries.iter().chain(vendor_entries.iter()) {
             let mut file = std::fs::File::open(abs).map_err(|source| PackageTarError::Io {
                 path: abs.clone(),
                 source,
@@ -213,6 +257,56 @@ mod tests {
         std::fs::write(&file, b"x").unwrap();
         let err = pack_workspace(&file).unwrap_err();
         assert!(matches!(err, PackageTarError::NotADirectory { .. }));
+    }
+
+    #[test]
+    fn pack_embeds_vendored_deps_under_akua_vendor() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "akua.toml",
+            b"[package]\nname=\"x\"\nversion=\"0.1.0\"\nedition=\"akua.dev/v1alpha1\"\n",
+        );
+        write(tmp.path(), "package.k", b"resources = []\n");
+
+        // Vendored chart lives outside the workspace — simulates
+        // the `$XDG_CACHE_HOME/akua/oci/sha256/<hex>/podinfo/`
+        // layout `akua publish` would pass in.
+        let cache = tempfile::tempdir().unwrap();
+        let chart = cache.path().join("nginx");
+        std::fs::create_dir_all(chart.join("templates")).unwrap();
+        std::fs::write(chart.join("Chart.yaml"), b"apiVersion: v2\nname: nginx\n").unwrap();
+        std::fs::write(chart.join("templates/cm.yaml"), b"apiVersion: v1\n").unwrap();
+
+        let vendored = vec![("nginx".to_string(), chart.clone())];
+        let tar_gz = pack_workspace_with_vendored_deps(tmp.path(), &vendored).unwrap();
+        let names = list_entries(&tar_gz);
+
+        assert!(names.contains(&".akua/vendor/nginx/Chart.yaml".to_string()), "names: {names:?}");
+        assert!(
+            names.contains(&".akua/vendor/nginx/templates/cm.yaml".to_string()),
+            "names: {names:?}"
+        );
+        // Workspace files still present.
+        assert!(names.contains(&"akua.toml".to_string()));
+        assert!(names.contains(&"package.k".to_string()));
+    }
+
+    #[test]
+    fn pack_with_no_vendored_deps_matches_plain_pack() {
+        // `pack_workspace(root)` and `pack_workspace_with_vendored_deps(root, &[])`
+        // must produce byte-identical output — the vendor API is
+        // strictly additive.
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "akua.toml",
+            b"[package]\nname=\"x\"\nversion=\"0.1.0\"\nedition=\"akua.dev/v1alpha1\"\n",
+        );
+        write(tmp.path(), "package.k", b"resources = []\n");
+        let a = pack_workspace(tmp.path()).unwrap();
+        let b = pack_workspace_with_vendored_deps(tmp.path(), &[]).unwrap();
+        assert_eq!(a, b);
     }
 
     #[test]
