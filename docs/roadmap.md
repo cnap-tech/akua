@@ -247,6 +247,15 @@ rest ship when demand justifies the surface.
 
 ---
 
+## Phase 8.5 — Operational verbs
+
+Glue that ships alongside the author loop but targets operators
+rather than authors. Small, composable, agent-friendly.
+
+- [x] `akua cache list | clear [--oci|--git] | path` — inventory + reclaim the content-addressed caches under `$XDG_CACHE_HOME/akua/{oci,git}` that `akua add` + `akua render` populate. Discriminated JSON shape `{action: list|clear|path, …}`. Ephemeral CI runners and disk-pressure triage without `rm -rf` guessing. (2026-04-23)
+
+---
+
 ## Phase 9 — Deploy + operator surface
 
 `akua deploy`, `akua query`, `akua trace`, `akua policy` — cluster-facing operational verbs. Out of scope for the sandbox-first core; ship when there's demand.
