@@ -23,6 +23,25 @@ use serde_yaml::Value;
 /// The `option()` key every Package uses for its `input` binding.
 const INPUT_OPTION_KEY: &str = "input";
 
+/// Probe-order for Package inputs auto-discovery. When the caller
+/// doesn't pass `--inputs`, we look alongside the `package.k` at
+/// `inputs.yaml` first, then `inputs.example.yaml`. Returns `None`
+/// if neither file exists. Shared between `akua render` + `akua dev`
+/// so the auto-discovery path can't drift between them.
+pub fn resolve_inputs_path(package_path: &Path, explicit: Option<&Path>) -> Option<PathBuf> {
+    if let Some(p) = explicit {
+        return Some(p.to_path_buf());
+    }
+    let package_dir = package_path.parent().unwrap_or(Path::new("."));
+    for candidate in ["inputs.yaml", "inputs.example.yaml"] {
+        let probe = package_dir.join(candidate);
+        if probe.is_file() {
+            return Some(probe);
+        }
+    }
+    None
+}
+
 /// A loaded `Package.k` file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageK {

@@ -65,6 +65,45 @@ fn walk(
     Ok(())
 }
 
+/// Walk `root` and return every directory `should_skip_dir`
+/// doesn't reject — the walk never descends into a skipped
+/// branch, so a deep `target/` / `node_modules/` tree is
+/// cheap. Includes `root` itself. Result is sorted; useful for
+/// non-recursive file-system watchers that need to register one
+/// watch per eligible subtree.
+pub(crate) fn collect_directories(root: &Path) -> std::io::Result<Vec<PathBuf>> {
+    let mut out = Vec::new();
+    if root.is_dir() {
+        out.push(root.to_path_buf());
+        walk_dirs(root, &mut out)?;
+    }
+    out.sort();
+    Ok(out)
+}
+
+fn walk_dirs(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if should_skip_dir(&name_str) {
+            continue;
+        }
+        let ft = entry.file_type()?;
+        if ft.is_dir() {
+            out.push(path.clone());
+            walk_dirs(&path, out)?;
+        }
+    }
+    Ok(())
+}
+
 /// Recursively copy `src` into `dst`. Creates `dst` if absent;
 /// overwrites existing files. Skips symlinks + other non-regular
 /// file types, same as the walker above. Used by anyone who needs

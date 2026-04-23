@@ -72,29 +72,31 @@ pub fn run<W: Write>(
         stop_for_handler.store(true, Ordering::SeqCst);
     })?;
 
-    // One-shot resource loads: the Package file + inputs. If the
-    // author edits either we'll re-resolve on each render cycle
-    // (not on this path — see `render_once` below).
     let emit_json = matches!(ctx.output, OutputMode::Json);
     let mut stdout_ref = stdout;
+    let stop_for_loop = stop.clone();
 
     akua_core::dev::watch_and_render(
         args.workspace,
         args.debounce,
         |changed| render_once(args, changed),
         |event| {
-            // Writing here can fail — we swallow the error since the
-            // watch loop can't do much about it; the next `should_stop`
-            // check will exit cleanly.
-            if emit_json {
+            // Broken-pipe handling: if the user pipes `akua dev |
+            // head`, the first failed write must stop the loop —
+            // otherwise we burn CPU re-rendering to a closed fd.
+            // Setting `stop` here makes the next `should_stop`
+            // check unwind cleanly.
+            let write_result = if emit_json {
                 let line = serde_json::to_string(event).unwrap_or_default();
-                let _ = writeln!(&mut stdout_ref, "{line}");
+                writeln!(&mut stdout_ref, "{line}")
             } else {
-                let _ = write_human(&mut stdout_ref, event);
+                write_human(&mut stdout_ref, event)
+            };
+            if write_result.is_err() || stdout_ref.flush().is_err() {
+                stop.store(true, Ordering::SeqCst);
             }
-            let _ = stdout_ref.flush();
         },
-        || stop.load(Ordering::SeqCst),
+        || stop_for_loop.load(Ordering::SeqCst),
     )?;
 
     Ok(ExitCode::Success)
@@ -126,20 +128,9 @@ fn load_inputs(args: &DevArgs<'_>) -> Result<serde_yaml::Value, String> {
     serde_yaml::from_slice(&bytes).map_err(|e| format!("parsing {}: {e}", path.display()))
 }
 
-/// Mirror `akua render`'s probe order so `akua dev` picks up the
-/// same inputs the user already uses.
+/// Shared probe order lives in akua-core.
 fn resolve_inputs_path(args: &DevArgs<'_>) -> Option<PathBuf> {
-    if let Some(p) = &args.inputs_path {
-        return Some(p.clone());
-    }
-    let pkg_dir = args.package_path.parent().unwrap_or(Path::new("."));
-    for candidate in ["inputs.yaml", "inputs.example.yaml"] {
-        let probe = pkg_dir.join(candidate);
-        if probe.is_file() {
-            return Some(probe);
-        }
-    }
-    None
+    akua_core::package_k::resolve_inputs_path(&args.package_path, args.inputs_path.as_deref())
 }
 
 fn write_human<W: Write>(w: &mut W, event: &DevEvent) -> std::io::Result<()> {

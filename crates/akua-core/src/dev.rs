@@ -115,13 +115,28 @@ where
         path: workspace.to_path_buf(),
         source,
     })?;
-    debouncer
-        .watcher()
-        .watch(workspace, RecursiveMode::Recursive)
-        .map_err(|source| DevError::Watcher {
-            path: workspace.to_path_buf(),
-            source,
-        })?;
+
+    // Watch per kept subdir non-recursively rather than
+    // `RecursiveMode::Recursive` on the workspace root. A
+    // monorepo's `target/` / `node_modules/` / `.git/` can
+    // exhaust `fs.inotify.max_user_watches` before startup
+    // finishes — skipping them here keeps the watch count
+    // proportional to the source tree size. New top-level dirs
+    // created during the session (rare) aren't auto-watched;
+    // authors restart `akua dev` in that case.
+    let dirs = crate::walk::collect_directories(workspace).map_err(|source| DevError::Watcher {
+        path: workspace.to_path_buf(),
+        source: notify::Error::io(source),
+    })?;
+    for dir in &dirs {
+        debouncer
+            .watcher()
+            .watch(dir, RecursiveMode::NonRecursive)
+            .map_err(|source| DevError::Watcher {
+                path: dir.clone(),
+                source,
+            })?;
+    }
 
     loop {
         if should_stop() {

@@ -248,25 +248,10 @@ pub fn run<W: Write>(
     Ok(ExitCode::Success)
 }
 
-/// When the caller passes `--inputs`, honour it verbatim. Otherwise
-/// probe for the two conventional defaults (alongside the
-/// `package.k`): `inputs.yaml` first, then `inputs.example.yaml` as a
-/// fallback so the freshly-scaffolded `akua init` output renders
-/// without the user having to pass `--inputs` manually. Returns
-/// `None` when nothing is found; `load_inputs` then produces an empty
-/// mapping.
+/// Thin adapter around `akua_core::package_k::resolve_inputs_path`
+/// so `akua render` + `akua dev` share the probe order.
 fn resolve_inputs_path(args: &RenderArgs<'_>) -> Option<PathBuf> {
-    if let Some(p) = args.inputs_path {
-        return Some(p.to_path_buf());
-    }
-    let package_dir = args.package_path.parent().unwrap_or(Path::new("."));
-    for candidate in ["inputs.yaml", "inputs.example.yaml"] {
-        let probe = package_dir.join(candidate);
-        if probe.is_file() {
-            return Some(probe);
-        }
-    }
-    None
+    akua_core::package_k::resolve_inputs_path(args.package_path, args.inputs_path)
 }
 
 /// Resolve `[dependencies]` from the Package's sibling `akua.toml`.
