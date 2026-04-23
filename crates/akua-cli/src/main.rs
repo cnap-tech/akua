@@ -10,10 +10,11 @@ use clap::{ArgGroup, Args, Parser, Subcommand};
 
 use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::{
-    add as add_verb, cache as cache_verb, check as check_verb, diff as diff_verb, fmt as fmt_verb,
-    init as init_verb, inspect as inspect_verb, lint as lint_verb, publish as publish_verb,
-    pull as pull_verb, remove as remove_verb, render as render_verb, test as test_verb,
-    tree as tree_verb, verify as verify_verb, version as version_verb, whoami as whoami_verb,
+    add as add_verb, auth as auth_verb, cache as cache_verb, check as check_verb,
+    diff as diff_verb, fmt as fmt_verb, init as init_verb, inspect as inspect_verb,
+    lint as lint_verb, publish as publish_verb, pull as pull_verb, remove as remove_verb,
+    render as render_verb, test as test_verb, tree as tree_verb, verify as verify_verb,
+    version as version_verb, whoami as whoami_verb,
 };
 #[cfg(feature = "dev-watch")]
 use akua_cli::verbs::dev as dev_verb;
@@ -321,6 +322,58 @@ enum Commands {
         #[command(subcommand)]
         sub: CacheSub,
     },
+
+    /// Manage credentials in `$XDG_CONFIG_HOME/akua/auth.toml`.
+    /// `add` reads the secret from stdin (no interactive prompt,
+    /// no password on the command line — mirrors `docker login
+    /// --password-stdin`).
+    Auth {
+        #[command(subcommand)]
+        sub: AuthSub,
+    },
+}
+
+#[derive(Subcommand, Clone, Debug)]
+enum AuthSub {
+    /// Show every configured registry across both akua/auth.toml
+    /// and ~/.docker/config.json. Never prints secrets.
+    List {
+        #[command(flatten)]
+        args: UniversalArgs,
+    },
+
+    /// Write/overwrite an entry in akua/auth.toml. The secret is
+    /// read from stdin. Use `--username` for basic auth, `--token`
+    /// for bearer (PATs).
+    #[command(group(ArgGroup::new("auth_kind")
+        .required(true)
+        .args(["username", "token"])))]
+    Add {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Registry host (e.g. `ghcr.io`, `quay.io`).
+        #[arg(long)]
+        registry: String,
+
+        /// Username for basic auth. The password is read from stdin.
+        #[arg(long)]
+        username: Option<String>,
+
+        /// Bearer token mode. The token is read from stdin.
+        #[arg(long)]
+        token: bool,
+    },
+
+    /// Drop an entry from akua/auth.toml. No-op when the registry
+    /// is absent.
+    Remove {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        #[arg(long)]
+        registry: String,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -466,6 +519,40 @@ fn dispatch(command: Commands) -> ExitCode {
             version.as_deref(), tag.as_deref(), rev.as_deref(), force, &workspace,
         ),
         Commands::Cache { sub } => run_cache(sub),
+        Commands::Auth { sub } => run_auth(sub),
+    }
+}
+
+fn run_auth(sub: AuthSub) -> ExitCode {
+    let (args, action) = match sub {
+        AuthSub::List { args } => (args, auth_verb::AuthAction::List),
+        AuthSub::Add {
+            args,
+            registry,
+            username,
+            token,
+        } => {
+            let input = if token {
+                auth_verb::AuthAddInput::Bearer { registry }
+            } else {
+                // clap ArgGroup guarantees exactly one of username/token.
+                auth_verb::AuthAddInput::Basic {
+                    registry,
+                    username: username
+                        .expect("clap ArgGroup guarantees username when !token"),
+                }
+            };
+            (args, auth_verb::AuthAction::Add(input))
+        }
+        AuthSub::Remove { args, registry } => (args, auth_verb::AuthAction::Remove { registry }),
+    };
+    let ctx = resolve_ctx(&args);
+    let verb_args = auth_verb::AuthArgs { action };
+    let mut stdout = io::stdout().lock();
+    let mut stdin_reader = auth_verb::StdinReader;
+    match auth_verb::run(&ctx, &verb_args, &mut stdout, &mut stdin_reader) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
 }
 
@@ -971,6 +1058,67 @@ mod tests {
             .err()
             .expect("should fail");
         assert!(err.to_string().contains("cannot be used"));
+    }
+
+    #[test]
+    fn parses_auth_add_with_username() {
+        let cli = Cli::parse_from([
+            "akua",
+            "auth",
+            "add",
+            "--registry",
+            "ghcr.io",
+            "--username",
+            "alice",
+        ]);
+        match cli.command {
+            Commands::Auth {
+                sub: AuthSub::Add {
+                    registry,
+                    username,
+                    token,
+                    ..
+                },
+            } => {
+                assert_eq!(registry, "ghcr.io");
+                assert_eq!(username.as_deref(), Some("alice"));
+                assert!(!token);
+            }
+            _ => panic!("expected auth add"),
+        }
+    }
+
+    #[test]
+    fn parses_auth_add_with_token_flag() {
+        let cli =
+            Cli::parse_from(["akua", "auth", "add", "--registry", "ghcr.io", "--token"]);
+        match cli.command {
+            Commands::Auth {
+                sub: AuthSub::Add { token, username, .. },
+            } => {
+                assert!(token);
+                assert!(username.is_none());
+            }
+            _ => panic!("expected auth add"),
+        }
+    }
+
+    #[test]
+    fn auth_add_rejects_username_and_token_together() {
+        let err = Cli::try_parse_from([
+            "akua", "auth", "add", "--registry", "ghcr.io", "--username", "alice", "--token",
+        ])
+        .err()
+        .expect("should fail");
+        assert!(err.to_string().contains("cannot be used"));
+    }
+
+    #[test]
+    fn auth_add_requires_a_kind() {
+        let err = Cli::try_parse_from(["akua", "auth", "add", "--registry", "ghcr.io"])
+            .err()
+            .expect("should fail");
+        assert!(err.to_string().contains("required"));
     }
 
     #[test]
