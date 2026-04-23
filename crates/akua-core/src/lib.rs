@@ -57,6 +57,8 @@ pub mod slsa;
 #[cfg(feature = "engine-kcl")]
 pub mod stdlib;
 #[cfg(feature = "engine-kcl")]
+pub mod test_runner;
+#[cfg(feature = "engine-kcl")]
 pub mod values_schema;
 
 pub use cli_contract::{AgentContext, AgentSource, ExitCode, StructuredError};
