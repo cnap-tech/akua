@@ -138,12 +138,12 @@ pub fn run<W: Write, R: SecretReader>(
         AuthAction::List => {
             let registries = oci_auth::list_sources()?;
             AuthOutput::List(AuthListBody {
-                path: oci_auth::default_akua_auth_path(),
+                path: oci_auth::akua_auth_path(),
                 registries,
             })
         }
         AuthAction::Add(input) => {
-            let path = oci_auth::default_akua_auth_path().ok_or(AuthVerbError::NoConfigPath)?;
+            let path = oci_auth::akua_auth_path().ok_or(AuthVerbError::NoConfigPath)?;
             let secret = secret_in
                 .read_secret()
                 .map_err(AuthVerbError::SecretRead)?;
@@ -173,7 +173,7 @@ pub fn run<W: Write, R: SecretReader>(
             })
         }
         AuthAction::Remove { registry } => {
-            let path = oci_auth::default_akua_auth_path().ok_or(AuthVerbError::NoConfigPath)?;
+            let path = oci_auth::akua_auth_path().ok_or(AuthVerbError::NoConfigPath)?;
             let removed = oci_auth::remove_entry(&path, registry)?;
             AuthOutput::Remove(AuthRemoveBody {
                 path,
@@ -277,7 +277,7 @@ mod tests {
         let code = run(&ctx_json(), &args, &mut stdout, &mut reader).unwrap();
         assert_eq!(code, ExitCode::Success);
 
-        let path = oci_auth::default_akua_auth_path().unwrap();
+        let path = oci_auth::akua_auth_path().unwrap();
         let body = std::fs::read_to_string(&path).unwrap();
         assert!(body.contains("ghcr.io"), "{body}");
         assert!(body.contains("alice"), "{body}");
@@ -303,7 +303,7 @@ mod tests {
         run(&ctx_json(), &args, &mut stdout, &mut reader).unwrap();
 
         let body =
-            std::fs::read_to_string(oci_auth::default_akua_auth_path().unwrap()).unwrap();
+            std::fs::read_to_string(oci_auth::akua_auth_path().unwrap()).unwrap();
         assert!(body.contains("token"), "{body}");
         assert!(body.contains("ghp_deadbeef"), "{body}");
         assert!(!body.contains("password"), "{body}");
@@ -341,7 +341,7 @@ mod tests {
         env_scope_to(tmp.path());
 
         // Seed.
-        let path = oci_auth::default_akua_auth_path().unwrap();
+        let path = oci_auth::akua_auth_path().unwrap();
         oci_auth::upsert_entry(
             &path,
             "ghcr.io",
@@ -390,7 +390,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         env_scope_to(tmp.path());
 
-        let path = oci_auth::default_akua_auth_path().unwrap();
+        let path = oci_auth::akua_auth_path().unwrap();
         let secret = "ghp_unique_token_material_xyz123";
         oci_auth::upsert_entry(
             &path,

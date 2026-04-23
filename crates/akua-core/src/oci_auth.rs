@@ -274,7 +274,13 @@ pub struct RegistrySummary {
 /// secret material leaked. Missing files degrade to their own
 /// half of the merge — same as [`CredsStore::load`].
 pub fn list_sources() -> Result<Vec<RegistrySummary>, AuthLoadError> {
-    let mut by_registry: BTreeMap<String, (bool, bool, &'static str)> = BTreeMap::new();
+    struct SourcePresence {
+        in_akua: bool,
+        in_docker: bool,
+        auth_kind: &'static str,
+    }
+
+    let mut by_registry: BTreeMap<String, SourcePresence> = BTreeMap::new();
 
     if let Some(path) = akua_auth_path() {
         if path.exists() {
@@ -288,11 +294,15 @@ pub fn list_sources() -> Result<Vec<RegistrySummary>, AuthLoadError> {
                 let kind = if entry.token.is_some() { "bearer" } else { "basic" };
                 by_registry
                     .entry(registry)
-                    .and_modify(|v| {
-                        v.0 = true;
-                        v.2 = kind;
+                    .and_modify(|p| {
+                        p.in_akua = true;
+                        p.auth_kind = kind;
                     })
-                    .or_insert((true, false, kind));
+                    .or_insert(SourcePresence {
+                        in_akua: true,
+                        in_docker: false,
+                        auth_kind: kind,
+                    });
             }
         }
     }
@@ -309,23 +319,27 @@ pub fn list_sources() -> Result<Vec<RegistrySummary>, AuthLoadError> {
                 // credHelpers aren't supported (shell-out forbidden).
                 by_registry
                     .entry(registry)
-                    .and_modify(|v| v.1 = true)
-                    .or_insert((false, true, "basic"));
+                    .and_modify(|p| p.in_docker = true)
+                    .or_insert(SourcePresence {
+                        in_akua: false,
+                        in_docker: true,
+                        auth_kind: "basic",
+                    });
             }
         }
     }
 
     Ok(by_registry
         .into_iter()
-        .map(|(registry, (akua, docker, auth_kind))| RegistrySummary {
+        .map(|(registry, p)| RegistrySummary {
             registry,
-            source: match (akua, docker) {
+            source: match (p.in_akua, p.in_docker) {
                 (true, true) => "both",
                 (true, false) => "akua",
                 (false, true) => "docker",
                 (false, false) => unreachable!("entry was inserted, must have one source"),
             },
-            auth_kind,
+            auth_kind: p.auth_kind,
         })
         .collect())
 }
@@ -354,12 +368,6 @@ pub fn remove_entry(path: &Path, registry: &str) -> Result<bool, AuthLoadError> 
         write_file(path, &file)?;
     }
     Ok(removed)
-}
-
-/// Public accessor for the default `akua/auth.toml` location. The
-/// `akua auth` verb writes here.
-pub fn default_akua_auth_path() -> Option<PathBuf> {
-    akua_auth_path()
 }
 
 fn load_file(path: &Path) -> Result<AkuaAuthFile, AuthLoadError> {
@@ -407,7 +415,9 @@ fn read_string(path: &Path) -> Result<String, AuthLoadError> {
 
 // --- Path discovery --------------------------------------------------------
 
-fn akua_auth_path() -> Option<PathBuf> {
+/// Resolved location of `akua/auth.toml`. Write helpers + the
+/// `akua auth` verb use this as the default target.
+pub fn akua_auth_path() -> Option<PathBuf> {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         if !xdg.is_empty() {
             return Some(PathBuf::from(xdg).join("akua/auth.toml"));
