@@ -33,6 +33,32 @@ pub enum PackageTarError {
     },
 }
 
+/// Unpack a `.tar.gz` produced by [`pack_workspace`] into `target`.
+/// The inverse of pack; used by `akua pull`. `target` is created
+/// if absent; existing files are overwritten (last-pull-wins on a
+/// re-pull, consistent with how `git checkout` handles worktree
+/// state).
+///
+/// Rejects entries whose paths have `..` components or absolute
+/// prefixes — the host tar crate already does this by default, but
+/// the explicit check above makes the invariant load-bearing even
+/// on a tar crate revision that flips the default.
+pub fn unpack_to(tar_gz: &[u8], target: &Path) -> Result<(), PackageTarError> {
+    std::fs::create_dir_all(target).map_err(|source| PackageTarError::Io {
+        path: target.to_path_buf(),
+        source,
+    })?;
+    let gz = flate2::read::GzDecoder::new(tar_gz);
+    let mut ar = tar::Archive::new(gz);
+    ar.set_overwrite(true);
+    ar.set_preserve_permissions(false);
+    ar.unpack(target).map_err(|source| PackageTarError::Io {
+        path: target.to_path_buf(),
+        source,
+    })?;
+    Ok(())
+}
+
 /// Build a deterministic `.tar.gz` of the workspace for publish.
 pub fn pack_workspace(root: &Path) -> Result<Vec<u8>, PackageTarError> {
     if !root.is_dir() {
@@ -229,6 +255,26 @@ mod tests {
         std::fs::write(&file, b"x").unwrap();
         let err = pack_workspace(&file).unwrap_err();
         assert!(matches!(err, PackageTarError::NotADirectory { .. }));
+    }
+
+    #[test]
+    fn pack_unpack_roundtrip() {
+        let src = tempfile::tempdir().unwrap();
+        write(src.path(), "akua.toml", b"[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n");
+        write(src.path(), "package.k", b"resources = []\n");
+        write(src.path(), "vendor/nginx/Chart.yaml", b"name: nginx\n");
+
+        let tar_gz = pack_workspace(src.path()).unwrap();
+
+        let dst = tempfile::tempdir().unwrap();
+        unpack_to(&tar_gz, dst.path()).unwrap();
+        assert!(dst.path().join("akua.toml").is_file());
+        assert!(dst.path().join("package.k").is_file());
+        assert!(dst.path().join("vendor/nginx/Chart.yaml").is_file());
+        assert_eq!(
+            std::fs::read(dst.path().join("vendor/nginx/Chart.yaml")).unwrap(),
+            b"name: nginx\n"
+        );
     }
 
     /// Prove a round-trip through the tarball preserves file contents

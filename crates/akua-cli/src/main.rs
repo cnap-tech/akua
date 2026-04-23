@@ -11,8 +11,8 @@ use clap::{ArgGroup, Args, Parser, Subcommand};
 use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::{
     add as add_verb, check as check_verb, diff as diff_verb, fmt as fmt_verb, init as init_verb,
-    inspect as inspect_verb, lint as lint_verb, publish as publish_verb, remove as remove_verb,
-    render as render_verb,
+    inspect as inspect_verb, lint as lint_verb, publish as publish_verb, pull as pull_verb,
+    remove as remove_verb, render as render_verb,
     tree as tree_verb, verify as verify_verb, version as version_verb, whoami as whoami_verb,
 };
 use akua_core::cli_contract::{AgentContext, ExitCode, StructuredError};
@@ -126,6 +126,25 @@ enum Commands {
 
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
+    },
+
+    /// Pull a published akua Package from an OCI registry and extract
+    /// it to a target directory.
+    Pull {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Source repository — `oci://<registry>/<repo>`.
+        #[arg(long = "ref")]
+        oci_ref: String,
+
+        /// Tag to pull. Required.
+        #[arg(long)]
+        tag: String,
+
+        /// Target directory to extract into. Created if missing.
+        #[arg(long, default_value = "./pulled")]
+        out: PathBuf,
     },
 
     /// Package the workspace and push it to an OCI registry as an
@@ -289,6 +308,12 @@ fn dispatch(command: Commands) -> ExitCode {
             package,
         } => run_check(&args, &workspace, &package),
         Commands::Diff { args, before, after } => run_diff(&args, &before, &after),
+        Commands::Pull {
+            args,
+            oci_ref,
+            tag,
+            out,
+        } => run_pull(&args, &oci_ref, &tag, &out),
         Commands::Publish {
             args,
             oci_ref,
@@ -317,6 +342,21 @@ fn dispatch(command: Commands) -> ExitCode {
             &args, &name, oci.as_deref(), git.as_deref(), path.as_deref(),
             version.as_deref(), tag.as_deref(), rev.as_deref(), force, &workspace,
         ),
+    }
+}
+
+fn run_pull(
+    args: &UniversalArgs,
+    oci_ref: &str,
+    tag: &str,
+    out: &std::path::Path,
+) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = pull_verb::PullArgs { oci_ref, tag, out };
+    let mut stdout = io::stdout().lock();
+    match pull_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
 }
 

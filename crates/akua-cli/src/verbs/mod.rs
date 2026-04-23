@@ -12,6 +12,7 @@ pub mod init;
 pub mod inspect;
 pub mod lint;
 pub mod publish;
+pub mod pull;
 pub mod remove;
 pub mod render;
 pub mod tree;
