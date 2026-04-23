@@ -10,9 +10,9 @@ use clap::{ArgGroup, Args, Parser, Subcommand};
 
 use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::{
-    add as add_verb, check as check_verb, diff as diff_verb, fmt as fmt_verb, init as init_verb,
-    inspect as inspect_verb, lint as lint_verb, publish as publish_verb, pull as pull_verb,
-    remove as remove_verb, render as render_verb, test as test_verb,
+    add as add_verb, cache as cache_verb, check as check_verb, diff as diff_verb, fmt as fmt_verb,
+    init as init_verb, inspect as inspect_verb, lint as lint_verb, publish as publish_verb,
+    pull as pull_verb, remove as remove_verb, render as render_verb, test as test_verb,
     tree as tree_verb, verify as verify_verb, version as version_verb, whoami as whoami_verb,
 };
 #[cfg(feature = "dev-watch")]
@@ -313,6 +313,43 @@ enum Commands {
         #[arg(long)]
         stdout: bool,
     },
+
+    /// List, clear, or locate the on-disk OCI + git caches under
+    /// `$XDG_CACHE_HOME/akua/`. Useful for ephemeral CI runners
+    /// and disk-pressure triage.
+    Cache {
+        #[command(subcommand)]
+        sub: CacheSub,
+    },
+}
+
+#[derive(Subcommand, Clone, Debug)]
+enum CacheSub {
+    /// Enumerate every OCI blob + git repo/checkout with size.
+    List {
+        #[command(flatten)]
+        args: UniversalArgs,
+    },
+    /// Wipe the caches. Default clears both; narrow with `--oci` or
+    /// `--git`. No-op on absent caches.
+    #[command(group(ArgGroup::new("cache_scope").args(["oci", "git"])))]
+    Clear {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Only wipe the OCI blob cache.
+        #[arg(long)]
+        oci: bool,
+
+        /// Only wipe the git repo + checkout cache.
+        #[arg(long)]
+        git: bool,
+    },
+    /// Print the resolved cache roots.
+    Path {
+        #[command(flatten)]
+        args: UniversalArgs,
+    },
 }
 
 #[derive(Args, Clone, Debug)]
@@ -428,6 +465,29 @@ fn dispatch(command: Commands) -> ExitCode {
             &args, &name, oci.as_deref(), git.as_deref(), path.as_deref(),
             version.as_deref(), tag.as_deref(), rev.as_deref(), force, &workspace,
         ),
+        Commands::Cache { sub } => run_cache(sub),
+    }
+}
+
+fn run_cache(sub: CacheSub) -> ExitCode {
+    let (args, action) = match sub {
+        CacheSub::List { args } => (args, cache_verb::CacheAction::List),
+        CacheSub::Clear { args, oci, git } => {
+            let scope = match (oci, git) {
+                (true, false) => akua_core::cache_inventory::ClearScope::OciOnly,
+                (false, true) => akua_core::cache_inventory::ClearScope::GitOnly,
+                _ => akua_core::cache_inventory::ClearScope::Both,
+            };
+            (args, cache_verb::CacheAction::Clear { scope })
+        }
+        CacheSub::Path { args } => (args, cache_verb::CacheAction::Path),
+    };
+    let ctx = resolve_ctx(&args);
+    let verb_args = cache_verb::CacheArgs { action };
+    let mut stdout = io::stdout().lock();
+    match cache_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
 }
 
@@ -880,6 +940,37 @@ mod tests {
             }
             _ => panic!("expected lint"),
         }
+    }
+
+    #[test]
+    fn parses_cache_list_subverb() {
+        let cli = Cli::parse_from(["akua", "cache", "list", "--json"]);
+        match cli.command {
+            Commands::Cache { sub: CacheSub::List { args } } => {
+                assert!(args.json);
+            }
+            _ => panic!("expected cache list"),
+        }
+    }
+
+    #[test]
+    fn parses_cache_clear_with_oci_scope() {
+        let cli = Cli::parse_from(["akua", "cache", "clear", "--oci"]);
+        match cli.command {
+            Commands::Cache { sub: CacheSub::Clear { oci, git, .. } } => {
+                assert!(oci);
+                assert!(!git);
+            }
+            _ => panic!("expected cache clear"),
+        }
+    }
+
+    #[test]
+    fn cache_clear_rejects_both_scope_flags_together() {
+        let err = Cli::try_parse_from(["akua", "cache", "clear", "--oci", "--git"])
+            .err()
+            .expect("should fail");
+        assert!(err.to_string().contains("cannot be used"));
     }
 
     #[test]

@@ -5,6 +5,7 @@
 //! are written via [`crate::contract::emit_error`].
 
 pub mod add;
+pub mod cache;
 pub mod check;
 #[cfg(feature = "dev-watch")]
 pub mod dev;
