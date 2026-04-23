@@ -168,7 +168,7 @@ pub fn pull_attestation(
         |req| req.header("Accept", crate::oci_pusher::OCI_MANIFEST_MEDIA_TYPE),
     ) {
         Ok(bytes) => {
-            let manifest: AttestationSidecarManifest = serde_json::from_slice(&bytes)?;
+            let manifest: Manifest = serde_json::from_slice(&bytes)?;
             let layer = manifest
                 .layers
                 .into_iter()
@@ -194,12 +194,6 @@ pub fn pull_attestation(
         Err(TransportError::Status { status: 404, .. }) => Ok(None),
         Err(e) => Err(OciPullError::Transport(e)),
     }
-}
-
-#[cfg(feature = "cosign-verify")]
-#[derive(Debug, Deserialize)]
-struct AttestationSidecarManifest {
-    layers: Vec<Layer>,
 }
 
 // ---------------------------------------------------------------------------

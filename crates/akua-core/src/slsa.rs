@@ -184,7 +184,7 @@ fn lock_entry_to_resource(pkg: &crate::lock_file::LockedPackage) -> ResourceDesc
 /// `"sha256:abc"` → `("sha256", "abc")`. `"git:abc"` → `("git", "abc")`.
 /// Unprefixed → `("sha256", …)` as a safe default — SLSA subjects
 /// default to sha256 anywhere we can't read the prefix.
-fn split_digest(d: &str) -> (&str, &str) {
+pub fn split_digest(d: &str) -> (&str, &str) {
     d.split_once(':').unwrap_or(("sha256", d))
 }
 

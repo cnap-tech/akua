@@ -110,6 +110,10 @@ pub enum VerifyError {
         source: std::io::Error,
     },
 
+    #[cfg(feature = "cosign-verify")]
+    #[error("reading OCI credential config: {0}")]
+    CredsConfig(String),
+
     #[error("write to stdout failed: {0}")]
     StdoutWrite(#[source] std::io::Error),
 }
@@ -143,6 +147,10 @@ impl VerifyError {
                         "akua.toml [signing].cosign_public_key must resolve to a PEM-encoded public key file.",
                     )
                     .with_default_docs()
+            }
+            #[cfg(feature = "cosign-verify")]
+            VerifyError::CredsConfig(detail) => {
+                StructuredError::new(codes::E_IO, detail.clone()).with_default_docs()
             }
             VerifyError::StdoutWrite(e) => {
                 StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
@@ -268,7 +276,7 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
     #[cfg(feature = "cosign-verify")]
     {
         if let Some(pub_key_pem) = load_cosign_pub_key(&manifest, workspace)? {
-            walk_attestations(&lock, &pub_key_pem, &mut violations);
+            walk_attestations(&lock, &pub_key_pem, &mut violations)?;
         }
     }
 
@@ -313,21 +321,21 @@ fn load_cosign_pub_key(
 
 /// Walk every OCI-sourced lockfile entry, pull its attestation
 /// sidecar, verify against `pub_key_pem`, record violations.
-/// Network failures are converted to per-dep violations rather than
-/// aborting the whole verify — ops want to see *every* missing
-/// attestation, not just the first one.
+/// Per-dep pull + verify failures are converted to violations so
+/// ops see every missing attestation; credential-config parse
+/// failures are propagated instead — silent fallback to anonymous
+/// pulls would mask a user-actionable problem with their auth
+/// setup.
 #[cfg(feature = "cosign-verify")]
-fn walk_attestations(lock: &AkuaLock, pub_key_pem: &str, violations: &mut Vec<Violation>) {
+fn walk_attestations(
+    lock: &AkuaLock,
+    pub_key_pem: &str,
+    violations: &mut Vec<Violation>,
+) -> Result<(), VerifyError> {
     use akua_core::oci_auth::CredsStore;
     use akua_core::oci_puller;
 
-    // Creds are loaded once per verify — all subsequent pulls reuse
-    // the same store. A bad config file is a hard error; we fail
-    // loudly rather than silently skip.
-    let creds = match CredsStore::load() {
-        Ok(c) => c,
-        Err(_) => CredsStore::empty(),
-    };
+    let creds = CredsStore::load().map_err(|e| VerifyError::CredsConfig(e.to_string()))?;
 
     for pkg in &lock.packages {
         if !pkg.is_oci() {
@@ -337,7 +345,15 @@ fn walk_attestations(lock: &AkuaLock, pub_key_pem: &str, violations: &mut Vec<Vi
         let digest = pkg.digest.clone();
         match oci_puller::pull_attestation(&oci_ref, &digest, &creds) {
             Ok(Some(envelope)) => {
-                if let Some(violation) = verify_attestation(&pkg.name, &digest, &envelope, pub_key_pem) {
+                if let Some(mut violation) =
+                    verify_attestation(&pkg.name, &digest, &envelope, pub_key_pem)
+                {
+                    // `verify_attestation` doesn't know the ref;
+                    // populate from the walker before we hand it
+                    // to the report.
+                    if let Violation::AttestationInvalid { oci_ref: r, .. } = &mut violation {
+                        *r = oci_ref.clone();
+                    }
                     violations.push(violation);
                 }
             }
@@ -352,6 +368,7 @@ fn walk_attestations(lock: &AkuaLock, pub_key_pem: &str, violations: &mut Vec<Vi
             }),
         }
     }
+    Ok(())
 }
 
 /// Core per-dep attestation check. Extracted so tests can exercise
@@ -390,7 +407,7 @@ pub(crate) fn verify_attestation(
     // Subject digest match: the statement's subject[].digest must
     // include an entry matching our lockfile digest. The lockfile
     // carries `sha256:<hex>` — statements store `{"sha256": "<hex>"}`.
-    let (expected_algo, expected_hex) = split_digest(expected_digest);
+    let (expected_algo, expected_hex) = akua_core::slsa::split_digest(expected_digest);
     let matches = statement.subject.iter().any(|s| {
         s.digest
             .get(expected_algo)
@@ -413,10 +430,6 @@ pub(crate) fn verify_attestation(
     None
 }
 
-#[cfg(feature = "cosign-verify")]
-fn split_digest(d: &str) -> (&str, &str) {
-    d.split_once(':').unwrap_or(("sha256", d))
-}
 
 /// Run the verb against the given workspace. Verify errors (missing /
 /// malformed files) are surfaced to the caller; check failures
