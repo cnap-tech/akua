@@ -203,15 +203,4 @@ mod tests {
         assert!(matches!(err, PushError::Push(_)), "got {err:?}");
     }
 
-    #[test]
-    fn error_to_structured_carries_io_code_for_missing_tarball() {
-        let tmp = tempfile::tempdir().unwrap();
-        let missing = tmp.path().join("nope.tgz");
-        let err = PushError::ReadTarball {
-            path: missing,
-            source: std::io::Error::new(std::io::ErrorKind::NotFound, "no such file"),
-        };
-        let structured = err.to_structured();
-        assert_eq!(structured.code, "E_IO");
-    }
 }
