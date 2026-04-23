@@ -52,6 +52,7 @@ pub mod package_k;
 pub mod package_render;
 #[cfg(feature = "engine-kcl")]
 pub mod pkg_render;
+#[cfg(feature = "cosign-verify")]
 pub mod slsa;
 #[cfg(feature = "engine-kcl")]
 pub mod stdlib;

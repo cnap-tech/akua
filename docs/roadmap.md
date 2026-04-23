@@ -202,12 +202,18 @@ HTTP front end for concurrent render requests. Per-request `Store` with preopens
 - [x] `akua.toml [signing].cosign_private_key`: `akua publish` signs by default when set. `--no-sign` CLI override.
 - [x] Typed exit codes `E_PUBLISH_FAILED` / `E_PULL_FAILED`.
 
-### Phase 7 slice B — deferred
+### Phase 7 slice B — SLSA attestation (SHIPPED — 2026-04-22)
 
-- [ ] SLSA v1 predicate generation on `akua publish` (Phase 6 B chain-walk dep)
+- [x] `slsa` module: in-toto v1 statement + SLSA v1 provenance predicate builder. Materials pulled from `akua.lock`; `buildType = https://akua.dev/slsa/publish/v1`; builder id keyed to the akua release.
+- [x] `cosign::sign_dsse` / `verify_dsse`: DSSE v1 envelope sign + verify with PAE (Pre-Auth Encoding) binding `payloadType` into the signature so cross-envelope-type substitution is rejected.
+- [x] `oci_pusher::push_attestation`: pushes the DSSE envelope as a `.att` sidecar at `sha256-<hex>.att` with media type `application/vnd.dsse.envelope.v1+json`.
+- [x] `akua publish` auto-attests when signing is active; `--no-attest` disables independently of `--no-sign`. `PublishOutput.attestation_tag` surfaces the sidecar ref.
+
+### Phase 7 slice C — still deferred
+
 - [ ] Vendor resolved deps into OCI layers so pull is network-free
 - [ ] Encrypted private keys (passphrase / cosign native format)
-- [ ] `akua verify` recursively walks a pulled Package's `charts.*` deps
+- [ ] `akua verify` recursively walks a pulled Package's `charts.*` deps + verifies attestation chain
 
 **Exit gate (full phase):** Published Package round-trips `akua publish` → `akua pull` → `akua render` with cosign signatures validated at each hop. ✅ slice A covers the core round-trip; slice B adds SLSA + offline-render-from-published-digests on top.
 

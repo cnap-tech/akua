@@ -170,6 +170,11 @@ enum Commands {
         #[arg(long)]
         no_sign: bool,
 
+        /// Skip SLSA attestation generation. Has no effect when
+        /// `--no-sign` is set (attestation always pairs with signing).
+        #[arg(long)]
+        no_attest: bool,
+
         /// Workspace root containing akua.toml.
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
@@ -326,8 +331,9 @@ fn dispatch(command: Commands) -> ExitCode {
             oci_ref,
             tag,
             no_sign,
+            no_attest,
             workspace,
-        } => run_publish(&args, &workspace, &oci_ref, tag.as_deref(), no_sign),
+        } => run_publish(&args, &workspace, &oci_ref, tag.as_deref(), no_sign, no_attest),
         Commands::Remove {
             args,
             name,
@@ -374,6 +380,7 @@ fn run_publish(
     oci_ref: &str,
     tag: Option<&str>,
     no_sign: bool,
+    no_attest: bool,
 ) -> ExitCode {
     let ctx = resolve_ctx(args);
     let verb_args = publish_verb::PublishArgs {
@@ -381,6 +388,7 @@ fn run_publish(
         oci_ref,
         tag,
         no_sign,
+        no_attest,
     };
     let mut stdout = io::stdout().lock();
     match publish_verb::run(&ctx, &verb_args, &mut stdout) {

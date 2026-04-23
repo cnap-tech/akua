@@ -79,8 +79,9 @@ This is the current-state gap vs the target. See [docs/roadmap.md](roadmap.md) p
 | `akua publish` with cosign sign-by-default | Shipped — P-256 PKCS#8 PEM private keys | ✅ Phase 7 A |
 | `akua pull` with manifest digest verify | Shipped | ✅ Phase 7 A |
 | cosign keyless (fulcio + rekor) verification | Not implemented | Phase 6 B |
-| SLSA attestation generation + chain walk | Not implemented | Phase 6 B / Phase 7 B |
-| Encrypted cosign private keys (passphrase / HSM) | Not implemented | Phase 7 B |
+| SLSA v1 attestation generation on publish | Shipped — DSSE envelope, in-toto v1 statement | ✅ Phase 7 B |
+| SLSA attestation chain walk on verify | Not implemented — needs keyless + `akua verify` recursion | Phase 7 C |
+| Encrypted cosign private keys (passphrase / HSM) | Not implemented | Phase 7 C |
 | Git dep checkout via `gix` | Shipped — pure Rust, no shell-out | ✅ Phase 2b C |
 | Private-repo OCI auth (docker config / akua auth.toml) | Shipped — Basic + bearer PAT | ✅ Phase 2b C |
 | Docker credential helpers | Not implemented — would require shell-out | Won't ship |

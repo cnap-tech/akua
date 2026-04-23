@@ -161,6 +161,93 @@ pub fn push(
     })
 }
 
+/// Push a DSSE-wrapped attestation (SLSA v1 provenance) as an `.att`
+/// sidecar for an already-published artifact. Tag shape matches
+/// cosign's convention: `sha256-<hex>.att`. The layer carries the
+/// DSSE envelope JSON with media type
+/// `application/vnd.dsse.envelope.v1+json`.
+///
+/// Parallel to [`push_cosign_signature`] — same two-blob + manifest
+/// shape, different media type + tag suffix, no per-layer
+/// annotations (the signature lives inside the DSSE payload).
+#[cfg(feature = "cosign-verify")]
+pub fn push_attestation(
+    oci_ref: &str,
+    manifest_digest: &str,
+    dsse_envelope_bytes: &[u8],
+    creds: &CredsStore,
+) -> Result<String, OciPushError> {
+    let parsed = parse_ref(oci_ref).map_err(OciPushError::from)?;
+    let client = build_client().map_err(OciPushError::from)?;
+    let registry_creds = oci_auth::for_registry(creds, &parsed.registry);
+    let mut token = TokenCache::default();
+
+    // Payload (the DSSE envelope) + empty config — same two-blob
+    // layout cosign uses for `.att`.
+    let payload_digest = format!(
+        "sha256:{}",
+        hex_encode(&Sha256::digest(dsse_envelope_bytes))
+    );
+    upload_blob(
+        &client,
+        &parsed,
+        dsse_envelope_bytes,
+        &payload_digest,
+        registry_creds.as_ref(),
+        &mut token,
+    )?;
+    let config_bytes: &[u8] = b"{}";
+    let config_digest = format!("sha256:{}", hex_encode(&Sha256::digest(config_bytes)));
+    upload_blob(
+        &client,
+        &parsed,
+        config_bytes,
+        &config_digest,
+        registry_creds.as_ref(),
+        &mut token,
+    )?;
+
+    let manifest = OciManifest {
+        schema_version: 2,
+        media_type: OCI_MANIFEST_MEDIA_TYPE.to_string(),
+        config: Descriptor {
+            media_type: "application/vnd.oci.image.config.v1+json".to_string(),
+            size: config_bytes.len() as u64,
+            digest: config_digest,
+        },
+        layers: vec![Descriptor {
+            media_type: crate::cosign::DSSE_ENVELOPE_MEDIA_TYPE.to_string(),
+            size: dsse_envelope_bytes.len() as u64,
+            digest: payload_digest,
+        }],
+    };
+    let manifest_bytes = serde_json::to_vec(&manifest)?;
+
+    let hex = manifest_digest
+        .strip_prefix("sha256:")
+        .unwrap_or(manifest_digest);
+    let att_tag = format!("sha256-{hex}.att");
+
+    let manifest_url = format!(
+        "https://{}/v2/{}/manifests/{}",
+        parsed.registry, parsed.repository, att_tag
+    );
+    send_with_auth(
+        &client,
+        &manifest_url,
+        &parsed.registry,
+        registry_creds.as_ref(),
+        &mut token,
+        |req| {
+            req.header("Content-Type", OCI_MANIFEST_MEDIA_TYPE)
+                .body(manifest_bytes.clone())
+        },
+        HttpMethod::Put,
+    )?;
+
+    Ok(att_tag)
+}
+
 /// Push a cosign `.sig` sidecar for an already-published artifact.
 /// `payload_bytes` + `signature_b64` come from
 /// [`crate::cosign::build_simple_signing_payload`] and
