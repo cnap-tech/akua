@@ -38,6 +38,17 @@ pub enum RefSpec {
     Rev(String),
 }
 
+impl RefSpec {
+    /// Human-readable label — the tag name or full SHA, whichever
+    /// discriminates this spec. Used in error text + lockfile
+    /// version fields.
+    pub fn label(&self) -> &str {
+        match self {
+            RefSpec::Tag(s) | RefSpec::Rev(s) => s,
+        }
+    }
+}
+
 /// Result of a successful git fetch. `chart_dir` is the directory
 /// the resolver hands to `helm-engine-wasm::render_dir` — same
 /// contract as `OciFetcher::FetchedChart`.
@@ -124,7 +135,7 @@ pub fn fetch(
         if commit != expected {
             return Err(GitFetchError::LockCommitMismatch {
                 url: url.to_string(),
-                ref_name: ref_spec_label(ref_spec),
+                ref_name: ref_spec.label().to_string(),
                 actual: commit,
                 expected: expected.to_string(),
             });
@@ -142,13 +153,12 @@ pub fn fetch(
     })
 }
 
-/// Look up a cached bare clone's path without cloning. Used by tests
-/// and by `git_fetcher::fetch_from_cache` (offline mode).
-pub fn fetch_from_cache(
-    url: &str,
-    cache_root: &Path,
-    expected_commit: &str,
-) -> Option<FetchedRepo> {
+/// Look up a cached checkout without touching the network. Returns
+/// `Some` only when `<cache_root>/checkouts/<expected_commit>/` has
+/// the `.git-checkout-done` sentinel — meaning a prior `fetch` call
+/// completed fully. Partial state from an interrupted run is treated
+/// as a cache miss.
+pub fn fetch_from_cache(cache_root: &Path, expected_commit: &str) -> Option<FetchedRepo> {
     let checkout = cache_root.join("checkouts").join(expected_commit);
     if checkout.join(".git-checkout-done").exists() {
         Some(FetchedRepo {
@@ -156,7 +166,6 @@ pub fn fetch_from_cache(
             commit_sha: expected_commit.to_string(),
         })
     } else {
-        let _ = url;
         None
     }
 }
@@ -172,13 +181,6 @@ fn bare_repo_path(cache_root: &Path, url: &str) -> PathBuf {
         }
     }
     cache_root.join("repos").join(format!("{out}.git"))
-}
-
-fn ref_spec_label(r: &RefSpec) -> String {
-    match r {
-        RefSpec::Tag(t) => t.clone(),
-        RefSpec::Rev(r) => r.clone(),
-    }
 }
 
 fn clone_bare(url: &str, dest: &Path) -> Result<gix::Repository, GitFetchError> {
@@ -306,7 +308,7 @@ fn materialize_checkout(
         dest.join(".git-checkout-done"),
         format!(
             "akua git_fetcher v1\ncommit={commit_sha}\nref={}\n",
-            ref_spec_label(ref_spec)
+            ref_spec.label()
         ),
     )
     .map_err(|source| GitFetchError::Io {
@@ -441,11 +443,8 @@ mod tests {
 
     #[test]
     fn ref_spec_label_returns_tag_or_rev() {
-        assert_eq!(ref_spec_label(&RefSpec::Tag("v1.0".into())), "v1.0");
-        assert_eq!(
-            ref_spec_label(&RefSpec::Rev("abcdef1234".into())),
-            "abcdef1234"
-        );
+        assert_eq!(RefSpec::Tag("v1.0".into()).label(), "v1.0");
+        assert_eq!(RefSpec::Rev("abcdef1234".into()).label(), "abcdef1234");
     }
 
     #[test]
@@ -556,7 +555,6 @@ mod tests {
     fn fetch_from_cache_returns_none_when_absent() {
         let tmp = tempfile::tempdir().unwrap();
         assert!(fetch_from_cache(
-            "file:///nowhere",
             tmp.path(),
             "0000000000000000000000000000000000000000",
         )

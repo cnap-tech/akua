@@ -15,6 +15,13 @@ use serde::{Deserialize, Serialize};
 /// Current lockfile schema version. Bumped on breaking changes.
 pub const CURRENT_VERSION: u32 = 1;
 
+/// Digest prefix for tree-hashed sources (OCI blobs, path deps).
+pub const SHA256_DIGEST_PREFIX: &str = "sha256:";
+
+/// Digest prefix for git-sourced deps (commit SHA-1). Distinct from
+/// `sha256:` so the validator doesn't confuse hash algorithms.
+pub const GIT_DIGEST_PREFIX: &str = "git:";
+
 /// The top-level shape of an `akua.lock` file.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AkuaLock {
@@ -231,7 +238,9 @@ impl AkuaLock {
             // Supported digest schemes: `sha256:` (OCI / path-dep
             // content hash) and `git:` (git commit SHA-1 from
             // `git_fetcher`). Adding more means extending this list.
-            if !(pkg.digest.starts_with("sha256:") || pkg.digest.starts_with("git:")) {
+            if !(pkg.digest.starts_with(SHA256_DIGEST_PREFIX)
+                || pkg.digest.starts_with(GIT_DIGEST_PREFIX))
+            {
                 return Err(LockError::BadDigest(pkg.name.clone()));
             }
         }

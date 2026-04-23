@@ -398,10 +398,7 @@ fn resolve_git(
     } else {
         unreachable!("manifest validation rejects git deps without tag or rev");
     };
-    let tag_or_rev = match &ref_spec {
-        RefSpec::Tag(t) => t.clone(),
-        RefSpec::Rev(r) => r.clone(),
-    };
+    let tag_or_rev = ref_spec.label().to_string();
 
     let cache_root = opts
         .cache_root
@@ -414,7 +411,7 @@ fn resolve_git(
     let expected_commit = opts
         .expected_digests
         .get(name)
-        .and_then(|d| d.strip_prefix("git:").map(str::to_string));
+        .and_then(|d| d.strip_prefix(crate::lock_file::GIT_DIGEST_PREFIX).map(str::to_string));
 
     let fetched = if opts.offline {
         let expected = expected_commit.as_deref().ok_or_else(|| {
@@ -424,7 +421,7 @@ fn resolve_git(
                 reason: "offline mode needs a lockfile-pinned commit — run `akua add` first",
             }
         })?;
-        git_fetcher::fetch_from_cache(git, &cache_root, expected).ok_or_else(|| {
+        git_fetcher::fetch_from_cache(&cache_root, expected).ok_or_else(|| {
             ChartResolveError::UnsupportedSource {
                 name: name.to_string(),
                 kind: DependencySource::Git,
@@ -440,18 +437,22 @@ fn resolve_git(
         )?
     };
 
-    let commit_sha = fetched.commit_sha.clone();
+    // For git deps the lockfile digest is the commit SHA (git-native
+    // content-address). Prefixed `git:` so it doesn't collide with
+    // OCI `sha256:` in the digest-prefix validator.
+    let digest = format!(
+        "{}{}",
+        crate::lock_file::GIT_DIGEST_PREFIX,
+        fetched.commit_sha
+    );
     Ok(ResolvedChart {
         name: name.to_string(),
         abs_path: fetched.chart_dir,
-        // For git deps the lockfile digest is the commit SHA (git-
-        // native content-address). Prefixed `git:` so it doesn't
-        // collide with OCI `sha256:` in the digest-prefix validator.
-        sha256: format!("git:{commit_sha}"),
+        sha256: digest,
         source: ResolvedSource::Git {
             git: git.to_string(),
             tag_or_rev,
-            commit_sha,
+            commit_sha: fetched.commit_sha,
         },
     })
 }
@@ -875,7 +876,11 @@ alpha = { path = "./charts/alpha" }
     }
 
     #[test]
-    fn git_dep_surfaces_phase_2b_error() {
+    fn git_dep_surfaces_typed_error_in_offline_mode() {
+        // Default `resolve()` is offline-mode. A git dep with no
+        // lockfile-pinned commit can't be satisfied without the
+        // network, so the resolver refuses — distinct from the
+        // `GitFetch` error path (which requires a real clone).
         let ws = tempfile::tempdir().unwrap();
         let manifest = minimal_manifest(
             r#"libs = { git = "https://github.com/foo/bar", tag = "v1.0.0" }"#,
@@ -892,6 +897,7 @@ alpha = { path = "./charts/alpha" }
             ),
             "got: {err:?}"
         );
+        assert!(err.to_string().contains("offline"), "got: {err}");
     }
 
     #[test]
