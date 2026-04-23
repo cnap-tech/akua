@@ -999,7 +999,7 @@ digest  = "{real_digest}"
                 None,
             );
             let bytes = slsa::statement_bytes(&stmt).unwrap();
-            cosign::sign_dsse(priv_pem, "application/vnd.in-toto+json", &bytes).unwrap()
+            cosign::sign_dsse(priv_pem, "application/vnd.in-toto+json", &bytes, None).unwrap()
         }
 
         #[test]

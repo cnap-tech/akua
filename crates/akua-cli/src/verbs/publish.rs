@@ -167,12 +167,17 @@ pub fn run<W: Write>(
         load_signing_key(args.workspace, &manifest)?
     };
 
-    // Passphrase for encrypted private keys. Read from the env
-    // (never argv). Empty string → `None` so an unset var behaves
-    // identically to an intentionally-set-empty var.
-    let passphrase = std::env::var("AKUA_COSIGN_PASSPHRASE")
-        .ok()
-        .filter(|s| !s.is_empty());
+    // Passphrase is only meaningful when we're actually signing.
+    // Deferring the env read past `no_sign` avoids unnecessary
+    // syscalls (minor) + keeps the secret out of the process
+    // address space when the code path can't use it.
+    let passphrase = if private_pem.is_some() {
+        std::env::var("AKUA_COSIGN_PASSPHRASE")
+            .ok()
+            .filter(|s| !s.is_empty())
+    } else {
+        None
+    };
 
     let signature_tag = if let Some(pem) = &private_pem {
         Some(sign_published_artifact(
@@ -274,7 +279,7 @@ fn sign_published_artifact(
     // matching what cosign-cli records for `cosign sign oci://...`.
     let docker_reference = oci_ref.strip_prefix("oci://").unwrap_or(oci_ref);
     let payload = akua_core::cosign::build_simple_signing_payload(docker_reference, manifest_digest);
-    let signature = akua_core::cosign::sign_keyed_with_passphrase(private_pem, &payload, passphrase)
+    let signature = akua_core::cosign::sign_keyed(private_pem, &payload, passphrase)
         .map_err(PublishError::Crypto)?;
     Ok(oci_pusher::push_cosign_signature(
         oci_ref,
@@ -319,7 +324,7 @@ fn attest_published_artifact(
         slsa::statement_bytes(&statement).map_err(|e| PublishError::Crypto(
             akua_core::cosign::CosignError::BadPayload(e),
         ))?;
-    let envelope = akua_core::cosign::sign_dsse_with_passphrase(
+    let envelope = akua_core::cosign::sign_dsse(
         private_pem,
         "application/vnd.in-toto+json",
         &statement_bytes,

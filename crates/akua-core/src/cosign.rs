@@ -127,24 +127,19 @@ pub fn build_simple_signing_payload(docker_reference: &str, manifest_digest: &st
 
 /// Sign `payload_bytes` with a P-256 ECDSA private key, returning a
 /// base64-encoded DER signature. Matches what cosign emits + what
-/// [`verify_keyed`] accepts. Accepts unencrypted PKCS#8 PEM only;
-/// for passphrase-protected keys use [`sign_keyed_with_passphrase`].
-pub fn sign_keyed(
-    private_key_pem: &str,
-    payload_bytes: &[u8],
-) -> Result<String, CosignError> {
-    sign_keyed_with_passphrase(private_key_pem, payload_bytes, None)
-}
-
-/// Like [`sign_keyed`], but tries the encrypted-PKCS#8 path when the
-/// PEM block is `ENCRYPTED PRIVATE KEY` and `passphrase` is `Some`.
-/// Unencrypted input → `passphrase` ignored.
+/// [`verify_keyed`] accepts.
 ///
-/// Stored passphrases should come from env vars (
-/// `$AKUA_COSIGN_PASSPHRASE`) or an OS keychain. Passing via CLI
-/// argv leaks the secret to `ps` + shell history, so there's no
-/// `--passphrase` flag.
-pub fn sign_keyed_with_passphrase(
+/// Accepts unencrypted PKCS#8 PEM directly; for PKCS#8-encrypted
+/// PEM (`-----BEGIN ENCRYPTED PRIVATE KEY-----`) pass `Some(pass)`
+/// as the third argument. An unencrypted key tolerates a
+/// passphrase (ignored). Encrypted without a passphrase → typed
+/// `BadPrivateKey` error naming the env var the CLI expects.
+///
+/// Stored passphrases should come from env vars
+/// (`$AKUA_COSIGN_PASSPHRASE`) or an OS keychain. Passing via argv
+/// leaks the secret to `ps` + shell history, so there's no
+/// `--passphrase` flag on any verb.
+pub fn sign_keyed(
     private_key_pem: &str,
     payload_bytes: &[u8],
     passphrase: Option<&str>,
@@ -218,27 +213,16 @@ pub struct DsseSignature {
 pub const DSSE_ENVELOPE_MEDIA_TYPE: &str = "application/vnd.dsse.envelope.v1+json";
 
 /// Build + sign a DSSE envelope. Returns the envelope JSON bytes —
-/// ready for `oci_pusher::push_attestation`. Delegates to
-/// [`sign_dsse_with_passphrase`]; use that variant directly when
-/// the private key is passphrase-protected.
+/// ready for `oci_pusher::push_attestation`. Same passphrase
+/// handling as [`sign_keyed`].
 pub fn sign_dsse(
-    private_key_pem: &str,
-    payload_type: &str,
-    payload_bytes: &[u8],
-) -> Result<Vec<u8>, CosignError> {
-    sign_dsse_with_passphrase(private_key_pem, payload_type, payload_bytes, None)
-}
-
-/// Passphrase-aware variant. Same PEM selection rule as
-/// [`sign_keyed_with_passphrase`].
-pub fn sign_dsse_with_passphrase(
     private_key_pem: &str,
     payload_type: &str,
     payload_bytes: &[u8],
     passphrase: Option<&str>,
 ) -> Result<Vec<u8>, CosignError> {
     let pae = dsse_pae(payload_type, payload_bytes);
-    let sig_b64 = sign_keyed_with_passphrase(private_key_pem, &pae, passphrase)?;
+    let sig_b64 = sign_keyed(private_key_pem, &pae, passphrase)?;
 
     use base64::Engine as _;
     let envelope = DsseEnvelope {
@@ -498,13 +482,13 @@ mod tests {
         let (pub_pem, priv_pem) = keypair_fixture();
         let digest = "sha256:f00";
         let payload = build_simple_signing_payload("ghcr.io/acme/app", digest);
-        let signature = sign_keyed(&priv_pem, &payload).expect("sign");
+        let signature = sign_keyed(&priv_pem, &payload, None).expect("sign");
         verify_keyed(&pub_pem, &payload, &signature, digest).expect("verify");
     }
 
     #[test]
     fn sign_rejects_malformed_private_key() {
-        let err = sign_keyed("not a pem", b"anything").unwrap_err();
+        let err = sign_keyed("not a pem", b"anything", None).unwrap_err();
         assert!(matches!(err, CosignError::BadPrivateKey(_)), "got {err:?}");
     }
 
@@ -531,14 +515,14 @@ mod tests {
         let pass = "correct horse battery staple";
         let (pub_pem, priv_pem) = encrypted_key_fixture(pass);
         let payload = payload_for("sha256:deadbeef");
-        let sig = sign_keyed_with_passphrase(&priv_pem, &payload, Some(pass)).expect("sign");
+        let sig = sign_keyed(&priv_pem, &payload, Some(pass)).expect("sign");
         verify_keyed(&pub_pem, &payload, &sig, "sha256:deadbeef").expect("verify");
     }
 
     #[test]
     fn sign_encrypted_key_without_passphrase_errors() {
         let (_pub_pem, priv_pem) = encrypted_key_fixture("anything");
-        let err = sign_keyed(&priv_pem, b"x").unwrap_err();
+        let err = sign_keyed(&priv_pem, b"x", None).unwrap_err();
         match err {
             CosignError::BadPrivateKey(msg) => {
                 assert!(
@@ -553,7 +537,7 @@ mod tests {
     #[test]
     fn sign_encrypted_key_with_wrong_passphrase_errors() {
         let (_pub_pem, priv_pem) = encrypted_key_fixture("right");
-        let err = sign_keyed_with_passphrase(&priv_pem, b"x", Some("wrong")).unwrap_err();
+        let err = sign_keyed(&priv_pem, b"x", Some("wrong")).unwrap_err();
         match err {
             CosignError::BadPrivateKey(msg) => {
                 assert!(msg.contains("decrypt"), "got {msg}");
@@ -568,7 +552,7 @@ mod tests {
         let payload = payload_for("sha256:abc");
         // Supplying a passphrase on a plain key must not fail —
         // falls back to the unencrypted path.
-        let sig = sign_keyed_with_passphrase(&priv_pem, &payload, Some("ignored")).expect("sign");
+        let sig = sign_keyed(&priv_pem, &payload, Some("ignored")).expect("sign");
         verify_keyed(&pub_pem, &payload, &sig, "sha256:abc").expect("verify");
     }
 
@@ -598,7 +582,7 @@ mod tests {
     fn dsse_sign_then_verify_roundtrips() {
         let (pub_pem, priv_pem) = keypair_fixture();
         let payload = br#"{"_type":"https://in-toto.io/Statement/v1"}"#;
-        let envelope = sign_dsse(&priv_pem, "application/vnd.in-toto+json", payload).unwrap();
+        let envelope = sign_dsse(&priv_pem, "application/vnd.in-toto+json", payload, None).unwrap();
         let recovered = verify_dsse(&pub_pem, &envelope).expect("verify");
         assert_eq!(recovered, payload);
     }
@@ -608,7 +592,7 @@ mod tests {
         let (pub_pem, priv_pem) = keypair_fixture();
         let payload = b"original";
         let envelope_bytes =
-            sign_dsse(&priv_pem, "application/test", payload).unwrap();
+            sign_dsse(&priv_pem, "application/test", payload, None).unwrap();
 
         // Tamper with the base64 payload inside the envelope — the
         // signature was over the *original* bytes.
@@ -628,7 +612,7 @@ mod tests {
         // swapped type.
         let (pub_pem, priv_pem) = keypair_fixture();
         let payload = b"cross-type";
-        let envelope_bytes = sign_dsse(&priv_pem, "type/a", payload).unwrap();
+        let envelope_bytes = sign_dsse(&priv_pem, "type/a", payload, None).unwrap();
         let mut envelope: DsseEnvelope = serde_json::from_slice(&envelope_bytes).unwrap();
         envelope.payload_type = "type/b".to_string();
         let tampered = serde_json::to_vec(&envelope).unwrap();
