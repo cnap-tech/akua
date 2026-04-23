@@ -21,7 +21,12 @@ const VERSION: &str = "6.6.0";
 /// drifted, media type changed) or a deserved CI red. Don't swallow
 /// them.
 fn skip_if_network_flake(e: &oci_fetcher::OciFetchError) -> bool {
-    matches!(e, oci_fetcher::OciFetchError::Http { .. })
+    matches!(
+        e,
+        oci_fetcher::OciFetchError::Transport(
+            akua_core::oci_transport::TransportError::Http { .. }
+        )
+    )
 }
 
 #[test]
@@ -33,7 +38,9 @@ fn fetches_public_helm_oci_chart() {
             eprintln!("skipping: transient network error: {e}");
             return;
         }
-        Err(oci_fetcher::OciFetchError::AuthRequired { registry }) => {
+        Err(oci_fetcher::OciFetchError::Transport(
+            akua_core::oci_transport::TransportError::AuthRequired { registry },
+        )) => {
             panic!("unexpected auth required on public chart for `{registry}`");
         }
         Err(e) => panic!("unexpected fetch error: {e}"),

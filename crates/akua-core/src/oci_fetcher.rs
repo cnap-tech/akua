@@ -38,13 +38,16 @@
 //! AuthRequired)` when the registry demands credentials we don't have.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::hex::hex_encode;
 use crate::oci_auth::{self, Credentials, CredsStore};
+use crate::oci_transport::{
+    apply_bearer, build_client, ensure_ok, fetch_token, parse_ref, BearerChallenge, OciRef,
+    TokenCache, TransportError,
+};
 
 /// Media type the helm-v3+ OCI chart format uses for the chart blob.
 const HELM_CHART_LAYER_MEDIA_TYPE: &str =
@@ -71,22 +74,12 @@ pub struct FetchedChart {
 
 #[derive(Debug, thiserror::Error)]
 pub enum OciFetchError {
-    #[error("invalid OCI reference `{0}`: expected `oci://<registry>/<repo>`")]
-    BadRef(String),
-
-    #[error("http error fetching `{url}`: {source}")]
-    Http {
-        url: String,
-        #[source]
-        source: reqwest::Error,
-    },
-
-    #[error("registry returned {status} for `{url}`: {body}")]
-    Status {
-        url: String,
-        status: u16,
-        body: String,
-    },
+    /// Anything the shared transport surfaces — bad ref, HTTP failure,
+    /// non-2xx status, auth rejected. Kept as a nested enum so the
+    /// CLI can pattern-match if it wants to distinguish connection-
+    /// level flakes from digest mismatches.
+    #[error(transparent)]
+    Transport(#[from] TransportError),
 
     /// Registry returned 401 after we exhausted every credential the
     /// caller gave us. Distinct from a malformed config (see
@@ -172,35 +165,6 @@ struct OciLayer {
     digest: String,
     #[serde(default)]
     size: u64,
-}
-
-// --- Ref parsing ----------------------------------------------------------
-
-/// Parsed OCI reference. Separated out so tests can exercise the parser
-/// without going to the network.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct OciRef {
-    registry: String,
-    repository: String,
-}
-
-/// Parse `oci://<registry>/<path/to/repo>` → `(registry, repository)`.
-/// Scheme is required — bare registry refs are an ambiguity the spec
-/// forbids.
-fn parse_ref(s: &str) -> Result<OciRef, OciFetchError> {
-    let rest = s
-        .strip_prefix("oci://")
-        .ok_or_else(|| OciFetchError::BadRef(s.to_string()))?;
-    let (registry, repository) = rest
-        .split_once('/')
-        .ok_or_else(|| OciFetchError::BadRef(s.to_string()))?;
-    if registry.is_empty() || repository.is_empty() {
-        return Err(OciFetchError::BadRef(s.to_string()));
-    }
-    Ok(OciRef {
-        registry: registry.to_string(),
-        repository: repository.to_string(),
-    })
 }
 
 // --- Public entry point ---------------------------------------------------
@@ -298,14 +262,7 @@ pub fn fetch_with_opts(
         }
     }
 
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .user_agent(concat!("akua/", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|e| OciFetchError::Http {
-            url: format!("{oci_ref}:{version}"),
-            source: e,
-        })?;
+    let client = build_client()?;
 
     let registry_creds = oci_auth::for_registry(creds, &parsed.registry);
     let mut token = TokenCache::default();
@@ -560,14 +517,6 @@ fn verify_cosign_signature(
 
 // --- HTTP helpers ---------------------------------------------------------
 
-/// Bearer token for a specific (registry, repository) scope. Cached on
-/// the stack for the life of a single `fetch()` so the manifest and
-/// blob GETs reuse it.
-#[derive(Default)]
-struct TokenCache {
-    token: Option<String>,
-}
-
 fn get_manifest(
     client: &reqwest::blocking::Client,
     url: &str,
@@ -595,17 +544,9 @@ fn get_blob(
 }
 
 /// GET with the retry-on-401-bearer-challenge pattern all the major
-/// public registries use. On a 401 we parse the `WWW-Authenticate`
-/// header, trade a scope for a token at the realm endpoint (sending
-/// user creds if we have them), cache it, and retry once.
-///
-/// Ordering: if the caller supplied `creds` AND it's a raw bearer PAT,
-/// we attach it to the initial request directly — that skips the
-/// anonymous-token exchange for registries that accept PATs in-band
-/// (ghcr.io with a `read:packages` PAT, for example). For Basic auth
-/// creds we still go through the challenge flow because registries
-/// typically want the Basic header *at the realm endpoint* rather
-/// than on the /v2/ request itself.
+/// public registries use. Delegates to the shared transport helpers;
+/// kept as a thin wrapper so `get_manifest` / `get_blob` stay
+/// readable + `decorate` pairs with the right HTTP verb.
 fn get_with_auth(
     client: &reqwest::blocking::Client,
     url: &str,
@@ -614,166 +555,34 @@ fn get_with_auth(
     token_cache: &mut TokenCache,
     decorate: impl Fn(reqwest::blocking::RequestBuilder) -> reqwest::blocking::RequestBuilder,
 ) -> Result<Vec<u8>, OciFetchError> {
-    let mut req = decorate(client.get(url));
-    if let Some(tok) = &token_cache.token {
-        req = req.bearer_auth(tok);
-    } else if let Some(Credentials::Bearer { token }) = creds {
-        // Skip the challenge round-trip for raw PATs.
-        req = req.bearer_auth(token);
-    }
-    let resp = req.send().map_err(|source| OciFetchError::Http {
+    let req = apply_bearer(decorate(client.get(url)), token_cache, creds);
+    let resp = req.send().map_err(|source| TransportError::Http {
         url: url.to_string(),
         source,
     })?;
 
     if resp.status().as_u16() != 401 {
-        return ensure_ok(resp, url);
+        return Ok(ensure_ok(resp, url)?);
     }
 
-    // 401: parse the challenge, fetch a token, retry.
-    let challenge = BearerChallenge::from_resp(&resp).ok_or_else(|| {
-        OciFetchError::AuthRequired {
-            registry: registry.to_string(),
-        }
+    let challenge = BearerChallenge::from_resp(&resp).ok_or_else(|| TransportError::AuthRequired {
+        registry: registry.to_string(),
     })?;
     let token = fetch_token(client, &challenge, creds)?;
     token_cache.token = Some(token.clone());
 
     let retry_req = decorate(client.get(url)).bearer_auth(&token);
-    let retry = retry_req.send().map_err(|source| OciFetchError::Http {
+    let retry = retry_req.send().map_err(|source| TransportError::Http {
         url: url.to_string(),
         source,
     })?;
     if retry.status().as_u16() == 401 {
-        return Err(OciFetchError::AuthRequired {
+        return Err(TransportError::AuthRequired {
             registry: registry.to_string(),
-        });
-    }
-    ensure_ok(retry, url)
-}
-
-/// Parsed `WWW-Authenticate: Bearer realm=...,service=...,scope=...`
-/// challenge. Only these three fields carry meaning for anonymous pulls.
-#[derive(Debug)]
-struct BearerChallenge {
-    realm: String,
-    service: Option<String>,
-    scope: Option<String>,
-}
-
-impl BearerChallenge {
-    fn from_resp(resp: &reqwest::blocking::Response) -> Option<Self> {
-        let hdr = resp.headers().get("WWW-Authenticate")?.to_str().ok()?;
-        let rest = hdr.strip_prefix("Bearer ")?;
-        let mut out = BearerChallenge {
-            realm: String::new(),
-            service: None,
-            scope: None,
-        };
-        // Split on commas, then `key="value"`. Per RFC 7235 values are
-        // quoted-strings; registries all follow the quoted form.
-        for part in rest.split(',') {
-            let (k, v) = part.trim().split_once('=')?;
-            let v = v.trim().trim_matches('"').to_string();
-            match k.trim() {
-                "realm" => out.realm = v,
-                "service" => out.service = Some(v),
-                "scope" => out.scope = Some(v),
-                _ => {}
-            }
         }
-        if out.realm.is_empty() {
-            return None;
-        }
-        Some(out)
+        .into());
     }
-}
-
-/// Exchange a `BearerChallenge` for a token. When `creds` is `Some`,
-/// send them to the realm endpoint — Basic auth for `username/password`,
-/// Bearer for a raw PAT. Anonymous (no creds) fetches a public-scope
-/// token, the path we shipped in slice B.
-fn fetch_token(
-    client: &reqwest::blocking::Client,
-    challenge: &BearerChallenge,
-    creds: Option<&Credentials>,
-) -> Result<String, OciFetchError> {
-    let mut req = client.get(&challenge.realm);
-    if let Some(c) = creds {
-        req = req.header("Authorization", c.to_authorization_header());
-    }
-    let mut query: Vec<(&str, &str)> = Vec::new();
-    if let Some(service) = &challenge.service {
-        query.push(("service", service));
-    }
-    if let Some(scope) = &challenge.scope {
-        query.push(("scope", scope));
-    }
-    if !query.is_empty() {
-        req = req.query(&query);
-    }
-    let resp = req.send().map_err(|source| OciFetchError::Http {
-        url: challenge.realm.clone(),
-        source,
-    })?;
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().unwrap_or_default();
-        return Err(OciFetchError::Status {
-            url: challenge.realm.clone(),
-            status: status.as_u16(),
-            body,
-        });
-    }
-    #[derive(Deserialize)]
-    struct TokenResp {
-        /// Docker Hub returns `token`; some others (`access_token`)
-        /// provide the same value under a different key.
-        #[serde(default)]
-        token: String,
-        #[serde(default)]
-        access_token: String,
-    }
-    let body: TokenResp = resp.json().map_err(|source| OciFetchError::Http {
-        url: challenge.realm.clone(),
-        source,
-    })?;
-    let tok = if !body.token.is_empty() {
-        body.token
-    } else {
-        body.access_token
-    };
-    if tok.is_empty() {
-        return Err(OciFetchError::AuthRequired {
-            registry: challenge
-                .service
-                .clone()
-                .unwrap_or_else(|| challenge.realm.clone()),
-        });
-    }
-    Ok(tok)
-}
-
-fn ensure_ok(
-    resp: reqwest::blocking::Response,
-    url: &str,
-) -> Result<Vec<u8>, OciFetchError> {
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().unwrap_or_default();
-        let truncated = if body.len() > 300 { &body[..300] } else { body.as_str() };
-        return Err(OciFetchError::Status {
-            url: url.to_string(),
-            status: status.as_u16(),
-            body: truncated.to_string(),
-        });
-    }
-    resp.bytes()
-        .map(|b| b.to_vec())
-        .map_err(|source| OciFetchError::Http {
-            url: url.to_string(),
-            source,
-        })
+    Ok(ensure_ok(retry, url)?)
 }
 
 // --- Tarball extraction ---------------------------------------------------
@@ -858,35 +667,7 @@ fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn parses_ghcr_style_ref() {
-        let r = parse_ref("oci://ghcr.io/grafana/helm-charts/grafana").unwrap();
-        assert_eq!(r.registry, "ghcr.io");
-        assert_eq!(r.repository, "grafana/helm-charts/grafana");
-    }
-
-    #[test]
-    fn parses_docker_hub_ref() {
-        let r = parse_ref("oci://registry-1.docker.io/bitnamicharts/nginx").unwrap();
-        assert_eq!(r.registry, "registry-1.docker.io");
-        assert_eq!(r.repository, "bitnamicharts/nginx");
-    }
-
-    #[test]
-    fn rejects_ref_without_scheme() {
-        assert!(matches!(
-            parse_ref("ghcr.io/x/y"),
-            Err(OciFetchError::BadRef(_))
-        ));
-    }
-
-    #[test]
-    fn rejects_ref_without_repo() {
-        assert!(matches!(
-            parse_ref("oci://ghcr.io"),
-            Err(OciFetchError::BadRef(_))
-        ));
-    }
+    // Ref-parsing tests live next to the parser in `oci_transport`.
 
     #[test]
     fn cache_dir_is_content_addressed() {
