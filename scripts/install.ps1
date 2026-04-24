@@ -1,4 +1,4 @@
-# akua install script for Windows — `irm https://akua.cnap.tech/install.ps1 | iex`
+# akua install script for Windows — `irm https://akua.dev/install.ps1 | iex`
 #
 # Downloads a prebuilt akua.exe from GitHub Releases into
 # $env:AKUA_INSTALL\bin (default: $env:USERPROFILE\.akua\bin) and prints

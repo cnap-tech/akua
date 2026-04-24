@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>akua — one binary for cloud-native packaging</title>
+		<meta
+			name="description"
+			content="A single Rust binary: render, verify, sign, publish. KCL-typed packages. Helm and Kustomize embedded as WebAssembly. Sandboxed by default."
+		/>
+		<meta name="color-scheme" content="dark" />
+		<meta property="og:title" content="akua — one binary for cloud-native packaging" />
+		<meta
+			property="og:description"
+			content="One binary: render, verify, sign, publish. KCL-typed. Helm and Kustomize embedded as WebAssembly. Sandboxed by default."
+		/>
+		<meta property="og:url" content="https://akua.dev/" />
+		<style>
+			:root {
+				color-scheme: dark;
+				--bg: #0a0a0a;
+				--fg: #e8e8ea;
+				--muted: #8a8a8d;
+				--line: #1b1b1d;
+				--accent: #ee1c25;
+				--code-bg: #111113;
+			}
+			* {
+				box-sizing: border-box;
+			}
+			html,
+			body {
+				margin: 0;
+				padding: 0;
+			}
+			body {
+				background: var(--bg);
+				color: var(--fg);
+				font:
+					16px/1.55 ui-sans-serif,
+					system-ui,
+					-apple-system,
+					Segoe UI,
+					Roboto,
+					sans-serif;
+				-webkit-font-smoothing: antialiased;
+				min-height: 100vh;
+				display: grid;
+				place-items: center;
+				padding: 48px 20px;
+			}
+			main {
+				width: 100%;
+				max-width: 640px;
+			}
+			h1 {
+				margin: 0 0 4px;
+				font-size: 44px;
+				font-weight: 600;
+				letter-spacing: -0.02em;
+			}
+			.tagline {
+				margin: 0 0 32px;
+				color: var(--muted);
+				font-size: 17px;
+			}
+			h2 {
+				margin: 36px 0 10px;
+				font-size: 12px;
+				font-weight: 600;
+				letter-spacing: 0.12em;
+				text-transform: uppercase;
+				color: var(--muted);
+			}
+			pre {
+				margin: 0;
+				padding: 14px 16px;
+				background: var(--code-bg);
+				border: 1px solid var(--line);
+				border-radius: 6px;
+				overflow-x: auto;
+				font:
+					13px/1.55 ui-monospace,
+					SFMono-Regular,
+					Menlo,
+					Consolas,
+					monospace;
+				color: var(--fg);
+			}
+			pre + pre {
+				margin-top: 8px;
+			}
+			.prompt {
+				color: var(--accent);
+				user-select: none;
+			}
+			p {
+				margin: 0 0 12px;
+				color: var(--fg);
+			}
+			p.note {
+				color: var(--muted);
+				font-size: 14px;
+			}
+			a {
+				color: var(--fg);
+				text-decoration: underline;
+				text-decoration-color: var(--line);
+				text-underline-offset: 3px;
+			}
+			a:hover {
+				text-decoration-color: var(--accent);
+			}
+			ul.links {
+				list-style: none;
+				padding: 0;
+				margin: 0;
+				display: flex;
+				flex-wrap: wrap;
+				gap: 18px;
+				color: var(--muted);
+				font-size: 14px;
+			}
+			footer {
+				margin-top: 48px;
+				color: var(--muted);
+				font-size: 13px;
+			}
+		</style>
+	</head>
+	<body>
+		<main>
+			<h1>akua</h1>
+			<p class="tagline">
+				One binary for cloud-native packaging. Render, verify, sign, publish. KCL-typed. Helm and
+				Kustomize embedded as WebAssembly. Sandboxed by default.
+			</p>
+
+			<h2>Install (macOS / Linux)</h2>
+			<pre><span class="prompt">$</span> curl -fsSL https://akua.dev/install | sh</pre>
+
+			<h2>Install (Windows)</h2>
+			<pre><span class="prompt">&gt;</span> irm https://akua.dev/install.ps1 | iex</pre>
+
+			<h2>From source</h2>
+			<pre><span class="prompt">$</span> cargo install --git https://github.com/cnap-tech/akua akua-cli</pre>
+
+			<p class="note" style="margin-top: 16px">
+				Pre-alpha. v0.1.0 ships four production-ready verbs; twenty-two more are wired behind the
+				same command surface. See the repo for what is and isn't done yet.
+			</p>
+
+			<h2>Links</h2>
+			<ul class="links">
+				<li><a href="https://github.com/cnap-tech/akua">github.com/cnap-tech/akua</a></li>
+				<li>
+					<a href="https://github.com/cnap-tech/akua/blob/main/docs/cli.md">CLI reference</a>
+				</li>
+				<li>
+					<a href="https://github.com/cnap-tech/akua/blob/main/docs/package-format.md"
+						>Package format</a
+					>
+				</li>
+				<li>
+					<a href="https://github.com/cnap-tech/akua/releases">Releases</a>
+				</li>
+			</ul>
+
+			<footer>Apache-2.0. Built by <a href="https://cnap.tech">CNAP</a>.</footer>
+		</main>
+	</body>
+</html>
