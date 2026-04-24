@@ -32,15 +32,21 @@ compiled to wasip1 WASM module
 shipped inside the akua binary via include_bytes!
         │
         ▼
-hosted at runtime by wasmtime (embedded in akua-core)
+hosted at runtime by the shared wasmtime Engine
+(one Engine per process; one Store per invocation)
         │
         ▼
 typed FFI: Rust host ↔ WASM guest
 ```
 
-For Rust engines (KCL via `kclvm-rs`), we link directly in-process — no WASM wrapping needed.
+**Shared Engine, many Stores.** akua follows wasmtime's canonical pattern. One `engine_host_wasm::shared_engine()` singleton hosts:
 
-Precompilation caches are written to `$XDG_CACHE_HOME/akua/modules/` on first use; subsequent invocations deserialize the precompiled module in single-digit milliseconds.
+- the `akua-render-worker` (per-render Store with the tenant's preopens + memory cap + epoch deadline);
+- every engine plugin (helm, kustomize, future kro/CEL/kyverno) — each call gets its own Store on the same Engine.
+
+Plugin callouts from sandboxed KCL cross the boundary once — through a single host-function import, `env::kcl_plugin_invoke_json_wasm`, that reads arguments from guest memory and dispatches to handlers registered against akua-core's plugin registry. The handler's engine Store runs, produces bytes, the bridge writes them back into the worker's linear memory. See [docs/security-model.md — one Engine, many Stores — with a plugin bridge](security-model.md#one-engine-many-stores--with-a-plugin-bridge) for the full picture + [docs/spikes/wasmtime-multi-engine.md](spikes/wasmtime-multi-engine.md) for the architecture decision.
+
+Precompilation: each engine's `build.rs` calls `engine_host_wasm::precompile(...)` against `shared_config()` at akua build time, producing a `.cwasm` deserialized in ~microseconds on first use.
 
 ---
 

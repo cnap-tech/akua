@@ -34,8 +34,39 @@ akua is a **sandboxed-by-default** render substrate. Every render runs inside a 
 **The render path runs in a wasmtime WASI sandbox.** Concretely:
 
 - **`akua-render-worker`** — akua's render pipeline compiled to `wasm32-wasip1`, AOT-compiled to `.cwasm` at akua's build time.
-- **wasmtime host** — akua's native binary loads the `.cwasm` once per process and instantiates per-render via `InstanceAllocationStrategy::pooling(...)` (microsecond instantiation after first load).
-- **Per-render `Store`** — fresh `WasiCtx` with the tenant's preopens, fresh `StoreLimits` with hard memory cap, fresh fuel + epoch deadlines. Dropped on render completion.
+- **wasmtime host** — akua's native binary loads the `.cwasm` once per process and instantiates per-render.
+- **Per-render `Store`** — fresh `WasiCtx` with the tenant's preopens, fresh `StoreLimits` with a hard memory cap, fresh epoch deadline. Dropped on render completion.
+
+### One Engine, many Stores — with a plugin bridge
+
+akua follows wasmtime's documented pattern: **one process-global `Engine`, one `Linker` of host imports, many per-invocation `Store`s**. The render worker and every engine plugin (helm, kustomize, future kro/CEL) share the same Engine so that:
+
+- JIT-compiled code is compiled once and reused across all Stores.
+- Type interning, compat-hash checks, and trap dispatch live in one place — no duplication, no inter-Engine TLS races.
+- Per-invocation isolation still holds: each render gets its own `Store`, and plugin calls execute in their own separate `Store` too.
+
+When a Package calls `helm.template(...)` or `kustomize.build(...)` from inside the render worker:
+
+```
+akua-cli (native Rust)
+  └ Engine (shared)
+      ├ Store A — render worker, KCL evaluator paused in host import
+      │     ⇣ kcl_plugin_invoke_json_wasm (wasm import)
+      │     ⇡ host Rust dispatches to registered plugin handler
+      │         ⇣
+      └ Store B — helm.wasm, runs the Go helm engine
+            ⇡ manifests bytes
+      ⇡ host writes response into Store A's guest memory, returns ptr
+      ⇡ KCL continues in Store A
+```
+
+Both Stores live on the same Engine and the same OS thread. Wasmtime's TLS tracks which Store is currently active; the paused Store resumes correctly when the plugin callout returns. Nested Engines were explicitly ruled out — they share process-global signal handlers in an untested way and duplicate the JIT cache. See [docs/spikes/wasmtime-multi-engine.md](spikes/wasmtime-multi-engine.md) for the research + verification.
+
+### Plugin bridge boundary
+
+The `env::kcl_plugin_invoke_json_wasm` import is the one hole in the worker's sandbox — the only place untrusted KCL can call out to host code. It has exactly one job: read three JSON-string arguments from the guest's linear memory, dispatch to akua-core's plugin registry on the host, allocate response bytes in the guest via the worker's exported `akua_bridge_alloc`, and hand back a pointer. The host never runs arbitrary guest-supplied code; only the dispatcher and its registered handlers. Plugin handlers themselves run in their own Store, not on the host — so even a compromised helm engine can't escape to the native process.
+
+The bridge emits a one-line trace per call under `AKUA_BRIDGE_TRACE=1` (stderr), useful for debugging misrouted plugin invocations.
 
 ## What's guaranteed
 
@@ -45,9 +76,8 @@ akua is a **sandboxed-by-default** render substrate. Every render runs inside a 
 | Write files outside scope | Same mechanism. Output dir preopened with `DirPerms::MUTATE + FilePerms::WRITE`; nothing else writable. |
 | Network | **wasip1 has no socket syscalls, period.** Not "denied by default" — denied by construction. No `connect()`, no DNS, no TLS initiation. The guest cannot fabricate a socket. |
 | Subprocess | No `fork`/`exec` in wasip1. Shell-out is unavailable at the host-ABI level. |
-| Memory | `StoreLimitsBuilder::memory_size(256 << 20)` caps each Store at 256 MiB (tunable). `memory.grow` fails beyond the cap; wasm traps. Default: **256 MiB per render**. |
-| CPU (deterministic) | `Config::consume_fuel(true)` + `store.set_fuel(N)`. Fuel counts wasm instructions executed. Deterministic across runs — same render hits the same fuel-exhaustion point, always. Default: **10 billion fuel units per render** (~10s of cranelift-JITted integer work, well beyond any legitimate render). |
-| CPU (wall-clock) | `Config::epoch_interruption(true)` + background thread calling `engine.increment_epoch()` on a fixed tick. `store.set_epoch_deadline(K)` traps when the current epoch exceeds deadline. Cheap to check (compiled into every loop backedge). Non-deterministic but fast. Default: **30 ticks × 100 ms/tick = 3 s wall-clock deadline per render**. |
+| Memory | `StoreLimitsBuilder::memory_size(256 << 20)` caps each render Store at 256 MiB (tunable). `memory.grow` fails beyond the cap; wasm traps. Default: **256 MiB per render**. |
+| CPU (wall-clock) | `Config::epoch_interruption(true)` + background thread calling `engine.increment_epoch()` on a fixed tick. `store.set_epoch_deadline(K)` traps when the current epoch exceeds deadline. Cheap to check (compiled into every loop backedge). Default: **30 ticks × 100 ms/tick = 3 s wall-clock deadline per render**. Engine-plugin Stores (helm, kustomize) opt out with `deadline = u64::MAX` — the host-Rust caller above them owns whole-call timeouts. Per-invocation fuel-based instruction counting is not enabled today; can return later without ABI impact. |
 | Stack overflow | `Config::max_wasm_stack(bytes)` caps the wasm-side stack. Default 512 KiB; lower for defense-in-depth. |
 | Instance count / table bloat | `StoreLimitsBuilder::instances(N)`, `tables(N)`. Prevents wasm from inflating host memory via many small allocations. |
 
