@@ -216,7 +216,9 @@ impl RenderError {
                 ExitCode::SystemError
             }
             RenderError::Render(PackageRenderError::Io { .. }) => ExitCode::SystemError,
-            RenderError::ManifestParse { source, .. } if source.is_system() => ExitCode::SystemError,
+            RenderError::ManifestParse { source, .. } if source.is_system() => {
+                ExitCode::SystemError
+            }
             RenderError::StdoutWrite(_) => ExitCode::SystemError,
             _ => ExitCode::UserError,
         }
@@ -340,11 +342,8 @@ pub fn render_in_worker(
 ) -> Result<akua_core::RenderedPackage, RenderError> {
     use crate::render_worker::{RenderHost, ResourceLimits, WorkerRequest};
 
-    let _scope = akua_core::kcl_plugin::RenderScope::enter_for_render(
-        &package.path,
-        charts,
-        strict,
-    );
+    let _scope =
+        akua_core::kcl_plugin::RenderScope::enter_for_render(&package.path, charts, strict);
 
     let charts_tmp = akua_core::stdlib::materialize_charts_if_any(charts).map_err(|e| {
         RenderError::PackageK(PackageKError::KclEval(format!(
@@ -354,9 +353,8 @@ pub fn render_in_worker(
 
     let host = RenderHost::shared().map_err(worker_to_render_err)?;
 
-    let inputs_json: serde_json::Value = serde_json::to_value(inputs).map_err(|e| {
-        RenderError::PackageK(PackageKError::KclEval(format!("inputs→json: {e}")))
-    })?;
+    let inputs_json: serde_json::Value = serde_json::to_value(inputs)
+        .map_err(|e| RenderError::PackageK(PackageKError::KclEval(format!("inputs→json: {e}"))))?;
 
     let request = WorkerRequest::Render {
         package_filename: package
@@ -732,8 +730,7 @@ resources = [
         fs::write(tmp.path().join("inputs.yaml"), ":::: not yaml ::::").unwrap();
         fs::write(tmp.path().join("inputs.example.yaml"), "replicas: 5\n").unwrap();
 
-        let err = run(&Context::human(), &args(&pkg, tmp.path()), &mut Vec::new())
-            .unwrap_err();
+        let err = run(&Context::human(), &args(&pkg, tmp.path()), &mut Vec::new()).unwrap_err();
         assert_eq!(err.to_structured().code, codes::E_INPUTS_PARSE);
     }
 

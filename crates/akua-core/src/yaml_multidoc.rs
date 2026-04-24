@@ -17,8 +17,8 @@ use serde_json::Value;
 pub(crate) fn parse(bytes: &[u8], plugin_name: &str) -> Result<Vec<Value>, String> {
     use serde::de::Deserialize;
 
-    let text = std::str::from_utf8(bytes)
-        .map_err(|e| format!("{plugin_name}: output not utf-8: {e}"))?;
+    let text =
+        std::str::from_utf8(bytes).map_err(|e| format!("{plugin_name}: output not utf-8: {e}"))?;
 
     let mut out = Vec::new();
     for doc in serde_yaml::Deserializer::from_str(text) {

@@ -80,8 +80,7 @@ impl UpdateError {
                 StructuredError::new(codes::E_CHART_RESOLVE, e.to_string()).with_default_docs()
             }
             UpdateError::UnknownDep { .. } => {
-                StructuredError::new(codes::E_ADD_INVALID_DEP, self.to_string())
-                    .with_default_docs()
+                StructuredError::new(codes::E_ADD_INVALID_DEP, self.to_string()).with_default_docs()
             }
             UpdateError::StdoutWrite(e) => {
                 StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
@@ -309,11 +308,7 @@ redis = { path = "./vendor/redis" }
         .unwrap();
 
         // Mutate one chart's content — bumps its digest.
-        std::fs::write(
-            tmp.path().join("vendor/nginx/values.yaml"),
-            b"image: new\n",
-        )
-        .unwrap();
+        std::fs::write(tmp.path().join("vendor/nginx/values.yaml"), b"image: new\n").unwrap();
 
         let mut stdout = Vec::new();
         run(
@@ -329,8 +324,14 @@ redis = { path = "./vendor/redis" }
         let updated = parsed["updated"].as_array().unwrap();
         assert_eq!(updated.len(), 1);
         assert_eq!(updated[0]["name"], "nginx");
-        assert!(updated[0]["from_digest"].as_str().unwrap().starts_with("sha256:"));
-        assert!(updated[0]["to_digest"].as_str().unwrap().starts_with("sha256:"));
+        assert!(updated[0]["from_digest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:"));
+        assert!(updated[0]["to_digest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:"));
         assert_ne!(updated[0]["from_digest"], updated[0]["to_digest"]);
     }
 
@@ -353,16 +354,8 @@ redis = { path = "./vendor/redis" }
 
         // Mutate BOTH charts; then `update --dep nginx` should only
         // refresh nginx's entry. redis's prior (stale) digest stays.
-        std::fs::write(
-            tmp.path().join("vendor/nginx/values.yaml"),
-            b"image: n\n",
-        )
-        .unwrap();
-        std::fs::write(
-            tmp.path().join("vendor/redis/values.yaml"),
-            b"image: r\n",
-        )
-        .unwrap();
+        std::fs::write(tmp.path().join("vendor/nginx/values.yaml"), b"image: n\n").unwrap();
+        std::fs::write(tmp.path().join("vendor/redis/values.yaml"), b"image: r\n").unwrap();
 
         let mut stdout = Vec::new();
         run(
@@ -415,5 +408,4 @@ redis = { path = "./vendor/redis" }
         assert!(matches!(err, UpdateError::UnknownDep { .. }));
         assert_eq!(err.exit_code(), ExitCode::UserError);
     }
-
 }

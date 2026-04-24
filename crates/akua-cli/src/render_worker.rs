@@ -124,7 +124,12 @@ impl WorkerResponse {
     /// sent a `Render` request) and likewise surfaces as `Err`.
     pub fn into_render_yaml(self) -> Result<String, String> {
         match self {
-            WorkerResponse::Render { status, yaml, message, .. } => {
+            WorkerResponse::Render {
+                status,
+                yaml,
+                message,
+                ..
+            } => {
                 if status == WORKER_STATUS_OK {
                     Ok(yaml)
                 } else {
@@ -383,10 +388,8 @@ impl RenderHost {
             return Err(WorkerError::WorkerStderr(stderr_str));
         }
         let raw = String::from_utf8_lossy(&out_bytes).into_owned();
-        serde_json::from_slice(&out_bytes).map_err(|source| WorkerError::DecodeResponse {
-            source,
-            raw,
-        })
+        serde_json::from_slice(&out_bytes)
+            .map_err(|source| WorkerError::DecodeResponse { source, raw })
     }
 }
 
@@ -430,8 +433,7 @@ fn install_kcl_plugin_bridge(linker: &mut Linker<HostState>) {
              args_ptr: i32,
              kwargs_ptr: i32|
              -> i32 {
-                plugin_bridge_call(&mut caller, method_ptr, args_ptr, kwargs_ptr)
-                    .unwrap_or(0)
+                plugin_bridge_call(&mut caller, method_ptr, args_ptr, kwargs_ptr).unwrap_or(0)
             },
         )
         .expect("install kcl_plugin_invoke_json_wasm");
@@ -474,11 +476,9 @@ fn plugin_bridge_call(
     // and we know the message here without a round-trip. Both paths
     // stash the message on HostState so `invoke_inner` can promote
     // the resulting wasip1 trap to `WorkerError::PluginPanic`.
-    let (response, panic_msg) = match std::panic::catch_unwind(
-        std::panic::AssertUnwindSafe(|| {
-            akua_core::kcl_plugin::invoke_bridge(&method, &args, &kwargs)
-        }),
-    ) {
+    let (response, panic_msg) = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        akua_core::kcl_plugin::invoke_bridge(&method, &args, &kwargs)
+    })) {
         Ok(s) => {
             let msg = akua_core::kcl_plugin::extract_panic_info(&s);
             (s, msg)
@@ -618,7 +618,10 @@ mod tests {
     fn ping_without_note_returns_no_echo() {
         let Some(host) = host_or_skip() else { return };
         let resp = host
-            .invoke(&WorkerRequest::Ping { note: None }, ResourceLimits::default())
+            .invoke(
+                &WorkerRequest::Ping { note: None },
+                ResourceLimits::default(),
+            )
             .expect("invoke");
         match resp {
             WorkerResponse::Ping { echoed, .. } => assert_eq!(echoed, None),
@@ -664,10 +667,7 @@ mod tests {
         // below calls it via the `kcl_plugin.<name>` discovery shape,
         // which is exactly what engine stdlibs (helm / kustomize) use.
         akua_core::kcl_plugin::register("bridge_echo.say", |args, _kwargs| {
-            Ok(args
-                .get(0)
-                .cloned()
-                .unwrap_or(serde_json::Value::Null))
+            Ok(args.get(0).cloned().unwrap_or(serde_json::Value::Null))
         });
 
         // KCL plugin invocation requires `import kcl_plugin.<pkg>`
@@ -794,7 +794,9 @@ mod tests {
             )
             .expect("invoke");
         match resp {
-            WorkerResponse::Render { status, message, .. } => {
+            WorkerResponse::Render {
+                status, message, ..
+            } => {
                 assert_eq!(status, "fail");
                 assert!(!message.is_empty(), "empty diagnostic");
             }

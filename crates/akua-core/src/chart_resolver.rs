@@ -13,9 +13,14 @@
 //! digest of the chart tree is exactly what this module computes.
 //!
 //! Phase 2a resolved local-path deps. Phase 2b adds `replace` directives
-//! + OCI/git remote fetches. Remote resolution without a `replace`
+//! and OCI/git remote fetches. Remote resolution without a `replace`
 //! override still returns [`ChartResolveError::UnsupportedSource`] until
 //! the OCI pull path lands (tracked in docs/roadmap.md Phase 2b slice B).
+
+// `ChartResolveError` wraps the OCI/git fetcher errors by value so callers
+// can pattern-match without a `Box::deref`. The enum sits at ~128 bytes,
+// which is fine in the cold error path.
+#![allow(clippy::result_large_err)]
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -115,11 +120,9 @@ impl ResolvedSource {
     pub fn to_locked_fields(&self) -> (String, String, Option<crate::lock_file::Replaced>) {
         use crate::lock_file::Replaced;
         match self {
-            ResolvedSource::Path { declared } => (
-                format!("path+file://{declared}"),
-                "local".to_string(),
-                None,
-            ),
+            ResolvedSource::Path { declared } => {
+                (format!("path+file://{declared}"), "local".to_string(), None)
+            }
             ResolvedSource::Oci { oci, version, .. } => (oci.clone(), version.clone(), None),
             ResolvedSource::OciReplaced {
                 oci,
@@ -133,14 +136,8 @@ impl ResolvedSource {
                 }),
             ),
             ResolvedSource::Git {
-                git,
-                tag_or_rev,
-                ..
-            } => (
-                format!("git+{git}@{tag_or_rev}"),
-                tag_or_rev.clone(),
-                None,
-            ),
+                git, tag_or_rev, ..
+            } => (format!("git+{git}@{tag_or_rev}"), tag_or_rev.clone(), None),
             ResolvedSource::GitReplaced {
                 git,
                 tag_or_rev,
@@ -223,7 +220,7 @@ pub enum ChartResolveError {
 /// path deps resolve against it.
 /// Options controlling how much network the resolver is allowed to do
 /// + where it caches fetched artifacts.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ResolverOptions {
     /// When `true`, OCI deps return [`ChartResolveError::UnsupportedSource`]
     /// rather than attempting a network fetch. `akua verify` / tests
@@ -256,17 +253,6 @@ impl ResolverOptions {
             offline: false,
             cache_root: None,
             expected_digests,
-            cosign_public_key_pem: None,
-        }
-    }
-}
-
-impl Default for ResolverOptions {
-    fn default() -> Self {
-        Self {
-            offline: false,
-            cache_root: None,
-            expected_digests: BTreeMap::new(),
             cosign_public_key_pem: None,
         }
     }
@@ -490,14 +476,13 @@ fn resolve_oci(
         })?
     } else {
         // Online path: consult creds + optional cosign key.
-        let creds = crate::oci_auth::CredsStore::load().map_err(|source| {
-            ChartResolveError::OciFetch {
+        let creds =
+            crate::oci_auth::CredsStore::load().map_err(|source| ChartResolveError::OciFetch {
                 name: name.to_string(),
                 source: crate::oci_fetcher::OciFetchError::AuthConfig {
                     detail: source.to_string(),
                 },
-            }
-        })?;
+            })?;
         let fetch_opts = crate::oci_fetcher::FetchOpts {
             expected_digest: expected,
             creds: &creds,
@@ -570,19 +555,20 @@ fn resolve_git(
     // The lockfile stores the commit SHA under `digest` with a `git:`
     // prefix. Strip it back to raw hex for the fetcher; the prefix
     // is a lock-layer concern.
-    let expected_commit = opts
-        .expected_digests
-        .get(name)
-        .and_then(|d| d.strip_prefix(crate::lock_file::GIT_DIGEST_PREFIX).map(str::to_string));
+    let expected_commit = opts.expected_digests.get(name).and_then(|d| {
+        d.strip_prefix(crate::lock_file::GIT_DIGEST_PREFIX)
+            .map(str::to_string)
+    });
 
     let fetched = if opts.offline {
-        let expected = expected_commit.as_deref().ok_or_else(|| {
-            ChartResolveError::UnsupportedSource {
-                name: name.to_string(),
-                kind: DependencySource::Git,
-                reason: "offline mode needs a lockfile-pinned commit — run `akua add` first",
-            }
-        })?;
+        let expected =
+            expected_commit
+                .as_deref()
+                .ok_or_else(|| ChartResolveError::UnsupportedSource {
+                    name: name.to_string(),
+                    kind: DependencySource::Git,
+                    reason: "offline mode needs a lockfile-pinned commit — run `akua add` first",
+                })?;
         git_fetcher::fetch_from_cache(&cache_root, expected).ok_or_else(|| {
             ChartResolveError::UnsupportedSource {
                 name: name.to_string(),
@@ -675,10 +661,7 @@ fn resolved_source_for_replace(
     match (&dep.oci, &dep.git, &dep.path) {
         (Some(oci), None, None) => Ok(ResolvedSource::OciReplaced {
             oci: oci.clone(),
-            version: dep
-                .version
-                .clone()
-                .unwrap_or_else(|| "unknown".to_string()),
+            version: dep.version.clone().unwrap_or_else(|| "unknown".to_string()),
             replace_path: replace_path.to_string(),
         }),
         (None, Some(git), None) => {
@@ -1017,9 +1000,8 @@ alpha = { path = "./charts/alpha" }
     #[test]
     fn oci_dep_surfaces_typed_error_in_offline_mode() {
         let ws = tempfile::tempdir().unwrap();
-        let manifest = minimal_manifest(
-            r#"nginx = { oci = "oci://ghcr.io/foo/nginx", version = "1.0.0" }"#,
-        );
+        let manifest =
+            minimal_manifest(r#"nginx = { oci = "oci://ghcr.io/foo/nginx", version = "1.0.0" }"#);
         let err = resolve(&manifest, ws.path()).unwrap_err();
         assert!(
             matches!(
@@ -1044,9 +1026,8 @@ alpha = { path = "./charts/alpha" }
         // network, so the resolver refuses — distinct from the
         // `GitFetch` error path (which requires a real clone).
         let ws = tempfile::tempdir().unwrap();
-        let manifest = minimal_manifest(
-            r#"libs = { git = "https://github.com/foo/bar", tag = "v1.0.0" }"#,
-        );
+        let manifest =
+            minimal_manifest(r#"libs = { git = "https://github.com/foo/bar", tag = "v1.0.0" }"#);
         let err = resolve(&manifest, ws.path()).unwrap_err();
         assert!(
             matches!(
@@ -1243,7 +1224,9 @@ alpha = { path = "./charts/alpha" }
         // live registry. Unit coverage for `verify_keyed` lives in
         // `cosign` and OCI wiring lives in `oci_fetcher`.
         let opts = ResolverOptions {
-            cosign_public_key_pem: Some("-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n".into()),
+            cosign_public_key_pem: Some(
+                "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n".into(),
+            ),
             ..Default::default()
         };
         assert!(opts.cosign_public_key_pem.is_some());
@@ -1284,9 +1267,8 @@ alpha = { path = "./charts/alpha" }
     fn vendored_git_dep_resolves_locally() {
         let ws = tempfile::tempdir().unwrap();
         write_minimal_chart(&ws.path().join(".akua/vendor/libs"));
-        let manifest = minimal_manifest(
-            r#"libs = { git = "https://github.com/foo/bar", tag = "v1.0.0" }"#,
-        );
+        let manifest =
+            minimal_manifest(r#"libs = { git = "https://github.com/foo/bar", tag = "v1.0.0" }"#);
         let resolved = resolve(&manifest, ws.path()).expect("vendor resolves offline");
         let libs = resolved.entries.get("libs").unwrap();
         match &libs.source {
@@ -1309,9 +1291,7 @@ alpha = { path = "./charts/alpha" }
         // Without vendor + offline mode, the normal offline-mode
         // OCI rejection fires.
         let ws = tempfile::tempdir().unwrap();
-        let manifest = minimal_manifest(
-            r#"nginx = { oci = "oci://r/n", version = "1.0.0" }"#,
-        );
+        let manifest = minimal_manifest(r#"nginx = { oci = "oci://r/n", version = "1.0.0" }"#);
         let err = resolve(&manifest, ws.path()).unwrap_err();
         assert!(
             matches!(err, ChartResolveError::UnsupportedSource { .. }),

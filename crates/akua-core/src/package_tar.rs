@@ -95,10 +95,12 @@ pub fn pack_workspace_with_vendored_deps(
         });
     }
 
-    let entries = crate::walk::collect_files(root, |name| !should_skip_file(name))
-        .map_err(|source| PackageTarError::Io {
-            path: root.to_path_buf(),
-            source,
+    let entries =
+        crate::walk::collect_files(root, |name| !should_skip_file(name)).map_err(|source| {
+            PackageTarError::Io {
+                path: root.to_path_buf(),
+                source,
+            }
         })?;
 
     // Collect vendored-dep files upfront so the tarball is packed in
@@ -302,7 +304,11 @@ mod tests {
     #[test]
     fn packs_expected_workspace_contents() {
         let tmp = tempfile::tempdir().unwrap();
-        write(tmp.path(), "akua.toml", b"[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n");
+        write(
+            tmp.path(),
+            "akua.toml",
+            b"[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n",
+        );
         write(tmp.path(), "akua.lock", b"version = 1\n");
         write(tmp.path(), "package.k", b"resources = []\n");
         write(tmp.path(), "inputs.example.yaml", b"hello: world\n");
@@ -321,7 +327,11 @@ mod tests {
     #[test]
     fn excludes_render_outputs_and_hidden_dirs() {
         let tmp = tempfile::tempdir().unwrap();
-        write(tmp.path(), "akua.toml", b"[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n");
+        write(
+            tmp.path(),
+            "akua.toml",
+            b"[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n",
+        );
         write(tmp.path(), "package.k", b"resources = []\n");
         write(tmp.path(), "deploy/000.yaml", b"k: v\n");
         write(tmp.path(), "rendered/000.yaml", b"k: v\n");
@@ -344,7 +354,11 @@ mod tests {
         // Guards against BTreeMap/HashMap iteration regressing the
         // ordering invariant layer-digest stability depends on.
         let tmp = tempfile::tempdir().unwrap();
-        write(tmp.path(), "akua.toml", b"[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n");
+        write(
+            tmp.path(),
+            "akua.toml",
+            b"[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n",
+        );
         write(tmp.path(), "package.k", b"resources = []\n");
         write(tmp.path(), "b.k", b"// b\n");
         write(tmp.path(), "a.k", b"// a\n");
@@ -393,7 +407,10 @@ mod tests {
         let tar_gz = pack_workspace_with_vendored_deps(tmp.path(), &vendored).unwrap();
         let names = list_entries(&tar_gz);
 
-        assert!(names.contains(&".akua/vendor/nginx/Chart.yaml".to_string()), "names: {names:?}");
+        assert!(
+            names.contains(&".akua/vendor/nginx/Chart.yaml".to_string()),
+            "names: {names:?}"
+        );
         assert!(
             names.contains(&".akua/vendor/nginx/templates/cm.yaml".to_string()),
             "names: {names:?}"
@@ -423,7 +440,11 @@ mod tests {
     #[test]
     fn pack_unpack_roundtrip() {
         let src = tempfile::tempdir().unwrap();
-        write(src.path(), "akua.toml", b"[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n");
+        write(
+            src.path(),
+            "akua.toml",
+            b"[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n",
+        );
         write(src.path(), "package.k", b"resources = []\n");
         write(src.path(), "vendor/nginx/Chart.yaml", b"name: nginx\n");
 
@@ -446,7 +467,11 @@ mod tests {
     #[test]
     fn roundtrip_preserves_bytes() {
         let tmp = tempfile::tempdir().unwrap();
-        write(tmp.path(), "akua.toml", b"[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n");
+        write(
+            tmp.path(),
+            "akua.toml",
+            b"[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n",
+        );
         let body = b"apiVersion: v1\nkind: ConfigMap\n";
         write(tmp.path(), "package.k", body);
 
@@ -519,7 +544,10 @@ mod tests {
         .unwrap();
 
         let got = inspect(&tar_gz).unwrap();
-        assert_eq!(got.vendored_deps, vec!["nginx".to_string(), "redis".to_string()]);
+        assert_eq!(
+            got.vendored_deps,
+            vec!["nginx".to_string(), "redis".to_string()]
+        );
     }
 
     #[test]

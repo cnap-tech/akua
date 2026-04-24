@@ -168,7 +168,8 @@ mod tests {
 
     /// Deliberately non-canonical whitespace so the formatter has
     /// something to change.
-    const UNFORMATTED: &str = "schema Input:\n  x:int=1\n\ninput:Input=option(\"input\") or Input{}\nresources = []\n";
+    const UNFORMATTED: &str =
+        "schema Input:\n  x:int=1\n\ninput:Input=option(\"input\") or Input{}\nresources = []\n";
 
     fn write_package(body: &str) -> (TempDir, PathBuf) {
         let tmp = TempDir::new().unwrap();
@@ -198,7 +199,10 @@ mod tests {
     #[test]
     fn check_mode_does_not_write() {
         let (_tmp, path) = write_package(UNFORMATTED);
-        let a = FmtArgs { check: true, ..args(&path) };
+        let a = FmtArgs {
+            check: true,
+            ..args(&path)
+        };
         let code = run(&Context::human(), &a, &mut Vec::new()).expect("run");
         assert_eq!(code, ExitCode::UserError, "expected change-detected exit");
         assert_eq!(fs::read_to_string(&path).unwrap(), UNFORMATTED);
@@ -209,7 +213,10 @@ mod tests {
         // First format to get a canonical version, write that, then --check should pass.
         let canonical = format_kcl(UNFORMATTED).unwrap();
         let (_tmp, path) = write_package(&canonical);
-        let a = FmtArgs { check: true, ..args(&path) };
+        let a = FmtArgs {
+            check: true,
+            ..args(&path)
+        };
         let code = run(&Context::human(), &a, &mut Vec::new()).expect("run");
         assert_eq!(code, ExitCode::Success);
     }
@@ -217,7 +224,10 @@ mod tests {
     #[test]
     fn stdout_mode_prints_formatted_and_leaves_file_untouched() {
         let (_tmp, path) = write_package(UNFORMATTED);
-        let a = FmtArgs { stdout_mode: true, ..args(&path) };
+        let a = FmtArgs {
+            stdout_mode: true,
+            ..args(&path)
+        };
         let mut stdout = Vec::new();
         run(&Context::human(), &a, &mut stdout).expect("run");
         assert_eq!(fs::read_to_string(&path).unwrap(), UNFORMATTED);
@@ -254,5 +264,4 @@ mod tests {
         assert_eq!(err.to_structured().code, codes::E_PACKAGE_MISSING);
         assert_eq!(err.exit_code(), ExitCode::UserError);
     }
-
 }

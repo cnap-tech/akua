@@ -206,7 +206,11 @@ mod tests {
     #[test]
     fn stdlib_root_materializes_helm_and_pkg() {
         let root = stdlib_root();
-        assert!(root.is_dir(), "root must be a directory: {}", root.display());
+        assert!(
+            root.is_dir(),
+            "root must be a directory: {}",
+            root.display()
+        );
         assert!(root.join("kcl.mod").is_file());
         assert!(root.join("helm.k").is_file());
         assert!(root.join("kustomize.k").is_file());
@@ -262,7 +266,10 @@ mod tests {
         assert!(nginx_k.contains("sha256: str = \"sha256:abc123\""));
         // Slice-C addition: `template` lambda pre-filled with `chart = path`.
         assert!(nginx_k.contains("template = lambda"), "module: {nginx_k}");
-        assert!(nginx_k.contains("schema TemplateOpts:"), "module: {nginx_k}");
+        assert!(
+            nginx_k.contains("schema TemplateOpts:"),
+            "module: {nginx_k}"
+        );
         // No values.schema.json → values type is the passthrough dict.
         assert!(nginx_k.contains("values: {str:}"), "module: {nginx_k}");
     }
@@ -384,7 +391,11 @@ mod tests {
         let tmp = materialize_charts(&resolved).unwrap();
         let body = std::fs::read_to_string(tmp.path().join("nginx.k")).unwrap();
         assert!(body.contains("path: str ="), "{}", body);
-        assert!(!body.contains("schema Values"), "schema unexpectedly emitted: {}", body);
+        assert!(
+            !body.contains("schema Values"),
+            "schema unexpectedly emitted: {}",
+            body
+        );
     }
 
     #[test]

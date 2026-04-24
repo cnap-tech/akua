@@ -59,7 +59,9 @@ pub enum LockError {
     #[error(transparent)]
     Resolve(#[from] ChartResolveError),
 
-    #[error("lockfile drift detected — on-disk akua.lock doesn't match what `akua lock` would write")]
+    #[error(
+        "lockfile drift detected — on-disk akua.lock doesn't match what `akua lock` would write"
+    )]
     Drift,
 
     #[error("write to stdout failed: {0}")]
@@ -220,8 +222,11 @@ mod tests {
         // Chart dir with Chart.yaml for path-dep digest.
         let chart = tmp.join("vendor/nginx");
         std::fs::create_dir_all(&chart).unwrap();
-        std::fs::write(chart.join("Chart.yaml"), b"apiVersion: v2\nname: nginx\nversion: 1.0.0\n")
-            .unwrap();
+        std::fs::write(
+            chart.join("Chart.yaml"),
+            b"apiVersion: v2\nname: nginx\nversion: 1.0.0\n",
+        )
+        .unwrap();
         std::fs::write(
             tmp.join("akua.toml"),
             br#"

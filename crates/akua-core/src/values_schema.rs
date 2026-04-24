@@ -119,7 +119,9 @@ fn generate(root: &JsonSchema) -> GeneratedKcl {
     }
     let mut gen = SchemaGen::default();
     gen.emit_object(root, "Values");
-    GeneratedKcl { source: gen.finish() }
+    GeneratedKcl {
+        source: gen.finish(),
+    }
 }
 
 #[derive(Default)]
@@ -171,12 +173,14 @@ impl SchemaGen {
         let ty = self.render_type(&nested_name, prop_schema);
 
         let default = default_literal(prop_schema);
-        let opt_marker = if is_required || default.is_some() { "" } else { "?" };
+        let opt_marker = if is_required || default.is_some() {
+            ""
+        } else {
+            "?"
+        };
         let assignment = default.map(|d| format!(" = {d}")).unwrap_or_default();
 
-        out.push_str(&format!(
-            "    {prop_name}{opt_marker}: {ty}{assignment}\n"
-        ));
+        out.push_str(&format!("    {prop_name}{opt_marker}: {ty}{assignment}\n"));
 
         if let Some(desc) = prop_schema.description.as_deref() {
             out.push_str(&format_docstring(desc, 8));
@@ -188,11 +192,7 @@ impl SchemaGen {
     /// schema and return its name; primitives return the built-in
     /// type; arrays recurse on the element type.
     fn render_type(&mut self, nested_name: &str, schema: &JsonSchema) -> String {
-        let primary = schema
-            .ty
-            .as_ref()
-            .and_then(TypeSpec::primary)
-            .unwrap_or("");
+        let primary = schema.ty.as_ref().and_then(TypeSpec::primary).unwrap_or("");
         match primary {
             "object" => {
                 // Nested object — emit a support schema.
@@ -347,8 +347,16 @@ mod tests {
             }
         }"#;
         let out = generate_from_bytes(input).unwrap();
-        assert!(out.source.contains("replicaCount: int = 1"), "{}", out.source);
-        assert!(out.source.contains("name: str = \"hello\""), "{}", out.source);
+        assert!(
+            out.source.contains("replicaCount: int = 1"),
+            "{}",
+            out.source
+        );
+        assert!(
+            out.source.contains("name: str = \"hello\""),
+            "{}",
+            out.source
+        );
         assert!(out.source.contains("debug: bool = False"), "{}", out.source);
         assert!(out.source.contains("ratio: float = 0.5"), "{}", out.source);
         assert!(out.source.starts_with("schema Values:"));

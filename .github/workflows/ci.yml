@@ -25,6 +25,9 @@ jobs:
           install: true
           cache: true
 
+      - name: Install rustfmt + clippy components
+        run: mise exec -- rustup component add rustfmt clippy
+
       - uses: Swatinem/rust-cache@v2
 
       - name: task ci

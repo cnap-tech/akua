@@ -6,7 +6,7 @@
 //! flaky. Enable more aggressively by setting `AKUA_OCI_IT=1` in CI
 //! environments that guarantee network.
 
-#![cfg(all(feature = "oci-fetch"))]
+#![cfg(feature = "oci-fetch")]
 
 use akua_core::oci_fetcher;
 

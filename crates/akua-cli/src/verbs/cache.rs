@@ -209,8 +209,7 @@ mod tests {
         )
         .expect("run");
         assert_eq!(code, ExitCode::Success);
-        let parsed: serde_json::Value =
-            serde_json::from_slice(&buf).expect("json");
+        let parsed: serde_json::Value = serde_json::from_slice(&buf).expect("json");
         assert_eq!(parsed["action"], "path");
         assert!(parsed["oci_root"].as_str().unwrap().ends_with("oci"));
         assert!(parsed["git_root"].as_str().unwrap().ends_with("git"));
@@ -228,8 +227,7 @@ mod tests {
             &mut buf,
         )
         .expect("run");
-        let parsed: serde_json::Value =
-            serde_json::from_slice(&buf).expect("json");
+        let parsed: serde_json::Value = serde_json::from_slice(&buf).expect("json");
         assert_eq!(parsed["action"], "list");
         assert!(parsed["oci_root"].is_string());
         assert!(parsed["git_root"].is_string());
@@ -244,5 +242,4 @@ mod tests {
         assert_eq!(human_bytes(2048), "2.0 KiB");
         assert_eq!(human_bytes(5 * 1024 * 1024), "5.0 MiB");
     }
-
 }

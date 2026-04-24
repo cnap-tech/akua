@@ -317,13 +317,20 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let oci = tmp.path().join("oci");
         let git = tmp.path().join("git");
-        write(&oci.join("sha256/abc123/nginx/Chart.yaml"), b"apiVersion: v2\n");
+        write(
+            &oci.join("sha256/abc123/nginx/Chart.yaml"),
+            b"apiVersion: v2\n",
+        );
         write(&oci.join("sha256/abc123/nginx/values.yaml"), b"foo: bar\n");
         write(&oci.join("sha256/def456/other/file"), b"x");
 
         let inv = list_at(&oci, &git).unwrap();
         assert_eq!(inv.entries.len(), 2);
-        let abc = inv.entries.iter().find(|e| e.id == "sha256:abc123").unwrap();
+        let abc = inv
+            .entries
+            .iter()
+            .find(|e| e.id == "sha256:abc123")
+            .unwrap();
         assert_eq!(abc.kind, "oci-blob");
         assert!(abc.size_bytes > 0);
         assert_eq!(

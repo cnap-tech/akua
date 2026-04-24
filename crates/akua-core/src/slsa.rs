@@ -214,8 +214,16 @@ mod tests {
             Some("deadbeef")
         );
         assert_eq!(stmt.predicate.build_definition.build_type, AKUA_BUILD_TYPE);
-        assert_eq!(stmt.predicate.build_definition.external_parameters.tag, "1.2.3");
-        assert!(stmt.predicate.run_details.builder.id.starts_with("https://akua.dev/cli/v"));
+        assert_eq!(
+            stmt.predicate.build_definition.external_parameters.tag,
+            "1.2.3"
+        );
+        assert!(stmt
+            .predicate
+            .run_details
+            .builder
+            .id
+            .starts_with("https://akua.dev/cli/v"));
     }
 
     #[test]
@@ -248,10 +256,7 @@ mod tests {
         assert_eq!(deps.len(), 1);
         assert_eq!(deps[0].name, "nginx");
         assert_eq!(deps[0].digest.get("sha256").unwrap(), "abc123");
-        assert_eq!(
-            deps[0].uri.as_deref(),
-            Some("path+file://./vendor/nginx")
-        );
+        assert_eq!(deps[0].uri.as_deref(), Some("path+file://./vendor/nginx"));
     }
 
     #[test]

@@ -169,10 +169,12 @@ impl PackageK {
         // roots so `helm.template(nginx.path, ...)` survives the
         // path-escape guard. Dropped on return — nested renders
         // (pkg.render) stack naturally.
-        let allowed_roots: Vec<PathBuf> =
-            charts.entries.values().map(|c| c.abs_path.clone()).collect();
-        let _scope =
-            crate::kcl_plugin::RenderScope::enter_with(&self.path, &allowed_roots, strict);
+        let allowed_roots: Vec<PathBuf> = charts
+            .entries
+            .values()
+            .map(|c| c.abs_path.clone())
+            .collect();
+        let _scope = crate::kcl_plugin::RenderScope::enter_with(&self.path, &allowed_roots, strict);
 
         // Materialize `charts/` alongside the static `akua/` stdlib.
         // TempDir dropped at end of scope, after `exec_program` has
@@ -277,7 +279,6 @@ pub fn lint_kcl_source(filename: &str, source: &str) -> Result<Vec<LintIssue>, P
         paths: vec![filename.to_string()],
         sources: vec![source.to_string()],
         external_pkgs: akua_external_pkgs(),
-        ..Default::default()
     };
     run_parse_program(&api, &args)
 }
@@ -392,7 +393,6 @@ pub fn list_options_kcl_source(
         paths: vec![filename.to_string()],
         sources: vec![source.to_string()],
         external_pkgs: akua_external_pkgs(),
-        ..Default::default()
     };
     match api.list_options(&args) {
         Ok(result) => Ok(result
@@ -448,7 +448,11 @@ pub fn format_kcl(source: &str) -> Result<String, PackageKError> {
 /// Engine callables (helm/kustomize/pkg.render) belong inside a
 /// workspace that `akua render` picks up.
 pub fn eval_source(path: &Path, source: &str) -> Result<String, PackageKError> {
-    eval_source_with_inputs(path, source, &serde_yaml::Value::Mapping(Default::default()))
+    eval_source_with_inputs(
+        path,
+        source,
+        &serde_yaml::Value::Mapping(Default::default()),
+    )
 }
 
 /// Like [`eval_source`] but injects the given inputs as the KCL
@@ -783,8 +787,8 @@ resources = [{
         // Bare bindings — no `resources = [...]`. `PackageK::render`
         // would reject this with MissingResources; eval_source
         // doesn't care.
-        let yaml = eval_source(Path::new("repl.k"), "x = 42\ny = \"hello\"\n")
-            .expect("eval_source");
+        let yaml =
+            eval_source(Path::new("repl.k"), "x = 42\ny = \"hello\"\n").expect("eval_source");
         let top: Value = serde_yaml::from_str(&yaml).unwrap();
         let map = top.as_mapping().expect("top-level mapping");
         assert_eq!(

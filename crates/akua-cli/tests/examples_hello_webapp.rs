@@ -82,6 +82,12 @@ fn renders_hello_webapp_with_resolved_chart_dep() {
     );
 
     let svc = by_kind("Service");
-    assert_eq!(svc["metadata"]["name"], serde_yaml::Value::String("hello".into()));
-    assert_eq!(svc["spec"]["type"], serde_yaml::Value::String("ClusterIP".into()));
+    assert_eq!(
+        svc["metadata"]["name"],
+        serde_yaml::Value::String("hello".into())
+    );
+    assert_eq!(
+        svc["spec"]["type"],
+        serde_yaml::Value::String("ClusterIP".into())
+    );
 }

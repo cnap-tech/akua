@@ -106,8 +106,7 @@ pub fn run<W: Write>(
     };
     let vendored_deps: Vec<String> = vendored_pairs.iter().map(|(n, _)| n.clone()).collect();
 
-    let tar_gz =
-        package_tar::pack_workspace_with_vendored_deps(args.workspace, &vendored_pairs)?;
+    let tar_gz = package_tar::pack_workspace_with_vendored_deps(args.workspace, &vendored_pairs)?;
 
     let out_path = match args.out {
         Some(p) => p.to_path_buf(),
@@ -205,7 +204,10 @@ edition = "akua.dev/v1alpha1"
         assert!(expected.is_file(), "default tarball path missing");
 
         let parsed: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
-        assert!(parsed["layer_digest"].as_str().unwrap().starts_with("sha256:"));
+        assert!(parsed["layer_digest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:"));
         assert!(parsed["size_bytes"].as_u64().unwrap() > 0);
     }
 
@@ -241,8 +243,7 @@ edition = "akua.dev/v1alpha1"
             };
             let mut stdout = Vec::new();
             run(&ctx_json(), &args, &mut stdout).unwrap();
-            first_bytes =
-                std::fs::read(tmp.path().join("dist/pack-test-0.1.0.tar.gz")).unwrap();
+            first_bytes = std::fs::read(tmp.path().join("dist/pack-test-0.1.0.tar.gz")).unwrap();
         }
         let args = PackArgs {
             workspace: tmp.path(),
@@ -251,8 +252,7 @@ edition = "akua.dev/v1alpha1"
         };
         let mut stdout = Vec::new();
         run(&ctx_json(), &args, &mut stdout).unwrap();
-        let second_bytes =
-            std::fs::read(tmp.path().join("dist/pack-test-0.1.0.tar.gz")).unwrap();
+        let second_bytes = std::fs::read(tmp.path().join("dist/pack-test-0.1.0.tar.gz")).unwrap();
         assert_eq!(
             first_bytes, second_bytes,
             "re-packing the same workspace should be byte-identical"

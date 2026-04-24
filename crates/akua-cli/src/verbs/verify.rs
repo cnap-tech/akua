@@ -184,7 +184,7 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
 
     let locked_names: std::collections::HashSet<&str> =
         lock.packages.iter().map(|p| p.name.as_str()).collect();
-    for (dep_name, _dep) in &manifest.dependencies {
+    for dep_name in manifest.dependencies.keys() {
         if !locked_names.contains(dep_name.as_str()) {
             violations.push(Violation::UnlockedDep {
                 name: dep_name.clone(),
@@ -255,18 +255,18 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
                 Some(_) => {} // digest matches
             }
         }
-    } else if let Err(e) = drift_resolution {
+    } else if let Err(
+        chart_resolver::ChartResolveError::NotFound { name, path }
+        | chart_resolver::ChartResolveError::NotADirectory { name, path },
+    ) = drift_resolution
+    {
         // Resolver failures for path deps are surfaced as PathMissing
         // violations — anything else (e.g. UnsupportedSource on a
         // bare OCI dep) is legitimately not our problem here.
-        if let chart_resolver::ChartResolveError::NotFound { name, path }
-        | chart_resolver::ChartResolveError::NotADirectory { name, path } = e
-        {
-            violations.push(Violation::PathMissing {
-                name,
-                path: path.display().to_string(),
-            });
-        }
+        violations.push(Violation::PathMissing {
+            name,
+            path: path.display().to_string(),
+        });
     }
 
     // Attestation chain walk. Only runs when the workspace
@@ -435,7 +435,6 @@ pub(crate) fn verify_attestation(
     }
     None
 }
-
 
 /// Run the verb against the given workspace. Verify errors (missing /
 /// malformed files) are surfaced to the caller; check failures
@@ -922,10 +921,8 @@ nginx = { path = "./vendor/nginx" }
 "#,
         )
         .unwrap();
-        let manifest =
-            AkuaManifest::load(tmp.path()).expect("manifest");
-        let resolved =
-            chart_resolver::resolve(&manifest, tmp.path()).expect("resolve");
+        let manifest = AkuaManifest::load(tmp.path()).expect("manifest");
+        let resolved = chart_resolver::resolve(&manifest, tmp.path()).expect("resolve");
         let real_digest = resolved.entries.get("nginx").unwrap().sha256.clone();
         fs::write(
             tmp.path().join("akua.lock"),
@@ -992,11 +989,7 @@ digest  = "{real_digest}"
             )
         }
 
-        fn envelope_for(
-            priv_pem: &str,
-            subject_name: &str,
-            manifest_digest: &str,
-        ) -> Vec<u8> {
+        fn envelope_for(priv_pem: &str, subject_name: &str, manifest_digest: &str) -> Vec<u8> {
             let stmt = slsa::build_publish_attestation(
                 subject_name,
                 manifest_digest,

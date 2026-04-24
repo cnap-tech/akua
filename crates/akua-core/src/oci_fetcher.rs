@@ -49,8 +49,7 @@ use crate::oci_transport::{
 };
 
 /// Media type the helm-v3+ OCI chart format uses for the chart blob.
-const HELM_CHART_LAYER_MEDIA_TYPE: &str =
-    "application/vnd.cncf.helm.chart.content.v1.tar+gzip";
+const HELM_CHART_LAYER_MEDIA_TYPE: &str = "application/vnd.cncf.helm.chart.content.v1.tar+gzip";
 
 /// OCI image manifest media type. Some registries (ghcr.io with
 /// compatibility mode, ECR) still serve `application/vnd.docker.*`
@@ -462,14 +461,15 @@ fn verify_cosign_signature(
             },
         )?;
 
-    let sig_manifest: CosignSigManifest = serde_json::from_slice(&sig_manifest_bytes).map_err(
-        |e| OciFetchError::CosignSignatureMissing {
-            oci_ref: oci_ref.clone(),
-            manifest_digest: manifest_digest.to_string(),
-            sig_tag: sig_tag.clone(),
-            detail: format!("manifest parse: {e}"),
-        },
-    )?;
+    let sig_manifest: CosignSigManifest =
+        serde_json::from_slice(&sig_manifest_bytes).map_err(|e| {
+            OciFetchError::CosignSignatureMissing {
+                oci_ref: oci_ref.clone(),
+                manifest_digest: manifest_digest.to_string(),
+                sig_tag: sig_tag.clone(),
+                detail: format!("manifest parse: {e}"),
+            }
+        })?;
 
     let sig_layer = sig_manifest
         .layers
@@ -497,21 +497,27 @@ fn verify_cosign_signature(
         "https://{}/v2/{}/blobs/{}",
         parsed.registry, parsed.repository, sig_layer.digest
     );
-    let payload_bytes = get_blob(client, &payload_url, &parsed.registry, creds, token).map_err(
-        |source| OciFetchError::CosignSignatureMissing {
-            oci_ref: oci_ref.clone(),
-            manifest_digest: manifest_digest.to_string(),
-            sig_tag: sig_tag.clone(),
-            detail: format!("payload blob: {source}"),
-        },
-    )?;
+    let payload_bytes =
+        get_blob(client, &payload_url, &parsed.registry, creds, token).map_err(|source| {
+            OciFetchError::CosignSignatureMissing {
+                oci_ref: oci_ref.clone(),
+                manifest_digest: manifest_digest.to_string(),
+                sig_tag: sig_tag.clone(),
+                detail: format!("payload blob: {source}"),
+            }
+        })?;
 
-    crate::cosign::verify_keyed(public_key_pem, &payload_bytes, &signature_b64, manifest_digest)
-        .map_err(|source| OciFetchError::CosignVerify {
-            oci_ref,
-            manifest_digest: manifest_digest.to_string(),
-            source,
-        })
+    crate::cosign::verify_keyed(
+        public_key_pem,
+        &payload_bytes,
+        &signature_b64,
+        manifest_digest,
+    )
+    .map_err(|source| OciFetchError::CosignVerify {
+        oci_ref,
+        manifest_digest: manifest_digest.to_string(),
+        source,
+    })
 }
 
 // --- HTTP helpers ---------------------------------------------------------
@@ -539,9 +545,10 @@ fn get_blob(
     creds: Option<&Credentials>,
     token: &mut TokenCache,
 ) -> Result<Vec<u8>, OciFetchError> {
-    Ok(get_with_auth(client, url, registry, creds, token, |req| req)?)
+    Ok(get_with_auth(client, url, registry, creds, token, |req| {
+        req
+    })?)
 }
-
 
 // --- Tarball extraction ---------------------------------------------------
 
@@ -552,10 +559,9 @@ fn extract_blob(bytes: &[u8], dest: &Path) -> Result<(), OciFetchError> {
     // Write to a temp dir first, then atomically rename into place —
     // avoids partial state when two parallel akua processes race on
     // the same chart.
-    let parent = dest.parent().ok_or_else(|| OciFetchError::Extract(format!(
-        "cache path has no parent: {}",
-        dest.display()
-    )))?;
+    let parent = dest.parent().ok_or_else(|| {
+        OciFetchError::Extract(format!("cache path has no parent: {}", dest.display()))
+    })?;
     std::fs::create_dir_all(parent).map_err(|source| OciFetchError::Io {
         path: parent.to_path_buf(),
         source,
@@ -593,13 +599,14 @@ fn extract_blob(bytes: &[u8], dest: &Path) -> Result<(), OciFetchError> {
             Ok(())
         }
         Err(_) if dest.exists() => Ok(()), // racing pull won
-        Err(_) => crate::walk::copy_tree(staging.path(), dest).map_err(|source| OciFetchError::Io {
-            path: dest.to_path_buf(),
-            source,
-        }),
+        Err(_) => {
+            crate::walk::copy_tree(staging.path(), dest).map_err(|source| OciFetchError::Io {
+                path: dest.to_path_buf(),
+                source,
+            })
+        }
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -655,7 +662,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dest = tmp.path().join("sha256").join("deadbeef");
         extract_blob(&buf, &dest).unwrap();
-        assert!(dest.join("nginx/Chart.yaml").is_file(), "Chart.yaml at {:?}", dest);
+        assert!(
+            dest.join("nginx/Chart.yaml").is_file(),
+            "Chart.yaml at {:?}",
+            dest
+        );
         let root = find_chart_root(&dest).unwrap();
         assert!(root.ends_with("nginx"));
     }

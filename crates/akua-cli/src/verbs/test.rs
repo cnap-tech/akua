@@ -88,7 +88,10 @@ pub fn run<W: Write>(
     // assume they passed.
     let want_golden = args.golden || args.update_snapshots;
     let golden = if want_golden {
-        Some(test_runner::run_golden(args.workspace, args.update_snapshots)?)
+        Some(test_runner::run_golden(
+            args.workspace,
+            args.update_snapshots,
+        )?)
     } else {
         None
     };
@@ -113,10 +116,7 @@ pub fn run<W: Write>(
 /// overall `fail`. Otherwise prefer `updated` when golden regen
 /// happened, then `ok`, with `empty` only when both sub-reports
 /// are empty.
-fn combined_status(
-    assertions: &TestReport,
-    golden: Option<&GoldenReport>,
-) -> &'static str {
+fn combined_status(assertions: &TestReport, golden: Option<&GoldenReport>) -> &'static str {
     let assertion_fail = assertions.status == "fail";
     let golden_fail = golden.map(|g| g.status == "fail").unwrap_or(false);
     if assertion_fail || golden_fail {
@@ -125,8 +125,8 @@ fn combined_status(
     if golden.map(|g| g.status == "updated").unwrap_or(false) {
         return "updated";
     }
-    let both_empty = assertions.status == "empty"
-        && golden.map(|g| g.status == "empty").unwrap_or(true);
+    let both_empty =
+        assertions.status == "empty" && golden.map(|g| g.status == "empty").unwrap_or(true);
     if both_empty {
         return "empty";
     }
@@ -208,12 +208,7 @@ fn write_golden<W: Write>(w: &mut W, report: &GoldenReport) -> std::io::Result<(
         } else {
             c.inputs.display().to_string()
         };
-        writeln!(
-            w,
-            "  {marker} {} [{}]",
-            c.package.display(),
-            inputs_label
-        )?;
+        writeln!(w, "  {marker} {} [{}]", c.package.display(), inputs_label)?;
         if !c.diff_summary.is_empty() {
             writeln!(w, "      {}", c.diff_summary)?;
         }
@@ -274,7 +269,11 @@ mod tests {
     #[test]
     fn failing_test_exits_user_error() {
         let tmp = workspace();
-        fs::write(tmp.path().join("test_broken.k"), b"assert False, \"nope\"\n").unwrap();
+        fs::write(
+            tmp.path().join("test_broken.k"),
+            b"assert False, \"nope\"\n",
+        )
+        .unwrap();
         let mut stdout = Vec::new();
         let code = run(&ctx(), &base_args(tmp.path()), &mut stdout).unwrap();
         assert_eq!(code, ExitCode::UserError);

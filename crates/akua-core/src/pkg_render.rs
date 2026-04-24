@@ -194,7 +194,11 @@ resources = _nested"#,
             .render(&YamlValue::Mapping(Default::default()))
             .expect("render outer");
 
-        assert_eq!(rendered.resources.len(), 1, "sentinel should expand to one ConfigMap");
+        assert_eq!(
+            rendered.resources.len(),
+            1,
+            "sentinel should expand to one ConfigMap"
+        );
         let cm = &rendered.resources[0];
         assert_eq!(cm["kind"], YamlValue::String("ConfigMap".into()));
         assert_eq!(

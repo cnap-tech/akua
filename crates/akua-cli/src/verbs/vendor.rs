@@ -20,10 +20,7 @@ use akua_core::AkuaManifest;
 /// Returns the pairs the resolver *did* produce — a partial-vendor
 /// result is still better than nothing when one dep out of many is
 /// broken.
-pub fn collect_vendor_pairs(
-    workspace: &Path,
-    manifest: &AkuaManifest,
-) -> Vec<(String, PathBuf)> {
+pub fn collect_vendor_pairs(workspace: &Path, manifest: &AkuaManifest) -> Vec<(String, PathBuf)> {
     use akua_core::chart_resolver::{self, ResolvedSource, ResolverOptions};
     use akua_core::AkuaLock;
 

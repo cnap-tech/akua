@@ -17,9 +17,7 @@ use sha2::{Digest, Sha256};
 use crate::hex::hex_encode;
 use crate::oci_auth::{self, CredsStore};
 use crate::oci_pusher::{AKUA_PACKAGE_LAYER_MEDIA_TYPE, OCI_MANIFEST_MEDIA_TYPE};
-use crate::oci_transport::{
-    build_client, get_with_auth, parse_ref, TokenCache, TransportError,
-};
+use crate::oci_transport::{build_client, get_with_auth, parse_ref, TokenCache, TransportError};
 
 /// Result of a successful pull. `tarball` is the raw `.tar.gz` bytes
 /// — same shape `akua publish` uploaded. Callers that want the
@@ -66,11 +64,7 @@ struct Layer {
 /// against the manifest's declaration is done inline — a mismatch
 /// means the registry handed us different bytes than the manifest
 /// advertised (cache poisoning / proxy bug).
-pub fn pull(
-    oci_ref: &str,
-    tag: &str,
-    creds: &CredsStore,
-) -> Result<PulledPackage, OciPullError> {
+pub fn pull(oci_ref: &str, tag: &str, creds: &CredsStore) -> Result<PulledPackage, OciPullError> {
     let parsed = parse_ref(oci_ref)?;
     let client = build_client()?;
     let registry_creds = oci_auth::for_registry(creds, &parsed.registry);

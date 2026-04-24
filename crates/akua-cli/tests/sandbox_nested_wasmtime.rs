@@ -24,9 +24,7 @@
 
 use std::path::PathBuf;
 
-use akua_cli::render_worker::{
-    RenderHost, ResourceLimits, WorkerRequest, WorkerResponse,
-};
+use akua_cli::render_worker::{RenderHost, ResourceLimits, WorkerRequest, WorkerResponse};
 
 /// Chart dir path inside the repo — used as `helm.template` input.
 fn chart_dir() -> PathBuf {
@@ -116,7 +114,12 @@ fn charts_import_resolves_inside_sandbox_via_preopen() {
         )
         .expect("invoke_with_charts");
     match resp {
-        WorkerResponse::Render { status, yaml, message, .. } => {
+        WorkerResponse::Render {
+            status,
+            yaml,
+            message,
+            ..
+        } => {
             assert_eq!(status, "ok", "diagnostic: {message}");
             assert!(
                 yaml.contains(marker),
@@ -134,7 +137,10 @@ fn helm_template_through_plugin_bridge_across_engines() {
     let chart = chart_dir();
     assert!(chart.is_dir(), "missing chart fixture: {}", chart.display());
     eprintln!("[test] chart dir: {}", chart.display());
-    eprintln!("[test] chart.parent(): {}", chart.parent().unwrap().display());
+    eprintln!(
+        "[test] chart.parent(): {}",
+        chart.parent().unwrap().display()
+    );
 
     // RenderScope wants the path to a `Package.k` file, not the
     // package dir — `current_package_dir()` returns `file.parent()`.
@@ -173,7 +179,7 @@ fn helm_template_through_plugin_bridge_across_engines() {
                 package_filename: "package.k".into(),
                 source: src,
                 inputs: None,
-                    charts_pkg_path: None,
+                charts_pkg_path: None,
             },
             limits,
         )
@@ -198,8 +204,7 @@ fn helm_template_through_plugin_bridge_across_engines() {
             // field echoes the input. If the bridge works end-to-end
             // across the two Engines the marker string round-trips.
             assert!(
-                yaml.contains("nested wasmtime works")
-                    || yaml.contains("ConfigMap"),
+                yaml.contains("nested wasmtime works") || yaml.contains("ConfigMap"),
                 "expected helm output to contain the marker or kind ConfigMap — got:\n{yaml}"
             );
         }

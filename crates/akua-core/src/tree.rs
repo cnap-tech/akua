@@ -182,8 +182,7 @@ source = "path+file:///tmp/nginx"
 
     #[test]
     fn dep_merges_with_lockfile_when_present() {
-        let out =
-            tree_from_sources(MANIFEST_WITH_DEP, Some(LOCK_WITH_NGINX)).expect("parse");
+        let out = tree_from_sources(MANIFEST_WITH_DEP, Some(LOCK_WITH_NGINX)).expect("parse");
         let nginx = &out.dependencies[0];
         assert!(nginx.locked.is_some());
         let locked = nginx.locked.as_ref().unwrap();

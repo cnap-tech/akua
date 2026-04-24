@@ -26,8 +26,7 @@ fn worker_config() -> wasmtime::Config {
 }
 
 fn main() {
-    let worker_wasm = workspace_root()
-        .join("target/wasm32-wasip1/release/akua-render-worker.wasm");
+    let worker_wasm = workspace_root().join("target/wasm32-wasip1/release/akua-render-worker.wasm");
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"));
     let cwasm_out = out_dir.join("akua-render-worker.cwasm");
 
@@ -48,8 +47,8 @@ fn main() {
 
     let wasm = std::fs::read(&worker_wasm)
         .unwrap_or_else(|e| panic!("read worker wasm from {}: {e}", worker_wasm.display()));
-    let engine = wasmtime::Engine::new(&worker_config())
-        .expect("wasmtime::Engine::new(worker_config)");
+    let engine =
+        wasmtime::Engine::new(&worker_config()).expect("wasmtime::Engine::new(worker_config)");
     let cwasm = engine
         .precompile_module(&wasm)
         .expect("precompile_module failed");

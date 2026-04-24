@@ -221,9 +221,10 @@ pub(crate) fn get_with_auth(
         return ensure_ok(resp, url);
     }
 
-    let challenge = BearerChallenge::from_resp(&resp).ok_or_else(|| TransportError::AuthRequired {
-        registry: registry.to_string(),
-    })?;
+    let challenge =
+        BearerChallenge::from_resp(&resp).ok_or_else(|| TransportError::AuthRequired {
+            registry: registry.to_string(),
+        })?;
     let token = fetch_token(client, &challenge, creds)?;
     token_cache.token = Some(token.clone());
 
@@ -297,8 +298,14 @@ mod tests {
 
     #[test]
     fn rejects_refs_without_scheme_or_repo() {
-        assert!(matches!(parse_ref("ghcr.io/x/y"), Err(TransportError::BadRef(_))));
-        assert!(matches!(parse_ref("oci://ghcr.io"), Err(TransportError::BadRef(_))));
+        assert!(matches!(
+            parse_ref("ghcr.io/x/y"),
+            Err(TransportError::BadRef(_))
+        ));
+        assert!(matches!(
+            parse_ref("oci://ghcr.io"),
+            Err(TransportError::BadRef(_))
+        ));
         assert!(matches!(parse_ref(""), Err(TransportError::BadRef(_))));
     }
 }

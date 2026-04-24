@@ -14,7 +14,7 @@
 //! 5. Write `<tarball>.akuasig` alongside.
 //!
 //! The signature is committed to a specific `oci://<registry>/<repo>`
-//! + manifest digest. The push host MUST use the same akua binary
+//! and manifest digest. The push host MUST use the same akua binary
 //! version as the sign host (the config blob embeds the version →
 //! divergent versions yield divergent manifest digests → the
 //! signature no longer verifies).
@@ -100,8 +100,7 @@ impl SignError {
             // an I/O problem — surface it as such so `jq '.code ==
             // "E_MANIFEST_PARSE"'` catches the authoring bug.
             SignError::NoKey => {
-                StructuredError::new(codes::E_MANIFEST_PARSE, self.to_string())
-                    .with_default_docs()
+                StructuredError::new(codes::E_MANIFEST_PARSE, self.to_string()).with_default_docs()
             }
             _ => StructuredError::new(codes::E_IO, self.to_string()).with_default_docs(),
         }
@@ -186,7 +185,10 @@ fn load_key(args: &SignArgs<'_>) -> Result<String, SignError> {
     }
     let manifest = AkuaManifest::load(args.workspace)?;
     let signing = manifest.signing.as_ref().ok_or(SignError::NoKey)?;
-    let rel = signing.cosign_private_key.as_deref().ok_or(SignError::NoKey)?;
+    let rel = signing
+        .cosign_private_key
+        .as_deref()
+        .ok_or(SignError::NoKey)?;
     let key_path = args.workspace.join(rel);
     std::fs::read_to_string(&key_path).map_err(|source| SignError::ReadInput {
         what: "signing key",
@@ -271,8 +273,8 @@ mod tests {
         // Extract the public key from the same PKCS#8 PEM to verify.
         let sk = p256::ecdsa::SigningKey::from_pkcs8_pem(&key_pem).unwrap();
         let vk = sk.verifying_key();
-        let public_pem = p256::pkcs8::EncodePublicKey::to_public_key_pem(vk, LineEnding::LF)
-            .unwrap();
+        let public_pem =
+            p256::pkcs8::EncodePublicKey::to_public_key_pem(vk, LineEnding::LF).unwrap();
 
         akua_core::cosign::verify_keyed(
             &public_pem,
@@ -326,7 +328,13 @@ mod tests {
             &mut Vec::new(),
         )
         .unwrap_err();
-        assert!(matches!(err, SignError::ReadInput { what: "tarball", .. }));
+        assert!(matches!(
+            err,
+            SignError::ReadInput {
+                what: "tarball",
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -383,8 +391,7 @@ mod tests {
 
         let sidecar = SignSidecar::read_from(&tmp.path().join("p.tgz.akuasig")).unwrap();
         let expected =
-            oci_pusher::compute_publish_digests(&std::fs::read(&tar_path).unwrap())
-                .manifest_digest;
+            oci_pusher::compute_publish_digests(&std::fs::read(&tar_path).unwrap()).manifest_digest;
         assert_eq!(sidecar.manifest_digest, expected);
     }
 }

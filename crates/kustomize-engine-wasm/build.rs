@@ -26,8 +26,7 @@ fn main() {
     }
 
     let wasm = fs::read(&wasm_path).expect("read kustomize-engine.wasm");
-    let cwasm =
-        engine_host_wasm::precompile(&wasm).expect("precompile kustomize-engine.wasm");
+    let cwasm = engine_host_wasm::precompile(&wasm).expect("precompile kustomize-engine.wasm");
     fs::write(&dest, &cwasm).expect("write kustomize-engine.cwasm");
 
     println!(

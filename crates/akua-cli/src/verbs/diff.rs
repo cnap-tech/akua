@@ -158,7 +158,9 @@ mod tests {
         )
         .expect("run");
         assert_eq!(code, ExitCode::Success);
-        assert!(String::from_utf8(stdout).unwrap().contains("no differences"));
+        assert!(String::from_utf8(stdout)
+            .unwrap()
+            .contains("no differences"));
     }
 
     #[test]

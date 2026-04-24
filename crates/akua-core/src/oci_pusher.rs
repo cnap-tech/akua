@@ -33,10 +33,8 @@ use crate::oci_transport::{
 /// Media types akua uses for its own published artifacts. Distinct
 /// from helm + docker media types so consumers can reject unrelated
 /// artifact classes on pull.
-pub const AKUA_PACKAGE_LAYER_MEDIA_TYPE: &str =
-    "application/vnd.akua.package.content.v1.tar+gzip";
-pub const AKUA_PACKAGE_CONFIG_MEDIA_TYPE: &str =
-    "application/vnd.akua.package.config.v1+json";
+pub const AKUA_PACKAGE_LAYER_MEDIA_TYPE: &str = "application/vnd.akua.package.content.v1.tar+gzip";
+pub const AKUA_PACKAGE_CONFIG_MEDIA_TYPE: &str = "application/vnd.akua.package.config.v1+json";
 
 /// OCI image manifest media type — what `PUT /v2/.../manifests/...`
 /// sets as its Content-Type + what consumers `Accept:` on pull.
@@ -602,6 +600,9 @@ mod tests {
     fn push_rejects_bad_ref() {
         let store = CredsStore::empty();
         let err = push("not-a-ref", "1.0.0", b"", &store).unwrap_err();
-        assert!(matches!(err, OciPushError::Transport(TransportError::BadRef(_))));
+        assert!(matches!(
+            err,
+            OciPushError::Transport(TransportError::BadRef(_))
+        ));
     }
 }

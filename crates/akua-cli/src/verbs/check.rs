@@ -9,8 +9,8 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use akua_core::cli_contract::{codes, ExitCode, StructuredError};
 use akua_core::check_from_sources;
+use akua_core::cli_contract::{codes, ExitCode, StructuredError};
 
 use crate::contract::{emit_output, Context};
 
@@ -252,8 +252,7 @@ resources = []
         fs::write(ws.path().join("package.k"), "schema X:\n  !!!\n").unwrap();
         let ctx = Context::json();
         let mut stdout = Vec::new();
-        let code = run(&ctx, &args(ws.path(), Path::new("package.k")), &mut stdout)
-            .expect("run");
+        let code = run(&ctx, &args(ws.path(), Path::new("package.k")), &mut stdout).expect("run");
         assert_eq!(code, ExitCode::UserError);
         let parsed: serde_json::Value =
             serde_json::from_str(String::from_utf8(stdout).unwrap().trim()).unwrap();

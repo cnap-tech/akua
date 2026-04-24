@@ -38,9 +38,8 @@ pub fn render(
 ) -> Result<String, JsError> {
     let inputs: serde_yaml::Value = match inputs_json.as_deref() {
         None | Some("") | Some("null") => serde_yaml::Value::Mapping(Default::default()),
-        Some(json) => serde_json::from_str(json).map_err(|e| {
-            JsError::new(&format!("inputs JSON parse: {e}"))
-        })?,
+        Some(json) => serde_json::from_str(json)
+            .map_err(|e| JsError::new(&format!("inputs JSON parse: {e}")))?,
     };
 
     akua_core::package_k::eval_source_full(
@@ -72,8 +71,8 @@ pub fn version() -> String {
 /// matches `akua lint --json`.
 #[wasm_bindgen]
 pub fn lint(filename: &str, source: &str) -> Result<String, JsError> {
-    let issues = akua_core::lint_kcl_source(filename, source)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let issues =
+        akua_core::lint_kcl_source(filename, source).map_err(|e| JsError::new(&e.to_string()))?;
     let status = if issues.is_empty() { "ok" } else { "fail" };
     serde_json::to_string(&serde_json::json!({
         "status": status,
@@ -88,8 +87,7 @@ pub fn lint(filename: &str, source: &str) -> Result<String, JsError> {
 /// JSON shape: `{ "files": [{ "path": "<filename>", "changed": bool }], "formatted": "..." }`.
 #[wasm_bindgen]
 pub fn fmt(filename: &str, source: &str, check_mode: bool) -> Result<String, JsError> {
-    let formatted = akua_core::format_kcl(source)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let formatted = akua_core::format_kcl(source).map_err(|e| JsError::new(&e.to_string()))?;
     let changed = formatted != source;
     let out = serde_json::json!({
         "files": [{ "path": filename, "changed": changed }],
@@ -149,7 +147,10 @@ pub fn diff(before_json: &str, after_json: &str) -> Result<String, JsError> {
     fn parse_map(json: &str) -> Result<BTreeMap<PathBuf, String>, JsError> {
         let raw: std::collections::HashMap<String, String> = serde_json::from_str(json)
             .map_err(|e| JsError::new(&format!("diff input JSON: {e}")))?;
-        Ok(raw.into_iter().map(|(k, v)| (PathBuf::from(k), v)).collect())
+        Ok(raw
+            .into_iter()
+            .map(|(k, v)| (PathBuf::from(k), v))
+            .collect())
     }
     let before = parse_map(before_json)?;
     let after = parse_map(after_json)?;

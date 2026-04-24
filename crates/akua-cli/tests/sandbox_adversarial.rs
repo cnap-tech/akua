@@ -80,8 +80,7 @@ fn memory_cap_enforced_below_minimum_instance_size() {
         memory_bytes: 1024 * 1024,
         ..ResourceLimits::default()
     };
-    let err = run("resources = []\n", limits)
-        .expect_err("1 MiB cap must reject instantiation");
+    let err = run("resources = []\n", limits).expect_err("1 MiB cap must reject instantiation");
     assert!(
         matches!(err, WorkerError::Wasmtime(_)),
         "expected Wasmtime(...) at instantiate, got: {err:?}"
@@ -151,8 +150,7 @@ fn absolute_plugin_path_rejected_at_guard() {
         _ = adversarial.resolve(\"/etc/passwd\")\n\
         resources = []\n\
     ";
-    let err = run(source, ResourceLimits::default())
-        .expect_err("absolute path must be rejected");
+    let err = run(source, ResourceLimits::default()).expect_err("absolute path must be rejected");
     match err {
         WorkerError::PluginPanic(msg) => assert!(
             msg.contains("absolute") || msg.contains("Package-relative"),
@@ -173,13 +171,11 @@ fn parent_relative_plugin_path_rejected_at_guard() {
         _ = adversarial.resolve(\"../../../etc\")\n\
         resources = []\n\
     ";
-    let err = run(source, ResourceLimits::default())
-        .expect_err("parent escape must be rejected");
+    let err = run(source, ResourceLimits::default()).expect_err("parent escape must be rejected");
     match err {
-        WorkerError::PluginPanic(msg) => assert!(
-            msg.contains("escape"),
-            "expected escape marker, got: {msg}"
-        ),
+        WorkerError::PluginPanic(msg) => {
+            assert!(msg.contains("escape"), "expected escape marker, got: {msg}")
+        }
         other => panic!("expected PluginPanic, got: {other:?}"),
     }
 }
@@ -210,8 +206,7 @@ fn symlink_escape_rejected_through_canonicalize() {
         _ = adversarial.resolve(\"./link\")\n\
         resources = []\n\
     ";
-    let err = run(source, ResourceLimits::default())
-        .expect_err("symlink escape must be rejected");
+    let err = run(source, ResourceLimits::default()).expect_err("symlink escape must be rejected");
     match err {
         WorkerError::PluginPanic(msg) => assert!(
             msg.contains("escape"),
@@ -238,7 +233,9 @@ fn absolute_import_path_rejected_by_kcl_resolver() {
     let resp = run(source, ResourceLimits::default())
         .expect("KCL parse errors come back as Render { status: fail }");
     match resp {
-        WorkerResponse::Render { status, message, .. } => {
+        WorkerResponse::Render {
+            status, message, ..
+        } => {
             assert_ne!(status, "ok", "expected KCL to reject absolute import");
             assert!(
                 !message.is_empty(),
@@ -248,4 +245,3 @@ fn absolute_import_path_rejected_by_kcl_resolver() {
         _ => panic!("expected Render"),
     }
 }
-

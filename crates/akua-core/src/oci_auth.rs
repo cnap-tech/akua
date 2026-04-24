@@ -92,10 +92,11 @@ impl CredsStore {
                 });
             }
         };
-        let parsed: AkuaAuthFile = toml::from_str(&body).map_err(|source| AuthLoadError::Parse {
-            path: path.to_path_buf(),
-            source: ParseBackend::Toml(source),
-        })?;
+        let parsed: AkuaAuthFile =
+            toml::from_str(&body).map_err(|source| AuthLoadError::Parse {
+                path: path.to_path_buf(),
+                source: ParseBackend::Toml(source),
+            })?;
         for (registry, entry) in parsed.registries {
             self.entries
                 .entry(registry)
@@ -291,7 +292,11 @@ pub fn list_sources() -> Result<Vec<RegistrySummary>, AuthLoadError> {
                     source: ParseBackend::Toml(source),
                 })?;
             for (registry, entry) in parsed.registries {
-                let kind = if entry.token.is_some() { "bearer" } else { "basic" };
+                let kind = if entry.token.is_some() {
+                    "bearer"
+                } else {
+                    "basic"
+                };
                 by_registry
                     .entry(registry)
                     .and_modify(|p| {
@@ -347,11 +352,7 @@ pub fn list_sources() -> Result<Vec<RegistrySummary>, AuthLoadError> {
 /// Insert or overwrite `registry` in `path`. Missing file creates a
 /// new one; parent dirs are created on demand. File write is
 /// best-effort atomic (write to sibling tempfile + rename).
-pub fn upsert_entry(
-    path: &Path,
-    registry: &str,
-    creds: &Credentials,
-) -> Result<(), AuthLoadError> {
+pub fn upsert_entry(path: &Path, registry: &str, creds: &Credentials) -> Result<(), AuthLoadError> {
     let mut file = load_file(path)?;
     file.registries
         .insert(registry.to_string(), AkuaAuthEntry::from_credentials(creds));
@@ -578,11 +579,7 @@ token = "akua-wins"
 "#,
         )
         .unwrap();
-        std::fs::write(
-            &docker,
-            r#"{ "auths": { "ghcr.io": { "auth": "WDpY" } } }"#,
-        )
-        .unwrap();
+        std::fs::write(&docker, r#"{ "auths": { "ghcr.io": { "auth": "WDpY" } } }"#).unwrap();
 
         let mut store = CredsStore::empty();
         store.merge_akua_auth(&akua).unwrap();
@@ -685,18 +682,8 @@ token = "akua-wins"
     fn upsert_preserves_other_registries() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("auth.toml");
-        upsert_entry(
-            &path,
-            "ghcr.io",
-            &Credentials::Bearer { token: "a".into() },
-        )
-        .unwrap();
-        upsert_entry(
-            &path,
-            "quay.io",
-            &Credentials::Bearer { token: "b".into() },
-        )
-        .unwrap();
+        upsert_entry(&path, "ghcr.io", &Credentials::Bearer { token: "a".into() }).unwrap();
+        upsert_entry(&path, "quay.io", &Credentials::Bearer { token: "b".into() }).unwrap();
 
         let body = std::fs::read_to_string(&path).unwrap();
         assert!(body.contains("ghcr.io"), "body: {body}");
@@ -707,12 +694,7 @@ token = "akua-wins"
     fn remove_returns_true_when_entry_existed() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("auth.toml");
-        upsert_entry(
-            &path,
-            "ghcr.io",
-            &Credentials::Bearer { token: "t".into() },
-        )
-        .unwrap();
+        upsert_entry(&path, "ghcr.io", &Credentials::Bearer { token: "t".into() }).unwrap();
         assert!(remove_entry(&path, "ghcr.io").unwrap());
 
         let mut store = CredsStore::empty();
@@ -728,12 +710,7 @@ token = "akua-wins"
         assert!(!remove_entry(&path, "ghcr.io").unwrap());
 
         // Present file without the registry.
-        upsert_entry(
-            &path,
-            "quay.io",
-            &Credentials::Bearer { token: "x".into() },
-        )
-        .unwrap();
+        upsert_entry(&path, "quay.io", &Credentials::Bearer { token: "x".into() }).unwrap();
         assert!(!remove_entry(&path, "ghcr.io").unwrap());
     }
 

@@ -42,10 +42,13 @@ pub fn install() {
             .filter(|v| !v.is_null())
             .and_then(Value::as_object)
             .unwrap_or(&empty_map);
-        let values_yaml =
-            serde_yaml::to_string(values_json).map_err(|e| err(format!("serializing values: {e}")))?;
+        let values_yaml = serde_yaml::to_string(values_json)
+            .map_err(|e| err(format!("serializing values: {e}")))?;
 
-        let release_name = opts.get("release").and_then(Value::as_str).unwrap_or("release");
+        let release_name = opts
+            .get("release")
+            .and_then(Value::as_str)
+            .unwrap_or("release");
         let release_namespace = opts
             .get("namespace")
             .and_then(Value::as_str)
@@ -62,13 +65,9 @@ pub fn install() {
             service: "Helm".to_string(),
         };
 
-        let manifests = helm_engine_wasm::render_dir(
-            &resolved_chart,
-            &chart_name,
-            &values_yaml,
-            &release,
-        )
-        .map_err(|e| err(format!("helm engine: {e}")))?;
+        let manifests =
+            helm_engine_wasm::render_dir(&resolved_chart, &chart_name, &values_yaml, &release)
+                .map_err(|e| err(format!("helm engine: {e}")))?;
 
         // Each helm manifest may contain multiple `---`-separated docs
         // (one chart file → N resources). Parse each through the shared

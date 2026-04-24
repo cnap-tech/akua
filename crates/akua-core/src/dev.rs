@@ -150,10 +150,7 @@ where
         // batched message per quiet period.
         match rx.recv_timeout(Duration::from_millis(250)) {
             Ok(Ok(events)) => {
-                let changed = filter_relevant(
-                    events.into_iter().map(|e| e.path),
-                    workspace,
-                );
+                let changed = filter_relevant(events.into_iter().map(|e| e.path), workspace);
                 if changed.is_empty() {
                     continue;
                 }
@@ -234,10 +231,7 @@ fn is_relevant(path: &Path, workspace: &Path) -> bool {
     let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
         return false;
     };
-    matches!(
-        ext,
-        "k" | "yaml" | "yml" | "json" | "toml" | "tpl" | "lock"
-    )
+    matches!(ext, "k" | "yaml" | "yml" | "json" | "toml" | "tpl" | "lock")
 }
 
 fn is_editor_tempfile(name: &str) -> bool {

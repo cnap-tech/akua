@@ -206,7 +206,10 @@ mod tests {
     fn hash_is_deterministic_for_identical_inputs() {
         let tmp1 = TempDir::new().unwrap();
         let tmp2 = TempDir::new().unwrap();
-        let p = pkg(vec![mk_resource("ConfigMap", "a"), mk_resource("Service", "b")]);
+        let p = pkg(vec![
+            mk_resource("ConfigMap", "a"),
+            mk_resource("Service", "b"),
+        ]);
         let a = render(&p, tmp1.path(), false).unwrap();
         let b = render(&p, tmp2.path(), false).unwrap();
         assert_eq!(a.hash, b.hash);
@@ -231,9 +234,15 @@ mod tests {
     fn resource_without_metadata_name_uses_unnamed_filename() {
         let tmp = TempDir::new().unwrap();
         let mut r = serde_yaml::Mapping::new();
-        r.insert(Value::String("kind".into()), Value::String("Namespace".into()));
+        r.insert(
+            Value::String("kind".into()),
+            Value::String("Namespace".into()),
+        );
         let summary = render(&pkg(vec![Value::Mapping(r)]), tmp.path(), false).unwrap();
-        assert_eq!(summary.files[0], PathBuf::from("000-namespace-unnamed.yaml"));
+        assert_eq!(
+            summary.files[0],
+            PathBuf::from("000-namespace-unnamed.yaml")
+        );
     }
 
     #[test]

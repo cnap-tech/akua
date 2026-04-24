@@ -224,8 +224,11 @@ impl RenderScope {
         charts: &crate::chart_resolver::ResolvedCharts,
         strict: bool,
     ) -> Self {
-        let allowed_roots: Vec<PathBuf> =
-            charts.entries.values().map(|c| c.abs_path.clone()).collect();
+        let allowed_roots: Vec<PathBuf> = charts
+            .entries
+            .values()
+            .map(|c| c.abs_path.clone())
+            .collect();
         Self::enter_with(package, &allowed_roots, strict)
     }
 }
@@ -344,12 +347,10 @@ pub fn resolve_in_package(path: &Path) -> Result<PathBuf, PathError> {
         return Err(PathError::StrictRequiresTypedImport(path.to_path_buf()));
     }
 
-    let pkg_canon = package_dir
-        .canonicalize()
-        .map_err(|e| PathError::Io {
-            path: package_dir.clone(),
-            source: e,
-        })?;
+    let pkg_canon = package_dir.canonicalize().map_err(|e| PathError::Io {
+        path: package_dir.clone(),
+        source: e,
+    })?;
 
     let joined = package_dir.join(path);
     // Canonicalize resolves `..` + symlinks to a real path under the
@@ -517,7 +518,10 @@ fn invoke(method: &str, args_json: &str, kwargs_json: &str) -> Result<Value, Str
 /// null here is a bridge bug we want surfaced loudly (the enclosing
 /// `catch_unwind` turns the panic into a normal KCL runtime error).
 unsafe fn c_str_required(ptr: *const c_char) -> String {
-    assert!(!ptr.is_null(), "plugin dispatcher received null method name");
+    assert!(
+        !ptr.is_null(),
+        "plugin dispatcher received null method name"
+    );
     unsafe { CStr::from_ptr(ptr) }
         .to_string_lossy()
         .into_owned()
@@ -672,7 +676,10 @@ mod tests {
 
         // Absolute: rejected.
         let err = resolve_in_package(std::path::Path::new("/etc/passwd")).unwrap_err();
-        assert!(matches!(err, PathError::AbsoluteDisallowed(_)), "got: {err:?}");
+        assert!(
+            matches!(err, PathError::AbsoluteDisallowed(_)),
+            "got: {err:?}"
+        );
     }
 
     #[test]
@@ -791,7 +798,9 @@ resources = [{
         std::fs::write(&path, src).unwrap();
 
         let pkg = PackageK::load(&path).expect("load");
-        let rendered = pkg.render(&YamlValue::Mapping(Default::default())).expect("render");
+        let rendered = pkg
+            .render(&YamlValue::Mapping(Default::default()))
+            .expect("render");
         assert_eq!(rendered.resources.len(), 1);
         let greeting = rendered.resources[0]
             .get("data")

@@ -102,7 +102,13 @@ pub fn run<W: Write>(
 }
 
 fn write_text<W: Write>(w: &mut W, out: &PullOutput) -> std::io::Result<()> {
-    writeln!(w, "pulled: {}:{} → {}", out.oci_ref, out.tag, out.out.display())?;
+    writeln!(
+        w,
+        "pulled: {}:{} → {}",
+        out.oci_ref,
+        out.tag,
+        out.out.display()
+    )?;
     writeln!(w, "  manifest  {}", out.manifest_digest)?;
     writeln!(w, "  layer     {}", out.layer_digest)?;
     Ok(())

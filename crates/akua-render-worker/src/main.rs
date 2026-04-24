@@ -137,8 +137,8 @@ fn run() -> Result<(), WorkerError> {
         .read_to_string(&mut buf)
         .map_err(|source| WorkerError::StdinRead { source })?;
 
-    let req: Request = serde_json::from_str(buf.trim())
-        .map_err(|source| WorkerError::ParseRequest { source })?;
+    let req: Request =
+        serde_json::from_str(buf.trim()).map_err(|source| WorkerError::ParseRequest { source })?;
 
     let resp = match req {
         Request::Ping { note } => Response::Ping {
@@ -158,7 +158,8 @@ fn run() -> Result<(), WorkerError> {
         } => render_request(package_filename, source, inputs, charts_pkg_path),
     };
 
-    let out = serde_json::to_string(&resp).map_err(|source| WorkerError::EncodeResponse { source })?;
+    let out =
+        serde_json::to_string(&resp).map_err(|source| WorkerError::EncodeResponse { source })?;
     std::io::stdout()
         .write_all(out.as_bytes())
         .map_err(|source| WorkerError::StdoutWrite { source })?;

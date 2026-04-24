@@ -9,6 +9,8 @@ use std::path::PathBuf;
 use clap::{ArgGroup, Args, Parser, Subcommand};
 
 use akua_cli::contract::{emit_error, Context, UniversalArgs};
+#[cfg(feature = "dev-watch")]
+use akua_cli::verbs::dev as dev_verb;
 use akua_cli::verbs::{
     add as add_verb, auth as auth_verb, cache as cache_verb, check as check_verb,
     diff as diff_verb, fmt as fmt_verb, init as init_verb, inspect as inspect_verb,
@@ -19,8 +21,6 @@ use akua_cli::verbs::{
 };
 #[cfg(feature = "cosign-verify")]
 use akua_cli::verbs::{sign as sign_verb, verify_tarball as verify_tarball_verb};
-#[cfg(feature = "dev-watch")]
-use akua_cli::verbs::dev as dev_verb;
 use akua_core::cli_contract::{AgentContext, ExitCode, StructuredError};
 
 #[derive(Parser)]
@@ -674,7 +674,11 @@ fn dispatch(command: Commands) -> ExitCode {
             workspace,
             package,
         } => run_check(&args, &workspace, &package),
-        Commands::Diff { args, before, after } => run_diff(&args, &before, &after),
+        Commands::Diff {
+            args,
+            before,
+            after,
+        } => run_diff(&args, &before, &after),
         Commands::Pull {
             args,
             oci_ref,
@@ -688,7 +692,14 @@ fn dispatch(command: Commands) -> ExitCode {
             no_sign,
             no_attest,
             workspace,
-        } => run_publish(&args, &workspace, &oci_ref, tag.as_deref(), no_sign, no_attest),
+        } => run_publish(
+            &args,
+            &workspace,
+            &oci_ref,
+            tag.as_deref(),
+            no_sign,
+            no_attest,
+        ),
         Commands::Remove {
             args,
             name,
@@ -703,7 +714,14 @@ fn dispatch(command: Commands) -> ExitCode {
             out,
             workspace,
             debounce_ms,
-        } => run_dev(&args, &workspace, &package, inputs.as_deref(), &out, debounce_ms),
+        } => run_dev(
+            &args,
+            &workspace,
+            &package,
+            inputs.as_deref(),
+            &out,
+            debounce_ms,
+        ),
         Commands::Test {
             args,
             workspace,
@@ -723,8 +741,16 @@ fn dispatch(command: Commands) -> ExitCode {
             force,
             workspace,
         } => run_add(
-            &args, &name, oci.as_deref(), git.as_deref(), path.as_deref(),
-            version.as_deref(), tag.as_deref(), rev.as_deref(), force, &workspace,
+            &args,
+            &name,
+            oci.as_deref(),
+            git.as_deref(),
+            path.as_deref(),
+            version.as_deref(),
+            tag.as_deref(),
+            rev.as_deref(),
+            force,
+            &workspace,
         ),
         Commands::Cache { sub } => run_cache(sub),
         Commands::Auth { sub } => run_auth(sub),
@@ -870,11 +896,7 @@ fn run_repl(args: &UniversalArgs) -> ExitCode {
     }
 }
 
-fn run_update(
-    args: &UniversalArgs,
-    workspace: &std::path::Path,
-    dep: Option<&str>,
-) -> ExitCode {
+fn run_update(args: &UniversalArgs, workspace: &std::path::Path, dep: Option<&str>) -> ExitCode {
     let ctx = resolve_ctx(args);
     let verb_args = update_verb::UpdateArgs { workspace, dep };
     let mut stdout = io::stdout().lock();
@@ -921,8 +943,7 @@ fn run_auth(sub: AuthSub) -> ExitCode {
                 // clap ArgGroup guarantees exactly one of username/token.
                 auth_verb::AuthAddInput::Basic {
                     registry,
-                    username: username
-                        .expect("clap ArgGroup guarantees username when !token"),
+                    username: username.expect("clap ArgGroup guarantees username when !token"),
                 }
             };
             (args, auth_verb::AuthAction::Add(input))
@@ -961,12 +982,7 @@ fn run_cache(sub: CacheSub) -> ExitCode {
     }
 }
 
-fn run_pull(
-    args: &UniversalArgs,
-    oci_ref: &str,
-    tag: &str,
-    out: &std::path::Path,
-) -> ExitCode {
+fn run_pull(args: &UniversalArgs, oci_ref: &str, tag: &str, out: &std::path::Path) -> ExitCode {
     let ctx = resolve_ctx(args);
     let verb_args = pull_verb::PullArgs { oci_ref, tag, out };
     let mut stdout = io::stdout().lock();
@@ -1120,7 +1136,11 @@ fn run_diff(args: &UniversalArgs, before: &std::path::Path, after: &std::path::P
     }
 }
 
-fn run_check(args: &UniversalArgs, workspace: &std::path::Path, package: &std::path::Path) -> ExitCode {
+fn run_check(
+    args: &UniversalArgs,
+    workspace: &std::path::Path,
+    package: &std::path::Path,
+) -> ExitCode {
     let ctx = resolve_ctx(args);
     let verb_args = check_verb::CheckArgs {
         workspace,
@@ -1223,7 +1243,12 @@ fn run_verify(args: &UniversalArgs, workspace: &std::path::Path) -> ExitCode {
     }
 }
 
-fn run_fmt(args: &UniversalArgs, package: &std::path::Path, check: bool, stdout_mode: bool) -> ExitCode {
+fn run_fmt(
+    args: &UniversalArgs,
+    package: &std::path::Path,
+    check: bool,
+    stdout_mode: bool,
+) -> ExitCode {
     let ctx = resolve_ctx(args);
     let verb_args = fmt_verb::FmtArgs {
         package_path: package,
@@ -1357,7 +1382,11 @@ mod tests {
         ]);
         match cli.command {
             Commands::Add {
-                name, oci, version, force, ..
+                name,
+                oci,
+                version,
+                force,
+                ..
             } => {
                 assert_eq!(name, "cnpg");
                 assert_eq!(oci.as_deref(), Some("oci://ghcr.io/x/y"));
@@ -1370,17 +1399,18 @@ mod tests {
 
     #[test]
     fn add_requires_a_source_flag() {
-        let err = Cli::try_parse_from(["akua", "add", "x"]).err().expect("should fail");
+        let err = Cli::try_parse_from(["akua", "add", "x"])
+            .err()
+            .expect("should fail");
         assert!(err.to_string().contains("required"));
     }
 
     #[test]
     fn add_rejects_two_sources_at_once() {
-        let err = Cli::try_parse_from([
-            "akua", "add", "x", "--oci", "oci://a", "--git", "https://b",
-        ])
-        .err()
-        .expect("should fail");
+        let err =
+            Cli::try_parse_from(["akua", "add", "x", "--oci", "oci://a", "--git", "https://b"])
+                .err()
+                .expect("should fail");
         assert!(err.to_string().contains("cannot be used"));
     }
 
@@ -1400,7 +1430,9 @@ mod tests {
     fn parses_inspect_with_package_override() {
         let cli = Cli::parse_from(["akua", "inspect", "--package", "foo.k"]);
         match cli.command {
-            Commands::Inspect { package, tarball, .. } => {
+            Commands::Inspect {
+                package, tarball, ..
+            } => {
                 assert_eq!(package, PathBuf::from("foo.k"));
                 assert!(tarball.is_none());
             }
@@ -1422,7 +1454,12 @@ mod tests {
     #[test]
     fn inspect_rejects_package_and_tarball_together() {
         let err = Cli::try_parse_from([
-            "akua", "inspect", "--package", "foo.k", "--tarball", "p.tgz",
+            "akua",
+            "inspect",
+            "--package",
+            "foo.k",
+            "--tarball",
+            "p.tgz",
         ])
         .err()
         .expect("should fail");
@@ -1444,7 +1481,9 @@ mod tests {
     fn parses_cache_list_subverb() {
         let cli = Cli::parse_from(["akua", "cache", "list", "--json"]);
         match cli.command {
-            Commands::Cache { sub: CacheSub::List { args } } => {
+            Commands::Cache {
+                sub: CacheSub::List { args },
+            } => {
                 assert!(args.json);
             }
             _ => panic!("expected cache list"),
@@ -1455,7 +1494,9 @@ mod tests {
     fn parses_cache_clear_with_oci_scope() {
         let cli = Cli::parse_from(["akua", "cache", "clear", "--oci"]);
         match cli.command {
-            Commands::Cache { sub: CacheSub::Clear { oci, git, .. } } => {
+            Commands::Cache {
+                sub: CacheSub::Clear { oci, git, .. },
+            } => {
                 assert!(oci);
                 assert!(!git);
             }
@@ -1630,12 +1671,13 @@ mod tests {
         ]);
         match cli.command {
             Commands::Auth {
-                sub: AuthSub::Add {
-                    registry,
-                    username,
-                    token,
-                    ..
-                },
+                sub:
+                    AuthSub::Add {
+                        registry,
+                        username,
+                        token,
+                        ..
+                    },
             } => {
                 assert_eq!(registry, "ghcr.io");
                 assert_eq!(username.as_deref(), Some("alice"));
@@ -1647,11 +1689,12 @@ mod tests {
 
     #[test]
     fn parses_auth_add_with_token_flag() {
-        let cli =
-            Cli::parse_from(["akua", "auth", "add", "--registry", "ghcr.io", "--token"]);
+        let cli = Cli::parse_from(["akua", "auth", "add", "--registry", "ghcr.io", "--token"]);
         match cli.command {
             Commands::Auth {
-                sub: AuthSub::Add { token, username, .. },
+                sub: AuthSub::Add {
+                    token, username, ..
+                },
             } => {
                 assert!(token);
                 assert!(username.is_none());
@@ -1663,7 +1706,14 @@ mod tests {
     #[test]
     fn auth_add_rejects_username_and_token_together() {
         let err = Cli::try_parse_from([
-            "akua", "auth", "add", "--registry", "ghcr.io", "--username", "alice", "--token",
+            "akua",
+            "auth",
+            "add",
+            "--registry",
+            "ghcr.io",
+            "--username",
+            "alice",
+            "--token",
         ])
         .err()
         .expect("should fail");

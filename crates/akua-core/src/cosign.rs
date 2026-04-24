@@ -240,10 +240,7 @@ pub fn sign_dsse(
 /// of the contained signatures against the public key. Returns the
 /// raw decoded payload on success — callers then parse it as the
 /// `payloadType` indicates.
-pub fn verify_dsse(
-    public_key_pem: &str,
-    envelope_bytes: &[u8],
-) -> Result<Vec<u8>, CosignError> {
+pub fn verify_dsse(public_key_pem: &str, envelope_bytes: &[u8]) -> Result<Vec<u8>, CosignError> {
     use base64::Engine as _;
     use p256::ecdsa::signature::Verifier;
 
@@ -261,11 +258,14 @@ pub fn verify_dsse(
     // "at least one signature must verify" semantic for consumer-
     // side verification with a known key.
     for sig_entry in &envelope.signatures {
-        let sig_bytes = match base64::engine::general_purpose::STANDARD.decode(sig_entry.sig.as_bytes()) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let Ok(signature) = Signature::from_der(&sig_bytes).or_else(|_| Signature::from_slice(&sig_bytes)) else {
+        let sig_bytes =
+            match base64::engine::general_purpose::STANDARD.decode(sig_entry.sig.as_bytes()) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+        let Ok(signature) =
+            Signature::from_der(&sig_bytes).or_else(|_| Signature::from_slice(&sig_bytes))
+        else {
             continue;
         };
         if key.verify(&pae, &signature).is_ok() {
@@ -406,7 +406,10 @@ mod tests {
         tampered[10] ^= 0xff;
         let err = verify_keyed(&pem, &tampered, &sig, digest).unwrap_err();
         assert!(
-            matches!(err, CosignError::VerifyFailed(_) | CosignError::BadPayload(_)),
+            matches!(
+                err,
+                CosignError::VerifyFailed(_) | CosignError::BadPayload(_)
+            ),
             "got {err:?}"
         );
     }
@@ -426,13 +429,7 @@ mod tests {
 
     #[test]
     fn rejects_malformed_public_key() {
-        let err = verify_keyed(
-            "not a pem",
-            b"{}",
-            "AAAA",
-            "sha256:00",
-        )
-        .unwrap_err();
+        let err = verify_keyed("not a pem", b"{}", "AAAA", "sha256:00").unwrap_err();
         assert!(matches!(err, CosignError::BadPublicKey(_)), "got {err:?}");
     }
 
@@ -573,8 +570,7 @@ mod tests {
     fn dsse_pae_matches_spec_layout() {
         // DSSEv1 <type_len> <type> <payload_len> <payload>
         let pae = dsse_pae("application/x-demo", b"hello");
-        let expected =
-            b"DSSEv1 18 application/x-demo 5 hello";
+        let expected = b"DSSEv1 18 application/x-demo 5 hello";
         assert_eq!(pae, expected);
     }
 
@@ -591,8 +587,7 @@ mod tests {
     fn dsse_verify_rejects_tampered_payload() {
         let (pub_pem, priv_pem) = keypair_fixture();
         let payload = b"original";
-        let envelope_bytes =
-            sign_dsse(&priv_pem, "application/test", payload, None).unwrap();
+        let envelope_bytes = sign_dsse(&priv_pem, "application/test", payload, None).unwrap();
 
         // Tamper with the base64 payload inside the envelope — the
         // signature was over the *original* bytes.

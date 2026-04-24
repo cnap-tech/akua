@@ -184,7 +184,11 @@ mod tests {
             .collect();
         assert_eq!(
             rels,
-            vec!["a.k".to_string(), "b.k".to_string(), "nested/d.k".to_string()]
+            vec![
+                "a.k".to_string(),
+                "b.k".to_string(),
+                "nested/d.k".to_string()
+            ]
         );
     }
 

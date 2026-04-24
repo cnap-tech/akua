@@ -67,7 +67,11 @@ pub fn check_from_sources(
     if let Some((filename, source)) = package {
         checks.push(check_package(filename, source));
     }
-    let status = if checks.iter().all(|c| c.ok) { "ok" } else { "fail" };
+    let status = if checks.iter().all(|c| c.ok) {
+        "ok"
+    } else {
+        "fail"
+    };
     CheckOutput { status, checks }
 }
 

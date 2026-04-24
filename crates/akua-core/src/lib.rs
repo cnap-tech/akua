@@ -52,12 +52,28 @@ macro_rules! contract_type {
 pub mod cache_inventory;
 #[cfg(feature = "engine-kcl")]
 pub mod chart_resolver;
-#[cfg(feature = "git-fetch")]
-pub mod git_fetcher;
+#[cfg(feature = "engine-kcl")]
+pub mod check;
+pub mod cli_contract;
 #[cfg(feature = "cosign-verify")]
 pub mod cosign;
 #[cfg(feature = "cosign-verify")]
 pub mod cosign_sidecar;
+#[cfg(feature = "dev-watch")]
+pub mod dev;
+#[cfg(feature = "engine-kcl")]
+pub mod dir_diff;
+#[cfg(feature = "git-fetch")]
+pub mod git_fetcher;
+#[cfg(all(feature = "engine-kcl", feature = "engine-helm"))]
+pub mod helm;
+pub(crate) mod hex;
+#[cfg(feature = "engine-kcl")]
+pub mod kcl_plugin;
+#[cfg(all(feature = "engine-kcl", feature = "engine-kustomize"))]
+pub mod kustomize;
+pub mod lock_file;
+pub mod mod_file;
 #[cfg(feature = "oci-fetch")]
 pub mod oci_auth;
 #[cfg(feature = "oci-fetch")]
@@ -67,32 +83,13 @@ pub mod oci_puller;
 #[cfg(feature = "oci-fetch")]
 pub mod oci_pusher;
 #[cfg(feature = "oci-fetch")]
-pub mod package_tar;
-#[cfg(feature = "oci-fetch")]
 pub mod oci_transport;
-pub mod cli_contract;
-#[cfg(feature = "dev-watch")]
-pub mod dev;
-#[cfg(feature = "engine-kcl")]
-pub mod dir_diff;
-#[cfg(all(feature = "engine-kcl", feature = "engine-helm"))]
-pub mod helm;
-pub(crate) mod hex;
-#[cfg(all(feature = "engine-kcl", feature = "engine-kustomize"))]
-pub mod kustomize;
-#[cfg(feature = "engine-kcl")]
-pub(crate) mod yaml_multidoc;
-#[cfg(feature = "engine-kcl")]
-pub mod kcl_plugin;
-pub mod lock_file;
-pub mod mod_file;
-#[cfg(feature = "engine-kcl")]
-pub mod check;
 #[cfg(feature = "engine-kcl")]
 pub mod package_k;
 #[cfg(feature = "engine-kcl")]
 pub mod package_render;
-pub mod tree;
+#[cfg(feature = "oci-fetch")]
+pub mod package_tar;
 #[cfg(feature = "engine-kcl")]
 pub mod pkg_render;
 #[cfg(feature = "cosign-verify")]
@@ -101,11 +98,20 @@ pub mod slsa;
 pub mod stdlib;
 #[cfg(feature = "engine-kcl")]
 pub mod test_runner;
+pub mod tree;
 #[cfg(feature = "engine-kcl")]
 pub mod values_schema;
 pub(crate) mod walk;
+#[cfg(feature = "engine-kcl")]
+pub(crate) mod yaml_multidoc;
 
+#[cfg(feature = "engine-kcl")]
+pub use chart_resolver::{ChartResolveError, ResolvedChart, ResolvedCharts};
+#[cfg(feature = "engine-kcl")]
+pub use check::{check_from_sources, CheckOutput, CheckResult};
 pub use cli_contract::{AgentContext, AgentSource, ExitCode, StructuredError};
+#[cfg(feature = "engine-kcl")]
+pub use dir_diff::{diff as dir_diff, DirDiff, DirDiffError, FileChange};
 pub use lock_file::{
     AkuaLock, LockError, LockLoadError, LockedPackage, Replaced, CURRENT_VERSION as LOCK_VERSION,
 };
@@ -114,22 +120,16 @@ pub use mod_file::{
     WorkspaceSection,
 };
 #[cfg(feature = "engine-kcl")]
-pub use chart_resolver::{ChartResolveError, ResolvedChart, ResolvedCharts};
-#[cfg(feature = "engine-kcl")]
-pub use dir_diff::{diff as dir_diff, DirDiff, DirDiffError, FileChange};
-#[cfg(feature = "engine-kcl")]
-pub use check::{check_from_sources, CheckOutput, CheckResult};
-#[cfg(feature = "engine-kcl")]
 pub use package_k::{
-    eval_source, eval_source_full, eval_source_with_inputs, format_kcl, lint_kcl,
-    lint_kcl_source, list_options_kcl, list_options_kcl_source, parse_rendered_yaml,
-    LintIssue, OptionInfo, PackageK, PackageKError, RenderedPackage,
-};
-pub use tree::{
-    tree_from_parsed, tree_from_sources, DepRow, LockedInfo, PackageInfo, TreeOutput,
-    TreeSourceError,
+    eval_source, eval_source_full, eval_source_with_inputs, format_kcl, lint_kcl, lint_kcl_source,
+    list_options_kcl, list_options_kcl_source, parse_rendered_yaml, LintIssue, OptionInfo,
+    PackageK, PackageKError, RenderedPackage,
 };
 #[cfg(feature = "engine-kcl")]
 pub use package_render::{
     render, RenderError as PackageRenderError, RenderSummary, FORMAT_RAW_MANIFESTS,
+};
+pub use tree::{
+    tree_from_parsed, tree_from_sources, DepRow, LockedInfo, PackageInfo, TreeOutput,
+    TreeSourceError,
 };

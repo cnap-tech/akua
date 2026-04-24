@@ -75,13 +75,12 @@ pub fn run<W: Write>(
     let manifest_path = args.workspace.join("akua.toml");
     let lock_path = args.workspace.join("akua.lock");
 
-    let manifest_source =
-        std::fs::read_to_string(&manifest_path).map_err(|source| {
-            TreeError::Manifest(ManifestLoadError::Io {
-                path: manifest_path.clone(),
-                source,
-            })
-        })?;
+    let manifest_source = std::fs::read_to_string(&manifest_path).map_err(|source| {
+        TreeError::Manifest(ManifestLoadError::Io {
+            path: manifest_path.clone(),
+            source,
+        })
+    })?;
     let lock_source = match std::fs::read_to_string(&lock_path) {
         Ok(s) => Some(s),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -93,8 +92,8 @@ pub fn run<W: Write>(
         }
     };
 
-    let output = tree_from_sources(&manifest_source, lock_source.as_deref())
-        .map_err(map_source_error)?;
+    let output =
+        tree_from_sources(&manifest_source, lock_source.as_deref()).map_err(map_source_error)?;
 
     emit_output(stdout, ctx, &output, |w| write_text(w, &output))
         .map_err(TreeError::StdoutWrite)?;
@@ -129,7 +128,11 @@ fn write_text<W: Write>(writer: &mut W, output: &TreeOutput) -> std::io::Result<
             .unwrap_or_default();
         let lock_marker = match &dep.locked {
             Some(l) => {
-                let sig_marker = if l.signature.is_some() { "signed" } else { "unsigned" };
+                let sig_marker = if l.signature.is_some() {
+                    "signed"
+                } else {
+                    "unsigned"
+                };
                 format!(" [locked {} ({})]", short_digest(&l.digest), sig_marker)
             }
             None => String::new(),

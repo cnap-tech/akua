@@ -164,10 +164,10 @@ impl Session {
         // SAFETY: `cwasm` was produced by `precompile()` against the
         // same `shared_config()` shape. Embedded at compile time, so
         // tampering requires tampering with the akua binary itself.
-        let module = unsafe { Module::deserialize(&engine, cwasm) }.map_err(wasm_err)?;
+        let module = unsafe { Module::deserialize(engine, cwasm) }.map_err(wasm_err)?;
 
         let wasi = WasiCtxBuilder::new().arg(spec.name).build_p1();
-        let mut store = Store::new(&engine, wasi);
+        let mut store = Store::new(engine, wasi);
         // Shared Engine has `epoch_interruption` enabled (for the
         // render worker's wall-clock cap). Engine plugins (helm,
         // kustomize) don't want a deadline — the host-Rust caller
@@ -179,7 +179,7 @@ impl Session {
         // 100ms ticker rate is ~29 billion years — comfortably
         // effectively-infinite.
         store.set_epoch_deadline(i64::MAX as u64);
-        let mut linker: Linker<WasiP1Ctx> = Linker::new(&engine);
+        let mut linker: Linker<WasiP1Ctx> = Linker::new(engine);
         p1::add_to_linker_sync(&mut linker, |s: &mut WasiP1Ctx| s).map_err(wasm_err)?;
 
         let instance = linker.instantiate(&mut store, &module).map_err(wasm_err)?;

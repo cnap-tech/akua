@@ -146,7 +146,11 @@ mod tests {
         let overlay = pkg.join("overlay");
         std::fs::create_dir_all(&base).unwrap();
         std::fs::create_dir_all(&overlay).unwrap();
-        std::fs::write(base.join("kustomization.yaml"), "resources:\n  - configmap.yaml\n").unwrap();
+        std::fs::write(
+            base.join("kustomization.yaml"),
+            "resources:\n  - configmap.yaml\n",
+        )
+        .unwrap();
         std::fs::write(
             base.join("configmap.yaml"),
             "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: hello\ndata:\n  greeting: hi\n",

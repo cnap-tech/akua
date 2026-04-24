@@ -144,9 +144,7 @@ pub fn run<W: Write, R: SecretReader>(
         }
         AuthAction::Add(input) => {
             let path = oci_auth::akua_auth_path().ok_or(AuthVerbError::NoConfigPath)?;
-            let secret = secret_in
-                .read_secret()
-                .map_err(AuthVerbError::SecretRead)?;
+            let secret = secret_in.read_secret().map_err(AuthVerbError::SecretRead)?;
             if secret.is_empty() {
                 return Err(AuthVerbError::EmptySecret);
             }
@@ -195,11 +193,7 @@ fn write_text<W: Write>(w: &mut W, output: &AuthOutput) -> std::io::Result<()> {
                 writeln!(w, "no registries configured")?;
             } else {
                 for r in &body.registries {
-                    writeln!(
-                        w,
-                        "  {:<40}  {:<6}  {}",
-                        r.registry, r.auth_kind, r.source
-                    )?;
+                    writeln!(w, "  {:<40}  {:<6}  {}", r.registry, r.auth_kind, r.source)?;
                 }
             }
             if let Some(path) = &body.path {
@@ -302,8 +296,7 @@ mod tests {
         };
         run(&ctx_json(), &args, &mut stdout, &mut reader).unwrap();
 
-        let body =
-            std::fs::read_to_string(oci_auth::akua_auth_path().unwrap()).unwrap();
+        let body = std::fs::read_to_string(oci_auth::akua_auth_path().unwrap()).unwrap();
         assert!(body.contains("token"), "{body}");
         assert!(body.contains("ghp_deadbeef"), "{body}");
         assert!(!body.contains("password"), "{body}");
@@ -342,12 +335,8 @@ mod tests {
 
         // Seed.
         let path = oci_auth::akua_auth_path().unwrap();
-        oci_auth::upsert_entry(
-            &path,
-            "ghcr.io",
-            &Credentials::Bearer { token: "x".into() },
-        )
-        .unwrap();
+        oci_auth::upsert_entry(&path, "ghcr.io", &Credentials::Bearer { token: "x".into() })
+            .unwrap();
 
         let mut stdout = Vec::new();
         let mut reader = MemReader { secret: "".into() };

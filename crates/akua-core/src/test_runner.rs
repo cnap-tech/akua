@@ -142,12 +142,11 @@ fn run_one(file: &Path, inputs: &serde_yaml::Value) -> Result<(), String> {
 /// filesystems. Hidden dirs + render outputs + language-ecosystem
 /// siblings are skipped via the shared [`crate::walk`] helper.
 pub(crate) fn discover_test_files(root: &Path) -> Result<Vec<PathBuf>, TestRunError> {
-    let pairs = crate::walk::collect_files(root, is_test_file).map_err(|source| {
-        TestRunError::Walk {
+    let pairs =
+        crate::walk::collect_files(root, is_test_file).map_err(|source| TestRunError::Walk {
             root: root.to_path_buf(),
             source,
-        }
-    })?;
+        })?;
     Ok(pairs.into_iter().map(|(_rel, abs)| abs).collect())
 }
 
@@ -347,8 +346,7 @@ fn run_one_golden(
         )));
     }
 
-    let diff =
-        crate::dir_diff::diff(snapshot_dir, &out_dir).map_err(|e| e.to_string())?;
+    let diff = crate::dir_diff::diff(snapshot_dir, &out_dir).map_err(|e| e.to_string())?;
     if diff.is_clean() {
         Ok(GoldenVerdict::Pass)
     } else {
@@ -374,8 +372,7 @@ fn load_inputs_or_empty(path: Option<&Path>) -> Result<serde_yaml::Value, String
     match path {
         None => Ok(serde_yaml::Value::Mapping(Default::default())),
         Some(p) => {
-            let bytes =
-                std::fs::read(p).map_err(|e| format!("reading {}: {e}", p.display()))?;
+            let bytes = std::fs::read(p).map_err(|e| format!("reading {}: {e}", p.display()))?;
             serde_yaml::from_slice(&bytes).map_err(|e| format!("parsing {}: {e}", p.display()))
         }
     }
@@ -470,7 +467,12 @@ mod tests {
         let files = discover_test_files(tmp.path()).unwrap();
         let rels: Vec<String> = files
             .iter()
-            .map(|p| p.strip_prefix(tmp.path()).unwrap().to_string_lossy().into_owned())
+            .map(|p| {
+                p.strip_prefix(tmp.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .collect();
         assert_eq!(rels, vec!["b_test.k".to_string(), "test_a.k".to_string()]);
     }

@@ -79,7 +79,10 @@ nginx = { oci = "oci://ghcr.io/acme/nginx", version = "1.2.3" }
 
     // Vendor dir is present post-extract.
     assert!(
-        pulled.path().join(".akua/vendor/nginx/Chart.yaml").is_file(),
+        pulled
+            .path()
+            .join(".akua/vendor/nginx/Chart.yaml")
+            .is_file(),
         "vendor dir missing after unpack"
     );
 

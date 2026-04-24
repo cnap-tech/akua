@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
 use akua_core::lock_file::{AkuaLock, LockLoadError};
 use akua_core::oci_auth::CredsStore;
-use akua_core::{package_tar, oci_pusher, slsa, AkuaManifest, ManifestLoadError};
+use akua_core::{oci_pusher, package_tar, slsa, AkuaManifest, ManifestLoadError};
 use serde::Serialize;
 
 use crate::contract::{emit_output, Context};
@@ -162,8 +162,7 @@ pub fn run<W: Write>(
     // un-vendored artifact.
     let vendored_pairs = crate::verbs::vendor::collect_vendor_pairs(args.workspace, &manifest);
 
-    let tar_gz =
-        package_tar::pack_workspace_with_vendored_deps(args.workspace, &vendored_pairs)?;
+    let tar_gz = package_tar::pack_workspace_with_vendored_deps(args.workspace, &vendored_pairs)?;
 
     let pushed = oci_pusher::push(args.oci_ref, &tag, &tar_gz, &creds)?;
 
@@ -240,7 +239,11 @@ pub fn run<W: Write>(
 fn write_text<W: Write>(w: &mut W, out: &PublishOutput) -> std::io::Result<()> {
     writeln!(w, "published: {}:{}", out.oci_ref, out.tag)?;
     writeln!(w, "  manifest  {}", out.manifest_digest)?;
-    writeln!(w, "  layer     {} ({} bytes)", out.layer_digest, out.layer_size)?;
+    writeln!(
+        w,
+        "  layer     {} ({} bytes)",
+        out.layer_digest, out.layer_size
+    )?;
     if let Some(sig_tag) = &out.signature_tag {
         writeln!(w, "  signed    {}", sig_tag)?;
     }
@@ -265,11 +268,9 @@ fn load_signing_key(
         return Ok(None);
     };
     let key_path = workspace.join(rel);
-    let body = std::fs::read_to_string(&key_path).map_err(|source| {
-        PublishError::SigningKeyIo {
-            path: key_path,
-            source,
-        }
+    let body = std::fs::read_to_string(&key_path).map_err(|source| PublishError::SigningKeyIo {
+        path: key_path,
+        source,
     })?;
     Ok(Some(body))
 }
@@ -287,7 +288,8 @@ fn sign_published_artifact(
     // docker-reference: human-readable OCI ref without the scheme,
     // matching what cosign-cli records for `cosign sign oci://...`.
     let docker_reference = oci_ref.strip_prefix("oci://").unwrap_or(oci_ref);
-    let payload = akua_core::cosign::build_simple_signing_payload(docker_reference, manifest_digest);
+    let payload =
+        akua_core::cosign::build_simple_signing_payload(docker_reference, manifest_digest);
     let signature = akua_core::cosign::sign_keyed(private_pem, &payload, passphrase)
         .map_err(PublishError::Crypto)?;
     Ok(oci_pusher::push_cosign_signature(
@@ -322,17 +324,10 @@ fn attest_published_artifact(
     };
 
     let subject_name = oci_ref.strip_prefix("oci://").unwrap_or(oci_ref);
-    let statement = slsa::build_publish_attestation(
-        subject_name,
-        manifest_digest,
-        oci_ref,
-        tag,
-        lock.as_ref(),
-    );
-    let statement_bytes =
-        slsa::statement_bytes(&statement).map_err(|e| PublishError::Crypto(
-            akua_core::cosign::CosignError::BadPayload(e),
-        ))?;
+    let statement =
+        slsa::build_publish_attestation(subject_name, manifest_digest, oci_ref, tag, lock.as_ref());
+    let statement_bytes = slsa::statement_bytes(&statement)
+        .map_err(|e| PublishError::Crypto(akua_core::cosign::CosignError::BadPayload(e)))?;
     let envelope = akua_core::cosign::sign_dsse(
         private_pem,
         "application/vnd.in-toto+json",

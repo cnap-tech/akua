@@ -19,10 +19,10 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
-use akua_core::oci_auth::CredsStore;
-use akua_core::oci_pusher;
 #[cfg(feature = "cosign-verify")]
 use akua_core::cosign_sidecar::{self, SignSidecar};
+use akua_core::oci_auth::CredsStore;
+use akua_core::oci_pusher;
 use serde::Serialize;
 
 use crate::contract::{emit_output, Context};
@@ -120,8 +120,7 @@ impl PushError {
                 StructuredError::new(codes::E_IO, detail.clone()).with_default_docs()
             }
             PushError::Push(inner) => {
-                StructuredError::new(codes::E_PUBLISH_FAILED, inner.to_string())
-                    .with_default_docs()
+                StructuredError::new(codes::E_PUBLISH_FAILED, inner.to_string()).with_default_docs()
             }
             #[cfg(feature = "cosign-verify")]
             PushError::Sidecar(e) => {
@@ -306,10 +305,7 @@ mod tests {
         };
         let mut stdout = Vec::new();
         let err = run(&ctx_json(), &args, &mut stdout).unwrap_err();
-        assert!(
-            matches!(err, PushError::EmptyTarball { .. }),
-            "got {err:?}"
-        );
+        assert!(matches!(err, PushError::EmptyTarball { .. }), "got {err:?}");
         assert_eq!(err.exit_code(), ExitCode::UserError);
     }
 

@@ -221,13 +221,12 @@ fn resolve_ref(
             // Require a full 40-hex — abbreviations would need
             // revision-resolution, which is a heavier gix feature.
             // Package manifests pin exact SHAs anyway.
-            let oid = gix::ObjectId::from_hex(hex.as_bytes()).map_err(|e| {
-                GitFetchError::ResolveRef {
+            let oid =
+                gix::ObjectId::from_hex(hex.as_bytes()).map_err(|e| GitFetchError::ResolveRef {
                     url: url.to_string(),
                     ref_name: hex.clone(),
                     detail: format!("rev must be a 40-char sha1 hex: {e}"),
-                }
-            })?;
+                })?;
             // Verify the object actually exists in the clone.
             repo.find_object(oid)
                 .map_err(|_| GitFetchError::RefNotFound {
@@ -239,21 +238,22 @@ fn resolve_ref(
         RefSpec::Tag(tag) => {
             // Tags land under `refs/tags/<name>` in the bare clone.
             let fqn = format!("refs/tags/{tag}");
-            let reference = repo.find_reference(&fqn).map_err(|_| {
-                GitFetchError::RefNotFound {
+            let reference = repo
+                .find_reference(&fqn)
+                .map_err(|_| GitFetchError::RefNotFound {
                     url: url.to_string(),
                     ref_name: tag.clone(),
-                }
-            })?;
+                })?;
             // Peel to a commit — annotated tags point at a tag
             // object which itself points at the commit.
-            let commit = reference.into_fully_peeled_id().map_err(|e| {
-                GitFetchError::ResolveRef {
-                    url: url.to_string(),
-                    ref_name: tag.clone(),
-                    detail: e.to_string(),
-                }
-            })?;
+            let commit =
+                reference
+                    .into_fully_peeled_id()
+                    .map_err(|e| GitFetchError::ResolveRef {
+                        url: url.to_string(),
+                        ref_name: tag.clone(),
+                        detail: e.to_string(),
+                    })?;
             Ok(commit.to_string())
         }
     }
@@ -275,13 +275,13 @@ fn materialize_checkout(
     // and linked worktree, which is overkill for "give me the files
     // at this commit in a clean directory."
     let commit = repo
-        .find_object(
-            gix::ObjectId::from_hex(commit_sha.as_bytes()).map_err(|e| GitFetchError::Checkout {
+        .find_object(gix::ObjectId::from_hex(commit_sha.as_bytes()).map_err(|e| {
+            GitFetchError::Checkout {
                 sha: commit_sha.to_string(),
                 path: dest.to_path_buf(),
                 detail: format!("hex parse: {e}"),
-            })?,
-        )
+            }
+        })?)
         .map_err(|e| GitFetchError::Checkout {
             sha: commit_sha.to_string(),
             path: dest.to_path_buf(),
@@ -322,11 +322,7 @@ fn materialize_checkout(
 /// Walk a git tree and materialize every blob to disk. Simple
 /// recursive traversal — no deltified tree walking, so bigger repos
 /// take more I/O; fine for helm-chart-scale trees (~100 files).
-fn write_tree(
-    repo: &gix::Repository,
-    tree_id: gix::ObjectId,
-    dest: &Path,
-) -> Result<(), String> {
+fn write_tree(repo: &gix::Repository, tree_id: gix::ObjectId, dest: &Path) -> Result<(), String> {
     let tree = repo
         .find_object(tree_id)
         .map_err(|e| format!("find tree `{tree_id}`: {e}"))?;
@@ -344,8 +340,7 @@ fn write_tree(
                     .map_err(|e| format!("mkdir {}: {e}", target.display()))?;
                 write_tree(repo, entry.oid.into(), &target)?;
             }
-            gix::object::tree::EntryKind::Blob
-            | gix::object::tree::EntryKind::BlobExecutable => {
+            gix::object::tree::EntryKind::Blob | gix::object::tree::EntryKind::BlobExecutable => {
                 let blob = repo
                     .find_object(entry.oid)
                     .map_err(|e| format!("find blob `{}`: {e}", entry.oid))?;
@@ -379,7 +374,10 @@ mod tests {
         // Build a tree from the files.
         let mut tree = gix::objs::Tree::empty();
         for (name, content) in files {
-            let blob_id = repo.write_blob(content.as_bytes()).expect("write blob").into();
+            let blob_id = repo
+                .write_blob(content.as_bytes())
+                .expect("write blob")
+                .into();
             tree.entries.push(gix::objs::tree::Entry {
                 mode: gix::objs::tree::EntryMode::from(gix::objs::tree::EntryKind::Blob),
                 filename: (*name).into(),
@@ -395,7 +393,7 @@ mod tests {
         let sig = SignatureRef {
             name: "akua-test".into(),
             email: "test@akua.dev".into(),
-            time: gix::date::Time::new(1700000000, 0).into(),
+            time: gix::date::Time::new(1700000000, 0),
         };
         let commit = gix::objs::Commit {
             tree: tree_id,
@@ -524,15 +522,8 @@ mod tests {
         );
         let cache = tmp.path().join("cache");
         let url = file_url(&origin);
-        let expected =
-            "0000000000000000000000000000000000000000"; // wrong SHA
-        let err = fetch(
-            &url,
-            &RefSpec::Tag("v1.0".into()),
-            &cache,
-            Some(expected),
-        )
-        .unwrap_err();
+        let expected = "0000000000000000000000000000000000000000"; // wrong SHA
+        let err = fetch(&url, &RefSpec::Tag("v1.0".into()), &cache, Some(expected)).unwrap_err();
         assert!(matches!(err, GitFetchError::LockCommitMismatch { .. }));
     }
 
@@ -554,10 +545,8 @@ mod tests {
     #[test]
     fn fetch_from_cache_returns_none_when_absent() {
         let tmp = tempfile::tempdir().unwrap();
-        assert!(fetch_from_cache(
-            tmp.path(),
-            "0000000000000000000000000000000000000000",
-        )
-        .is_none());
+        assert!(
+            fetch_from_cache(tmp.path(), "0000000000000000000000000000000000000000",).is_none()
+        );
     }
 }

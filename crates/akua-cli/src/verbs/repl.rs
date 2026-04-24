@@ -88,7 +88,9 @@ pub fn run<R: BufRead, W: Write>(
     let mut session = Session::new();
 
     loop {
-        stdout.write_all(session.prompt().as_bytes()).map_err(ReplError::StdoutWrite)?;
+        stdout
+            .write_all(session.prompt().as_bytes())
+            .map_err(ReplError::StdoutWrite)?;
         stdout.flush().map_err(ReplError::StdoutWrite)?;
 
         let mut line = String::new();
@@ -105,7 +107,9 @@ pub fn run<R: BufRead, W: Write>(
             SessionOutcome::Continue => {}
             SessionOutcome::Quit => return Ok(ExitCode::Success),
             SessionOutcome::Render(text) => {
-                stdout.write_all(text.as_bytes()).map_err(ReplError::StdoutWrite)?;
+                stdout
+                    .write_all(text.as_bytes())
+                    .map_err(ReplError::StdoutWrite)?;
                 if !text.ends_with('\n') {
                     writeln!(stdout).map_err(ReplError::StdoutWrite)?;
                 }
@@ -153,9 +157,7 @@ impl Session {
                 self.buffer = trial;
                 SessionOutcome::Render(yaml)
             }
-            Err(PackageKError::KclEval(msg)) => {
-                SessionOutcome::Render(format!("error: {msg}"))
-            }
+            Err(PackageKError::KclEval(msg)) => SessionOutcome::Render(format!("error: {msg}")),
             Err(e) => SessionOutcome::Render(format!("error: {e}")),
         }
     }
@@ -197,8 +199,7 @@ impl Session {
                 }
             }
             "help" => SessionOutcome::Render(
-                "meta commands: .load <path> | .reset | .show | .help | .exit"
-                    .to_string(),
+                "meta commands: .load <path> | .reset | .show | .help | .exit".to_string(),
             ),
             other => SessionOutcome::Render(format!("unknown meta command `.{other}`")),
         }

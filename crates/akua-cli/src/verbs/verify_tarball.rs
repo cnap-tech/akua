@@ -10,7 +10,7 @@
 //! 1. **sidecar_readable** — `.akuasig` parses.
 //! 2. **digest_match** — locally-computed `manifest_digest` matches
 //!    what the sidecar signed. Catches wrong-sidecar-for-this-tarball
-//!    + sign/push version drift (config blob embeds
+//!    and sign/push version drift (config blob embeds
 //!    `env!("CARGO_PKG_VERSION")`).
 //! 3. **signature_verify** — `cosign::verify_keyed` against the
 //!    sidecar's `signature_b64` + `simple_signing_payload`. Skipped
@@ -18,8 +18,6 @@
 //!
 //! Attestation verification (`.akuaatt`) lands with the `akua attest`
 //! verb in a later slice.
-
-#![cfg(feature = "cosign-verify")]
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -273,12 +271,12 @@ fn resolve_sidecar_path(args: &VerifyTarballArgs<'_>) -> PathBuf {
 
 fn load_public_key(args: &VerifyTarballArgs<'_>) -> Result<Option<String>, VerifyTarballError> {
     if let Some(p) = args.public_key {
-        return std::fs::read_to_string(p)
-            .map(Some)
-            .map_err(|source| VerifyTarballError::ReadPublicKey {
+        return std::fs::read_to_string(p).map(Some).map_err(|source| {
+            VerifyTarballError::ReadPublicKey {
                 path: p.to_path_buf(),
                 source,
-            });
+            }
+        });
     }
     // Fall back to workspace akua.toml [signing].cosign_public_key.
     // Missing manifest or missing key is a clean `None` — the caller
@@ -318,7 +316,11 @@ fn write_text<W: Write>(w: &mut W, out: &VerifyTarballOutput) -> std::io::Result
                     writeln!(w, "        {d}")?;
                 }
             }
-            VerifyCheck::DigestMatch { status, expected, actual } => {
+            VerifyCheck::DigestMatch {
+                status,
+                expected,
+                actual,
+            } => {
                 writeln!(w, "  [{status}] manifest digest match")?;
                 if let (Some(e), Some(a)) = (expected, actual) {
                     writeln!(w, "        expected {e}")?;
@@ -376,8 +378,7 @@ mod tests {
     fn sign_sidecar(tarball: &[u8], oci_ref: &str, tag: &str, priv_pem: &str) -> SignSidecar {
         let d = oci_pusher::compute_publish_digests(tarball);
         let docker_reference = oci_ref.strip_prefix("oci://").unwrap_or(oci_ref);
-        let payload =
-            cosign::build_simple_signing_payload(docker_reference, &d.manifest_digest);
+        let payload = cosign::build_simple_signing_payload(docker_reference, &d.manifest_digest);
         let sig = cosign::sign_keyed(priv_pem, &payload, None).unwrap();
         SignSidecar {
             oci_ref: oci_ref.to_string(),
