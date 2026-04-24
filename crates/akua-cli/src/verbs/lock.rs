@@ -12,7 +12,7 @@
 use std::io::Write;
 use std::path::Path;
 
-use akua_core::chart_resolver::{self, ChartResolveError, ResolvedSource, ResolverOptions};
+use akua_core::chart_resolver::{self, ChartResolveError, ResolverOptions};
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
 use akua_core::{AkuaLock, AkuaManifest, LockLoadError, ManifestLoadError};
 use serde::Serialize;
@@ -112,12 +112,7 @@ pub fn run<W: Write>(
         .filter(|p| p.is_oci())
         .map(|p| (p.name.clone(), p.digest.clone()))
         .collect();
-    let opts = ResolverOptions {
-        offline: false,
-        cache_root: None,
-        expected_digests,
-        cosign_public_key_pem: None,
-    };
+    let opts = ResolverOptions::online_with(expected_digests);
 
     let resolved = chart_resolver::resolve_with_options(&manifest, args.workspace, &opts)?;
 
@@ -161,7 +156,7 @@ fn build_output(wrote: bool, drift: bool, resolved: &chart_resolver::ResolvedCha
                 name: c.name.clone(),
                 version,
                 digest: c.sha256.clone(),
-                source_kind: source_kind_for(&c.source),
+                source_kind: c.source.kind_str(),
             }
         })
         .collect();
@@ -170,14 +165,6 @@ fn build_output(wrote: bool, drift: bool, resolved: &chart_resolver::ResolvedCha
         wrote,
         drift,
         locked_packages,
-    }
-}
-
-fn source_kind_for(src: &ResolvedSource) -> &'static str {
-    match src {
-        ResolvedSource::Path { .. } => "path",
-        ResolvedSource::Oci { .. } | ResolvedSource::OciReplaced { .. } => "oci",
-        ResolvedSource::Git { .. } | ResolvedSource::GitReplaced { .. } => "git",
     }
 }
 

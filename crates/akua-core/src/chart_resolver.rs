@@ -100,6 +100,18 @@ impl ResolvedSource {
     /// for path deps), replace marker when a fork is active. Isolates
     /// the "how does this variant map to the lockfile" knowledge here
     /// instead of leaking it across every call site.
+    /// Stable discriminator for consumers (CLI JSON, verdicts).
+    /// `"path" | "oci" | "git"` — collapses the `*Replaced`
+    /// variants into their canonical source kind, matching how
+    /// `akua.lock` records source-of-record.
+    pub fn kind_str(&self) -> &'static str {
+        match self {
+            ResolvedSource::Path { .. } => "path",
+            ResolvedSource::Oci { .. } | ResolvedSource::OciReplaced { .. } => "oci",
+            ResolvedSource::Git { .. } | ResolvedSource::GitReplaced { .. } => "git",
+        }
+    }
+
     pub fn to_locked_fields(&self) -> (String, String, Option<crate::lock_file::Replaced>) {
         use crate::lock_file::Replaced;
         match self {
@@ -232,6 +244,21 @@ pub struct ResolverOptions {
     /// the chart is unpacked. Populated from
     /// `akua.toml [signing] cosign_public_key` by the CLI.
     pub cosign_public_key_pem: Option<String>,
+}
+
+impl ResolverOptions {
+    /// Online resolve with a given set of expected digests (from
+    /// prior lockfile). Matches the shape `akua add` + `akua lock`
+    /// use. `cosign_public_key_pem` stays `None` — those verbs
+    /// don't perform signature verification.
+    pub fn online_with(expected_digests: BTreeMap<String, String>) -> Self {
+        Self {
+            offline: false,
+            cache_root: None,
+            expected_digests,
+            cosign_public_key_pem: None,
+        }
+    }
 }
 
 impl Default for ResolverOptions {

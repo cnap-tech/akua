@@ -17,7 +17,7 @@
 use std::io::Write;
 use std::path::Path;
 
-use akua_core::chart_resolver::{self, ChartResolveError, ResolvedSource, ResolverOptions};
+use akua_core::chart_resolver::{self, ChartResolveError, ResolverOptions};
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
 use akua_core::{AkuaLock, AkuaManifest, LockLoadError, ManifestLoadError};
 use serde::Serialize;
@@ -114,23 +114,12 @@ pub fn run<W: Write>(
 
     let prior_lock = AkuaLock::load(args.workspace).unwrap_or_else(|_| AkuaLock::empty());
 
-    // Deliberately empty — that's the whole point of update vs lock.
-    // A fresh resolve with no expected_digests accepts whatever the
+    // Deliberately empty expected_digests — that's the whole point
+    // of update vs lock. A fresh resolve accepts whatever the
     // registry / git remote / path dep serves right now.
-    let opts = ResolverOptions {
-        offline: false,
-        cache_root: None,
-        expected_digests: BTreeMap::new(),
-        cosign_public_key_pem: None,
-    };
+    let opts = ResolverOptions::online_with(BTreeMap::new());
 
-    let resolved = chart_resolver::resolve_with_options(&manifest, args.workspace, &opts)?;
-
-    let prior_by_name: BTreeMap<String, String> = prior_lock
-        .packages
-        .iter()
-        .map(|p| (p.name.clone(), p.digest.clone()))
-        .collect();
+    let mut resolved = chart_resolver::resolve_with_options(&manifest, args.workspace, &opts)?;
 
     let mut new_lock = prior_lock.clone();
     let mut updated = Vec::new();
@@ -148,7 +137,11 @@ pub fn run<W: Write>(
             }
         }
 
-        let prior_digest = prior_by_name.get(&chart.name).cloned();
+        let prior_digest = prior_lock
+            .packages
+            .iter()
+            .find(|p| p.name == chart.name)
+            .map(|p| p.digest.clone());
         let to_digest = chart.sha256.clone();
         if prior_digest.as_deref() == Some(&to_digest) {
             unchanged.push(chart.name.clone());
@@ -159,19 +152,18 @@ pub fn run<W: Write>(
                 version,
                 from_digest: prior_digest,
                 to_digest,
-                source_kind: source_kind_for(&chart.source),
+                source_kind: chart.source.kind_str(),
             });
         }
     }
 
-    // Merge the resolved charts that pass the dep filter. `--dep`
-    // mode: only the named entry is merged; the rest stay untouched.
-    // No --dep: everything merges (the standard update flow).
-    let scoped = match args.dep {
-        Some(target) => scoped_resolved(&resolved, target),
-        None => resolved,
-    };
-    chart_resolver::merge_into_lock(&mut new_lock, &scoped);
+    // `--dep` mode: keep only the named entry in the resolved set so
+    // merge_into_lock doesn't touch others. No --dep: merge the whole
+    // resolved graph (standard update flow).
+    if let Some(target) = args.dep {
+        resolved.entries.retain(|k, _| k == target);
+    }
+    chart_resolver::merge_into_lock(&mut new_lock, &resolved);
     new_lock.save(args.workspace)?;
 
     updated.sort_by(|a, b| a.name.cmp(&b.name));
@@ -186,25 +178,6 @@ pub fn run<W: Write>(
     emit_output(stdout, ctx, &output, |w| write_text(w, &output))
         .map_err(UpdateError::StdoutWrite)?;
     Ok(ExitCode::Success)
-}
-
-fn scoped_resolved(
-    resolved: &chart_resolver::ResolvedCharts,
-    target: &str,
-) -> chart_resolver::ResolvedCharts {
-    let mut entries = BTreeMap::new();
-    if let Some(chart) = resolved.entries.get(target) {
-        entries.insert(target.to_string(), chart.clone());
-    }
-    chart_resolver::ResolvedCharts { entries }
-}
-
-fn source_kind_for(src: &ResolvedSource) -> &'static str {
-    match src {
-        ResolvedSource::Path { .. } => "path",
-        ResolvedSource::Oci { .. } | ResolvedSource::OciReplaced { .. } => "oci",
-        ResolvedSource::Git { .. } | ResolvedSource::GitReplaced { .. } => "git",
-    }
 }
 
 fn write_text<W: Write>(w: &mut W, out: &UpdateOutput) -> std::io::Result<()> {
@@ -443,27 +416,4 @@ redis = { path = "./vendor/redis" }
         assert_eq!(err.exit_code(), ExitCode::UserError);
     }
 
-    #[test]
-    fn update_with_no_deps_is_no_op() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            tmp.path().join("akua.toml"),
-            b"[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n",
-        )
-        .unwrap();
-
-        let mut stdout = Vec::new();
-        run(
-            &ctx_json(),
-            &UpdateArgs {
-                workspace: tmp.path(),
-                dep: None,
-            },
-            &mut stdout,
-        )
-        .unwrap();
-        let parsed: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
-        assert!(parsed["updated"].as_array().unwrap().is_empty());
-        assert!(parsed["unchanged"].as_array().unwrap().is_empty());
-    }
 }

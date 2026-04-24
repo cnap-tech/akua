@@ -258,6 +258,7 @@ rather than authors. Small, composable, agent-friendly.
 - [x] `akua push --tarball <path> --ref <oci://...> --tag <t>` — upload a pre-packed tarball. The push half of `akua publish`, decomposed so air-gap flows complete: pack here, transfer, push there. No signing / attestation (publish remains the all-in-one). (2026-04-24)
 - [x] `akua inspect --tarball <path>` — triage a packed `.tar.gz` in-memory without unpacking. Reports `{package_name, version, edition}` parsed from the embedded `akua.toml`, `layer_digest`, `{compressed,uncompressed}_size_bytes`, `file_count`, sorted `vendored_deps`. Completes the air-gap triad: pack → transfer → inspect → push. (2026-04-24)
 - [x] `akua lock [--check]` — regenerate `akua.lock` from `akua.toml` (cargo `generate-lockfile` analogue). `--check` diffs without writing and exits `E_LOCK_DRIFT` on staleness — pre-commit / CI gate to catch "author edited akua.toml but forgot to re-lock." Preserves signatures on unchanged entries via `merge_into_lock`; canonical TOML byte-compare for drift detection. (2026-04-24)
+- [x] `akua update [--dep <name>]` — intentionally bump the lock against whatever upstream now serves. Inverse stance to `akua lock`: where `lock` rejects OCI digest drift (security), `update` accepts it and records the new digest. `--dep` scopes the lockfile write to one entry (cargo `update -p foo` analogue). Output lists `{updated, unchanged, skipped}` so operators see exactly what moved. (2026-04-24)
 
 ---
 
