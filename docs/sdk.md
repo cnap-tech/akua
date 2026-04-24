@@ -816,7 +816,7 @@ Expected to throw in-browser (no filesystem, no credential store, no cluster acc
 
 - `akua.publish`, `akua.attest`, `akua.deploy`, `akua.rollout`, `akua.secret.*`, `akua.audit.*`, `akua.query.*`, `akua.login`
 
-For v0.1.0 the Node-loadable bundle ships first; browser is next on the Phase 4B punch list.
+For v0.1.0 the Node-loadable bundle ships first; browser is deferred to v0.2.0 per [docs/spikes/engines-on-wasm32-unknown-unknown.md](spikes/engines-on-wasm32-unknown-unknown.md). Adding the `"browser"` condition to `package.json` is a minor-version bump (additive, non-breaking) once the helm/kustomize engines are reachable from the browser runtime.
 
 ---
 

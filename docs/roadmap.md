@@ -224,13 +224,11 @@ Compiles the render path to a browser-compatible WASM bundle so `@akua/sdk` ship
 - [x] `@akua/sdk` instantiates the WASM bundle **internally** on first call — lazy `await import('./wasm/nodejs/akua_wasm.js')` in `packages/sdk/src/mod.ts`. Shell-out verbs pay no load cost. **No `@akua/sdk/wasm` subpath.**
 - [x] Bundle staged under `packages/sdk/wasm/nodejs/` by `task build:akua-wasm:nodejs`; JSR publishes it alongside the TS source via `jsr.json` `publish.include`.
 - [x] First WASM-backed method on `Akua` — `renderSource(packageFilename, source, inputs?)` — 3 bun tests green; 2 e2e tests against the live binary still green.
-- [ ] Helm + Kustomize engines available from the SDK: reuse the existing `wasm32-wasip1` `.wasm` via a wasmtime-in-the-browser shim OR re-compile the Go engines to `wasm32-unknown-unknown`. Decision + prototype still owed. Packages that import `helm.template` / `kustomize.build` currently surface a `__kcl_PanicInfo__` pointing users at the CLI.
-- [ ] Browser build via `wasm-pack --target bundler` staged at `packages/sdk/wasm/browser/`; `package.json` conditional exports pick it for `"browser"`.
-- [ ] Size budget: re-measure once engines are bundled. KCL-only today: 7.3 MB gzipped-native, well under the 15 MB bundle target.
+- [~] **Browser target deferred to v0.2.0** per [docs/spikes/engines-on-wasm32-unknown-unknown.md](spikes/engines-on-wasm32-unknown-unknown.md). The helm + kustomize Go engines on `wasm32-unknown-unknown` (either via `GOOS=js` recompile or wasmer-js-in-browser) is a multi-week effort with uncertain perf; punting preserves the v0.1.0 ship window without compromising the sandbox invariant. Browser condition in `package.json` `exports` is additive in v0.2.0 (non-breaking).
+- [ ] Helm + Kustomize engines from the SDK in Node — wire the existing `wasm32-wasip1` `.wasm` artifacts through a JS-side wasmtime host (or spawn-the-CLI-transparently fallback). Packages that import `helm.template` / `kustomize.build` surface a `__kcl_PanicInfo__` pointing users at the CLI today; must be resolved before v0.1.0 tag so the SDK's render surface isn't lopsided.
 - [ ] Benchmarks: cold + warm render latency via the WASM SDK vs the CLI binary — target parity-within-2× on warm calls.
-- [ ] Browser smoke test: a static HTML page imports `@akua/sdk` from JSR + renders an example Package.
 
-**Exit gate for Phase 4B:** `pnpm add jsr:@akua/sdk` (or equivalent `bun add`, `deno add`) → import → render → typed result, on Node + Deno + Bun + Chrome + Firefox. No `akua` binary in sight. **Node side is proven; browser target + engine bundling remain.**
+**Exit gate for Phase 4B (v0.1.0 scope):** `bun add jsr:@akua/sdk` / `deno add` / `npm install` → import → render → typed result, on Node 20+ / Deno / Bun. `@akua/sdk@0.1.0` is Node-target only; browser ships in v0.2.0. **Node KCL renders proven; helm + kustomize through the SDK remain to wire.**
 
 ---
 
