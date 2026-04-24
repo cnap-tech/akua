@@ -213,7 +213,7 @@ Compiles the render path to a browser-compatible WASM bundle so `@akua/sdk` ship
 - [ ] Helm + Kustomize engines: reuse the existing `wasm32-wasip1` `.wasm` from Phase 1/3, instantiated via wasmtime-in-the-browser (`wasmer-js` or wasmtime's JS bindings) OR re-compile engines against `wasm32-unknown-unknown` with a shim. Pick whichever is shorter to v0.1.0.
 - [ ] Size budget: target <15 MB for the full bundle (KCL + stdlib + both engines). gzip + brotli ship via JSR.
 - [ ] `akua-wasm` exports typed-method surface matching the SDK's `Akua` class; SDK method → WASM call → typed result, no process spawn.
-- [ ] `@akua/sdk` imports `@akua/sdk/wasm` (ESM module from JSR) and instantiates on first call. Lazy-init + cache across calls.
+- [ ] `@akua/sdk` instantiates the WASM bundle **internally** on first call — lazy-init + cache across calls. **No `@akua/sdk/wasm` subpath.** See the "Single-entrypoint design" note under the SDK punch list for why.
 - [ ] Benchmarks: cold + warm render latency via the WASM SDK vs the CLI binary — target parity-within-2× on warm calls.
 - [ ] Browser smoke test: a static HTML page imports `@akua/sdk` from JSR + renders an example Package.
 
@@ -388,17 +388,32 @@ Many markdown files predate recent shipping and make claims that no longer match
 
 Depends on [Phase 4B](#phase-4b--akua-wasm-for-jsr-delivery-blocks-v010). The SDK does not shell out. Consumers `bun add jsr:@akua/sdk` (or deno/pnpm/npm equivalents) and call render / publish / verify in-process.
 
-Foundation from [PR #19](https://github.com/cnap-tech/akua/pull/19) — ts-rs + schemars pipeline, error hierarchy keyed on `ExitCode` + `StructuredError`, ajv runtime validation, Standard Schema v1 adapter, JSR publish pipeline, 24 bun tests — all carries over. The shell-out transport in that PR is scaffolding; the real transport is the `akua-wasm` bundle.
+Foundation from [PR #19](https://github.com/cnap-tech/akua/pull/19) — ts-rs + schemars pipeline, error hierarchy keyed on `ExitCode` + `StructuredError`, ajv runtime validation, Standard Schema v1 adapter, JSR publish pipeline, 24 bun tests — all carries over. The shell-out transport in that PR is scaffolding; the real transport is the `akua-wasm` bundle loaded internally.
+
+#### Single-entrypoint design (load-bearing)
+
+**Ship only `@akua/sdk`.** Everything — typed class, errors, Standard Schema adapter, WASM bundle instantiation — lives behind one import. No `@akua/sdk/wasm`, no `@akua/sdk/browser`, no `@akua/sdk/node` subpaths for v0.1.0.
+
+Runtime differences (Node / Deno / Bun / browser) resolve through `package.json`'s `exports` + conditions (`"browser"`, `"node"`, `"default"`), not through the consumer typing a different subpath. Convention in 2026 across Vercel AI SDK, Anthropic SDK, Zod, TensorFlow.js, etc. — consumers should never have to pick a runtime-specific import.
+
+Reasons this matters:
+
+- **No decision for the consumer.** Forcing `@akua/sdk/browser` means every consumer picks based on runtime, which is exactly what conditional exports exist to avoid.
+- **Smaller stability surface.** Every subpath is a public API. Exposing `@akua/sdk/wasm` locks the raw WASM-bindings shape into the stability contract forever. A minor internal refactor becomes a breaking change. Internal-only means we can refactor freely.
+- **`/wasm` isn't wrong, just premature.** Real use cases (web-worker isolation where the main thread only needs the class layer; tree-shaking the error hierarchy out of a tight bundle) may materialize. Add `@akua/sdk/wasm` as a minor-version addition if and when demand shows up. Don't speculate in v0.1.0.
+
+#### Punch list
 
 - [ ] Merge PR #19 (contract layer + error hierarchy + JSR pipeline — all transport-agnostic)
-- [ ] Replace the shell-out `Akua` class with the WASM-backed one: imports `@akua/sdk/wasm` (the `akua-wasm` bundle), lazy-init on first call, method dispatch goes through `WebAssembly.instantiate`'d exports instead of `child_process.execFile`.
+- [ ] Replace the shell-out `Akua` class with WASM-backed dispatch. Method → internal `WebAssembly.instantiate`'d export call → typed result. No process spawn. No exposed bindings surface.
+- [ ] `package.json` (or `jsr.json`) `exports` resolves the runtime-specific build automatically via conditions — single `"."` key, no runtime subpaths.
 - [ ] Wrap every verb against the same typed pattern. Blocking set for v0.1.0: `init`, `render`, `check`, `lint`, `fmt`, `test`, `dev`, `repl`, `add`, `remove`, `tree`, `lock`, `update`, `verify`, `diff`, `inspect`, `pack`, `push`, `sign`, `pull`, `publish`, `cache`, `auth`.
 - [ ] Per-verb tests mirror `whoami`'s shape — one payload assertion, one error-path assertion, validated against the generated JSON Schema.
-- [ ] `@akua/sdk` README — `bun add jsr:@akua/sdk`, one-screen render example, browser import example, link to every `AkuaError` subclass's `akua.dev/errors/<code>` docs URL.
-- [ ] [docs/sdk.md](sdk.md) — WASM-in-process transport, bundle size, lazy-init semantics, Node + Deno + Bun + browser matrix.
+- [ ] `@akua/sdk` README — `bun add jsr:@akua/sdk`, one-screen render example (same import works in Node + browser), link to every `AkuaError` subclass's `akua.dev/errors/<code>` docs URL.
+- [ ] [docs/sdk.md](sdk.md) — WASM-in-process transport, single-entrypoint rationale, bundle size, lazy-init semantics, Node + Deno + Bun + browser matrix.
 - [ ] Tag `sdk-v0.1.0` to exercise the publish workflow — dry-run via `workflow_dispatch` first.
 - [ ] Drift guard (`task sdk:check`) wired into the v0.1.0 CI matrix so generated types + the WASM bundle + committed artifacts stay in sync.
-- [ ] Runtime matrix in CI: smoke-test the JSR artifact on Node (current LTS), Deno (latest), Bun (pinned `.mise.toml` version), plus a headless-browser check.
+- [ ] Runtime matrix in CI: smoke-test the JSR artifact on Node (current LTS), Deno (latest), Bun (pinned `.mise.toml` version), plus a headless-browser check. Single `import { Akua } from "jsr:@akua/sdk"` across all five.
 
 ---
 
