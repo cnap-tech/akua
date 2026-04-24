@@ -120,22 +120,27 @@ impl PackageK {
         })
     }
 
-    /// Execute the Package against the given inputs, returning the
+    /// In-process render against the given inputs, returning the
     /// typed resource list.
     ///
-    /// `Package.k` files that `import charts.<name>` will fail to
-    /// parse on this path — the caller must use
-    /// [`render_with_charts`](Self::render_with_charts) and hand in
-    /// a resolver output. See `docs/roadmap.md` Phase 2a.
-    pub fn render(&self, inputs: &Value) -> Result<RenderedPackage, PackageKError> {
+    /// **Private to akua-core.** Production render paths run inside
+    /// the wasmtime sandbox (see `akua_cli::verbs::render::render_in_worker`)
+    /// per CLAUDE.md's "Sandboxed by default. No shell-out, ever"
+    /// invariant. This method stays crate-private for akua-core's
+    /// own unit tests — it provides the same KCL + plugin-bridge
+    /// semantics the sandbox path uses, minus the wasmtime isolation.
+    ///
+    /// `Package.k` files that `import charts.<name>` fail to parse
+    /// on this path unless resolved charts are supplied — callers
+    /// use [`render_with_charts`](Self::render_with_charts).
+    pub(crate) fn render(&self, inputs: &Value) -> Result<RenderedPackage, PackageKError> {
         self.render_with_charts(inputs, &crate::chart_resolver::ResolvedCharts::default())
     }
 
     /// Like [`render`](Self::render), but also registers a per-render
     /// `charts` KCL package containing one module per resolved dep.
-    /// Packages that declare `[dependencies]` in their `akua.toml` and
-    /// write `import charts.nginx` resolve here.
-    pub fn render_with_charts(
+    /// Crate-private; see [`render`](Self::render) for the rationale.
+    pub(crate) fn render_with_charts(
         &self,
         inputs: &Value,
         charts: &crate::chart_resolver::ResolvedCharts,
@@ -145,8 +150,9 @@ impl PackageK {
 
     /// Full-option render: charts + `strict` mode. `strict=true`
     /// rejects plugin paths that don't come from a typed
-    /// `charts.*` import, forcing every chart through `akua.toml`.
-    pub fn render_opts(
+    /// `charts.*` import. Crate-private; see [`render`](Self::render)
+    /// for the rationale.
+    pub(crate) fn render_opts(
         &self,
         inputs: &Value,
         charts: &crate::chart_resolver::ResolvedCharts,

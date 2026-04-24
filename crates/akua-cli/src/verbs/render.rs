@@ -332,7 +332,7 @@ fn load_cosign_public_key(
 /// `E_STRICT_UNTYPED_CHART` — this stringly-typed contract is why
 /// every worker failure is collapsed through
 /// [`worker_to_render_err`] rather than a typed `From` impl.
-pub(crate) fn render_in_worker(
+pub fn render_in_worker(
     package: &PackageK,
     inputs: &serde_yaml::Value,
     charts: &ResolvedCharts,

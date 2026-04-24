@@ -3,13 +3,16 @@
 //! `akua.toml` (Phase 2a local-path form) and feeds the resolved
 //! chart path into `helm.template`.
 //!
-//! Requires `crates/helm-engine-wasm/assets/helm-engine.wasm`. Skips
-//! cleanly when the WASM artifact hasn't been built yet.
+//! Runs through the wasmtime render sandbox (Phase 4), not the
+//! old in-process `PackageK::render_with_charts`. Requires
+//! `crates/helm-engine-wasm/assets/helm-engine.wasm`; skips cleanly
+//! when the WASM artifact hasn't been built yet.
 
-#![cfg(all(feature = "engine-kcl", feature = "engine-helm"))]
+#![cfg(all(feature = "cosign-verify", feature = "dev-watch"))]
 
 use std::path::{Path, PathBuf};
 
+use akua_cli::verbs::render::render_in_worker;
 use akua_core::{chart_resolver, AkuaManifest, PackageK};
 
 fn example_dir() -> PathBuf {
@@ -41,11 +44,13 @@ fn renders_hello_webapp_with_resolved_chart_dep() {
     )
     .expect("parse inputs");
 
-    let rendered = match package.render_with_charts(&inputs, &resolved) {
+    let rendered = match render_in_worker(&package, &inputs, &resolved, false) {
         Ok(r) => r,
         Err(e) => {
             let msg = e.to_string();
-            if msg.contains("helm-engine.wasm not built") {
+            if msg.contains("helm-engine.wasm not built")
+                || msg.contains("worker module wasn't compiled")
+            {
                 eprintln!("skipping: {msg}");
                 return;
             }

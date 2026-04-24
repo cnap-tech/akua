@@ -304,7 +304,16 @@ mod tests {
             &fs::read_to_string(pkg.join("inputs.example.yaml")).unwrap(),
         )
         .expect("inputs.yaml parses");
-        let rendered = loaded.render(&inputs).expect("renders");
+        // Render through the wasmtime sandbox — same path `akua render`
+        // uses in production. Scaffold must be valid all the way
+        // through, not just parseable.
+        let rendered = crate::verbs::render::render_in_worker(
+            &loaded,
+            &inputs,
+            &akua_core::chart_resolver::ResolvedCharts::default(),
+            false,
+        )
+        .expect("renders");
         assert_eq!(rendered.resources.len(), 1);
     }
 }
