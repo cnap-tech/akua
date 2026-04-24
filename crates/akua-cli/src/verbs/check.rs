@@ -23,12 +23,15 @@ pub struct CheckArgs<'a> {
     pub package_path: &'a Path,
 }
 
+akua_core::contract_type! {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CheckOutput {
     pub status: &'static str,
     pub checks: Vec<CheckResult>,
 }
+}
 
+akua_core::contract_type! {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct CheckResult {
     /// Short label for the check: `"manifest"`, `"lockfile"`,
@@ -37,14 +40,14 @@ pub struct CheckResult {
 
     pub ok: bool,
 
-    /// One-line error from the failing check; absent when `ok`.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// One-line error from the failing check; `null` when `ok`.
     pub error: Option<String>,
 
     /// Per-file issues from linting the Package.k. Other check kinds
-    /// leave this empty.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    /// leave this empty. Always serialized (possibly empty) so
+    /// consumers can iterate without a presence guard.
     pub issues: Vec<LintIssue>,
+}
 }
 
 #[derive(Debug, thiserror::Error)]

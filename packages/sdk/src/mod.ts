@@ -1,5 +1,11 @@
 import { execFile } from 'node:child_process';
 
+import type { CheckOutput } from './types/CheckOutput.ts';
+import type { CheckResult } from './types/CheckResult.ts';
+import type { FmtFile } from './types/FmtFile.ts';
+import type { FmtOutput } from './types/FmtOutput.ts';
+import type { LintIssue } from './types/LintIssue.ts';
+import type { LintOutput } from './types/LintOutput.ts';
 import type { RenderSummary } from './types/RenderSummary.ts';
 import type { VersionOutput } from './types/VersionOutput.ts';
 import type { WhoamiOutput } from './types/WhoamiOutput.ts';
@@ -25,7 +31,17 @@ function loadWasm(): Promise<WasmBinding> {
 export * from './errors.ts';
 export { AkuaContractError, standardSchemaFor, validateAs } from './validate.ts';
 export type { SchemaName } from './validate.ts';
-export type { RenderSummary, VersionOutput, WhoamiOutput };
+export type {
+	CheckOutput,
+	CheckResult,
+	FmtFile,
+	FmtOutput,
+	LintIssue,
+	LintOutput,
+	RenderSummary,
+	VersionOutput,
+	WhoamiOutput,
+};
 export type { ExitCode } from './types/ExitCode.ts';
 export type { StructuredError, Level } from './types/StructuredError.ts';
 export type { AgentContext } from './types/AgentContext.ts';
@@ -39,6 +55,27 @@ const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
 export interface AkuaOptions {
 	/** Path to the `akua` binary. Defaults to `"akua"` (resolved via PATH). */
 	binary?: string;
+}
+
+export interface CheckOptions {
+	/** Workspace root (dir containing `akua.toml` + `akua.lock`). Default: `.`. */
+	workspace?: string;
+	/** Path to the `package.k` file. Default: `./package.k`. */
+	package?: string;
+}
+
+export interface LintOptions {
+	/** Path to the `package.k` file. Default: `./package.k`. */
+	package?: string;
+}
+
+export interface FmtOptions {
+	/** Path to the `package.k` file. Default: `./package.k`. */
+	package?: string;
+	/** Fail with user-error exit if any file needs reformatting. */
+	check?: boolean;
+	/** Print formatted output to stdout instead of writing in place. */
+	stdout?: boolean;
 }
 
 export interface RenderOptions {
@@ -111,6 +148,40 @@ export class Akua {
 	 * Every field of `opts` maps to a `--` flag of `akua render`; see
 	 * [`docs/cli.md#akua-render`](../../../docs/cli.md#akua-render).
 	 */
+	/**
+	 * Fast syntax / type / dep check over the workspace. No
+	 * execution; no engine callouts. Mirrors `akua check --json`.
+	 */
+	async check(opts: CheckOptions = {}): Promise<CheckOutput> {
+		const extra: string[] = [];
+		if (opts.workspace) extra.push('--workspace', opts.workspace);
+		if (opts.package) extra.push('--package', opts.package);
+		return this.callDiagnostic<CheckOutput>('check', extra, 'CheckOutput');
+	}
+
+	/**
+	 * Run the KCL linter against the Package. Mirrors
+	 * `akua lint --json`.
+	 */
+	async lint(opts: LintOptions = {}): Promise<LintOutput> {
+		const extra: string[] = [];
+		if (opts.package) extra.push('--package', opts.package);
+		return this.callDiagnostic<LintOutput>('lint', extra, 'LintOutput');
+	}
+
+	/**
+	 * Format KCL sources. Mirrors `akua fmt --json`. Without
+	 * `check`, the file is rewritten in place; with `check`, the
+	 * verb reports which files would change without touching them.
+	 */
+	async fmt(opts: FmtOptions = {}): Promise<FmtOutput> {
+		const extra: string[] = [];
+		if (opts.package) extra.push('--package', opts.package);
+		if (opts.check) extra.push('--check');
+		if (opts.stdout) extra.push('--stdout');
+		return this.callDiagnostic<FmtOutput>('fmt', extra, 'FmtOutput');
+	}
+
 	async render(opts: RenderOptions = {}): Promise<RenderSummary> {
 		const args = ['render', '--json'];
 		if (opts.package) args.push('--package', opts.package);
@@ -128,6 +199,19 @@ export class Akua {
 		return validateAs<T>(schema, JSON.parse(stdout));
 	}
 
+	/**
+	 * Variant of [`call`](Akua.call) for verbs that emit valid JSON on
+	 * stdout regardless of exit code — `check`, `fmt --check`,
+	 * `verify`, etc. — where the exit code is the *status signal*
+	 * (`0 ok` vs `1 findings`) and both outcomes are data the caller
+	 * wants. Only spawn-level failures (binary missing, OOM, signal)
+	 * propagate.
+	 */
+	private async callDiagnostic<T>(verb: string, extraArgs: readonly string[], schema: SchemaName): Promise<T> {
+		const { stdout } = await this.execTolerant([verb, '--json', ...extraArgs]);
+		return validateAs<T>(schema, JSON.parse(stdout));
+	}
+
 	private exec(args: readonly string[]): Promise<{ stdout: string; stderr: string }> {
 		return new Promise((resolve, reject) => {
 			const child = execFile(
@@ -141,6 +225,29 @@ export class Akua {
 					}
 					// Both binary-not-found (ENOENT, exitCode == null) and non-zero
 					// exits land here — `classifyCliError` picks the right subclass.
+					reject(classifyCliError({ rawExitCode: child.exitCode, stderr, cause: err }));
+				},
+			);
+		});
+	}
+
+	/**
+	 * Like [`exec`](Akua.exec) but doesn't throw on non-zero exit as
+	 * long as the process actually ran to completion. Spawn-level
+	 * failures (binary missing, killed by signal) still throw via
+	 * `classifyCliError`. Used by [`callDiagnostic`](Akua.callDiagnostic).
+	 */
+	private execTolerant(args: readonly string[]): Promise<{ stdout: string; stderr: string }> {
+		return new Promise((resolve, reject) => {
+			const child = execFile(
+				this.binary,
+				args,
+				{ encoding: 'utf8', maxBuffer: DEFAULT_MAX_BUFFER },
+				(err, stdout, stderr) => {
+					if (!err || typeof child.exitCode === 'number') {
+						resolve({ stdout, stderr });
+						return;
+					}
 					reject(classifyCliError({ rawExitCode: child.exitCode, stderr, cause: err }));
 				},
 			);

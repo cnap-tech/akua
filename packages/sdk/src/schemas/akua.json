@@ -65,6 +65,55 @@
         }
       ]
     },
+    "CheckOutput": {
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/CheckResult"
+          },
+          "type": "array"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "checks"
+      ],
+      "type": "object"
+    },
+    "CheckResult": {
+      "properties": {
+        "error": {
+          "description": "One-line error from the failing check; `null` when `ok`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "issues": {
+          "description": "Per-file issues from linting the Package.k. Other check kinds\nleave this empty. Always serialized (possibly empty) so\nconsumers can iterate without a presence guard.",
+          "items": {
+            "$ref": "#/$defs/LintIssue"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "Short label for the check: `\"manifest\"`, `\"lockfile\"`,\n`\"package\"`.",
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "ok",
+        "issues"
+      ],
+      "type": "object"
+    },
     "ExitCode": {
       "description": "The seven typed exit codes every akua verb may produce.\n\nAgents branch on these. Humans read them. The stability contract is\nthat meanings never change; new codes require a major version bump.\n\nSerialized as the stable kebab-case name (`\"success\"`, `\"user-error\"`,\n`\"policy-deny\"`, etc.) — same string [`ExitCode::name`] returns. The\nSDK maps from the numeric `child.exitCode` (0..=6) to this name.",
       "oneOf": [
@@ -105,6 +154,36 @@
         }
       ]
     },
+    "FmtFile": {
+      "properties": {
+        "changed": {
+          "description": "True when the file's contents differ from the formatter's\noutput. Under `--check`, this flips the exit code to\n[`ExitCode::UserError`]; without `--check`, the file is\nrewritten in place.",
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "changed"
+      ],
+      "type": "object"
+    },
+    "FmtOutput": {
+      "properties": {
+        "files": {
+          "items": {
+            "$ref": "#/$defs/FmtFile"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "files"
+      ],
+      "type": "object"
+    },
     "Level": {
       "description": "Log severity. Almost always `Error`; `Warn` for recoverable issues.",
       "enum": [
@@ -112,6 +191,67 @@
         "warn"
       ],
       "type": "string"
+    },
+    "LintIssue": {
+      "description": "Structured issue reported by [`lint_kcl`]. Mirrors KCL's own\n`Error.messages[*]` shape, flattened one-row-per-message so\nconsumers don't need to walk a two-level tree.",
+      "properties": {
+        "code": {
+          "description": "KCL error code (e.g. `\"E1001\"`). Empty string when KCL emits no\ncode — preserved verbatim.",
+          "type": "string"
+        },
+        "column": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "file": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "level": {
+          "description": "`\"Error\"` or `\"Warning\"` as reported by KCL.",
+          "type": "string"
+        },
+        "line": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "level",
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "LintOutput": {
+      "properties": {
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/LintIssue"
+          },
+          "type": "array"
+        },
+        "status": {
+          "description": "`\"ok\"` when no issues reported; `\"fail\"` otherwise.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status",
+        "issues"
+      ],
+      "type": "object"
     },
     "RenderSummary": {
       "description": "Verdict for a single render: where manifests went, how many, and a\nhash that makes \"did the rendered output change?\" a byte comparison.",

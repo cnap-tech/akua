@@ -238,6 +238,7 @@ fn value_kind(v: &Value) -> &'static str {
     }
 }
 
+crate::contract_type! {
 /// Structured issue reported by [`lint_kcl`]. Mirrors KCL's own
 /// `Error.messages[*]` shape, flattened one-row-per-message so
 /// consumers don't need to walk a two-level tree.
@@ -260,6 +261,7 @@ pub struct LintIssue {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub column: Option<i64>,
+}
 }
 
 /// Parse a KCL file via kcl_lang and return any parse / load errors.

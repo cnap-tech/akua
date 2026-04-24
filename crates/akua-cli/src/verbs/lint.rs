@@ -20,12 +20,14 @@ pub struct LintArgs<'a> {
     pub package_path: &'a Path,
 }
 
+akua_core::contract_type! {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct LintOutput {
     /// `"ok"` when no issues reported; `"fail"` otherwise.
     pub status: &'static str,
 
     pub issues: Vec<LintIssue>,
+}
 }
 
 impl LintOutput {

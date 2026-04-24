@@ -24,11 +24,14 @@ pub struct FmtArgs<'a> {
     pub stdout_mode: bool,
 }
 
+akua_core::contract_type! {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct FmtOutput {
     pub files: Vec<FmtFile>,
 }
+}
 
+akua_core::contract_type! {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct FmtFile {
     pub path: PathBuf,
@@ -38,6 +41,7 @@ pub struct FmtFile {
     /// [`ExitCode::UserError`]; without `--check`, the file is
     /// rewritten in place.
     pub changed: bool,
+}
 }
 
 #[derive(Debug, thiserror::Error)]
