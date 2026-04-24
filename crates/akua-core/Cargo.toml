@@ -9,6 +9,14 @@ authors.workspace = true
 
 [features]
 default = ["engine-kcl", "engine-helm", "engine-kustomize", "oci-fetch", "git-fetch", "cosign-verify", "dev-watch"]
+# SDK type emission — off by default. `ts-export` makes the CLI
+# contract types `derive(ts_rs::TS)` so they can be exported as TS
+# sources for `@akua/sdk`. `schema-export` does the same for
+# schemars (JSON Schema bundle). Both are build-time only; zero
+# cost in production builds. Triggered by the emission test in
+# akua-cli (`cargo test -p akua-cli --features schema-export,ts-export`).
+ts-export = ["dep:ts-rs"]
+schema-export = ["dep:schemars"]
 # KCL engine — native Rust via kcl-lang/lib (git dep).
 engine-kcl = ["dep:kcl-lang", "dep:sha2", "dep:tempfile"]
 # Embedded Helm v4 template engine. Go source in crates/helm-engine-wasm/
@@ -58,6 +66,11 @@ thiserror = { workspace = true }
 kcl-lang = { git = "https://github.com/kcl-lang/lib", optional = true }
 sha2 = { version = "0.10", optional = true }
 tempfile = { version = "3", optional = true }
+
+# SDK type-emission deps. Optional; pulled in only when the
+# `ts-export` / `schema-export` features are enabled.
+ts-rs = { version = "11", optional = true }
+schemars = { version = "1", optional = true }
 
 # Host-only deps — compiled into the CLI binary that *hosts* the
 # render worker, not into the worker itself. Stay gated off wasm32:

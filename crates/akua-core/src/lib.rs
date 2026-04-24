@@ -14,6 +14,40 @@
 
 #![allow(dead_code)]
 
+/// Apply the SDK-export derives to a contract type. Avoids hand-repeating
+/// `#[cfg_attr]` attributes (and the `export_to` path, where a typo
+/// silently drops the type from the bundle).
+///
+/// Usage:
+/// ```ignore
+/// akua_core::contract_type! {
+///     #[derive(Debug, Serialize, Deserialize)]
+///     pub struct Foo { ... }
+/// }
+/// ```
+///
+/// Workspace-internal by intent: `akua-cli` reuses it for verbs that
+/// define their own response types (e.g. `VersionOutput`). External
+/// consumers don't need it — they're not writing to `sdk-types/` or
+/// the bundle. `#[macro_export]` is the mechanism that makes the
+/// macro reachable across crates in the same workspace, so it's
+/// public by mechanism; `#[doc(hidden)]` keeps it out of the rendered
+/// API docs.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! contract_type {
+    ($item:item) => {
+        // ts-rs 11: `export_to` is concatenated with `TS_RS_EXPORT_DIR`
+        // (when set), so we keep `export_to` empty and rely on the
+        // caller setting `TS_RS_EXPORT_DIR=packages/sdk/src/types/`
+        // (wired up by `task sdk:gen-types`).
+        #[cfg_attr(feature = "ts-export", derive(::ts_rs::TS))]
+        #[cfg_attr(feature = "ts-export", ts(export))]
+        #[cfg_attr(feature = "schema-export", derive(::schemars::JsonSchema))]
+        $item
+    };
+}
+
 #[cfg(any(feature = "oci-fetch", feature = "git-fetch"))]
 pub mod cache_inventory;
 #[cfg(feature = "engine-kcl")]

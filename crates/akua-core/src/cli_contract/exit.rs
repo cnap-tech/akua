@@ -5,11 +5,19 @@
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
+crate::contract_type! {
 /// The seven typed exit codes every akua verb may produce.
 ///
 /// Agents branch on these. Humans read them. The stability contract is
 /// that meanings never change; new codes require a major version bump.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// Serialized as the stable kebab-case name (`"success"`, `"user-error"`,
+/// `"policy-deny"`, etc.) — same string [`ExitCode::name`] returns. The
+/// SDK maps from the numeric `child.exitCode` (0..=6) to this name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 #[repr(u8)]
 pub enum ExitCode {
     /// `0` — operation completed as requested.
@@ -35,6 +43,7 @@ pub enum ExitCode {
 
     /// `6` — operation did not complete within `--timeout`.
     Timeout = 6,
+}
 }
 
 impl ExitCode {

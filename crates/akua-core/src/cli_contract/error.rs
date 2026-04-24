@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
+crate::contract_type! {
 /// The canonical error shape. One struct; every verb reuses it.
 ///
 /// `code` is the stable, load-bearing identifier. `message` is the one-line
@@ -54,13 +55,16 @@ pub struct StructuredError {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_actions: Vec<String>,
 }
+}
 
+crate::contract_type! {
 /// Log severity. Almost always `Error`; `Warn` for recoverable issues.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {
     Error,
     Warn,
+}
 }
 
 fn default_level() -> Level {

@@ -6,20 +6,22 @@
 use std::io::Write;
 
 use akua_core::cli_contract::{AgentContext, ExitCode};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::contract::{emit_output, Context};
 
+akua_core::contract_type! {
 /// Whoami response shape. Part of the stability contract — new fields
 /// may be added (backward-compatible); existing field semantics never
 /// change.
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct WhoamiOutput {
     /// Agent-context detection result per cli-contract §1.5.
     pub agent_context: AgentContext,
 
     /// akua binary version (same as `akua --version`).
     pub version: String,
+}
 }
 
 impl WhoamiOutput {

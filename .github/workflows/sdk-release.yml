@@ -1,0 +1,74 @@
+name: sdk-release
+
+# Publish `@akua/sdk` to JSR on a `sdk-v<semver>` tag push.
+#
+# SDK version floats independently of the CLI's crate version: a doc
+# tweak or a wrapper-layer fix can ship without rebuilding the binary.
+# The Rust-derived types + schema bundle inside the package are still
+# drift-guarded by `task sdk:check` in the main CI pipeline.
+
+on:
+  push:
+    tags:
+      - 'sdk-v*'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Skip the actual publish (manifest + slow-type check only)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write  # required for JSR's OIDC auth — no PAT needed
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+          cache: true
+
+      # The Rust generator writes into packages/sdk/src/{types,schemas}.
+      # Regenerate on the runner so we publish from the same bytes main
+      # CI just verified — and so a tag pushed from a stale checkout
+      # doesn't silently publish stale types.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: sdk-release
+          cache-on-failure: true
+
+      - name: Regenerate SDK types + schema bundle
+        run: mise exec -- task sdk:gen
+
+      - name: Drift guard (fail if Rust source and bindings diverge)
+        run: mise exec -- task sdk:check
+
+      - name: Bump jsr.json version from the tag
+        # Tag format: `sdk-v1.2.3` → JSR version `1.2.3`. Strip the
+        # `sdk-v` prefix and write straight to jsr.json so the publish
+        # uses the tag's semver.
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#sdk-v}"
+          echo "Publishing @akua/sdk@${version}"
+          # jq is preinstalled on ubuntu-latest.
+          jq --arg v "$version" '.version = $v' packages/sdk/jsr.json > packages/sdk/jsr.json.tmp
+          mv packages/sdk/jsr.json.tmp packages/sdk/jsr.json
+
+      - name: Install SDK deps (bun)
+        run: mise exec -- task sdk:install
+
+      - name: Publish to JSR
+        if: github.event_name == 'push' || inputs.dry-run == false
+        working-directory: packages/sdk
+        run: bunx jsr publish
+
+      - name: Dry-run only (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch' && inputs.dry-run == true
+        working-directory: packages/sdk
+        run: bunx jsr publish --dry-run

@@ -11,6 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
+crate::contract_type! {
 /// Which env var triggered agent detection. Recorded in `akua whoami`
 /// output for introspection and in debug-level logs for post-hoc diagnosis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -27,6 +28,7 @@ pub enum AgentSource {
     /// akua-specific fallback (`AKUA_AGENT=<name>`).
     AkuaAgent,
 }
+}
 
 impl AgentSource {
     /// The env var whose presence triggered this source.
@@ -41,6 +43,7 @@ impl AgentSource {
     }
 }
 
+crate::contract_type! {
 /// Result of agent-context detection at process start.
 ///
 /// When `detected == true`, the CLI layer should (per §1.5) auto-enable
@@ -61,6 +64,7 @@ pub struct AgentContext {
 
     /// Whether detection was disabled via `AKUA_NO_AGENT_DETECT=1`.
     pub disabled_via_env: bool,
+}
 }
 
 impl AgentContext {

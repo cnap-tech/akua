@@ -30,6 +30,14 @@ default = ["oci-fetch", "cosign-verify", "dev-watch"]
 oci-fetch = ["akua-core/oci-fetch"]
 cosign-verify = ["akua-core/cosign-verify"]
 dev-watch = ["akua-core/dev-watch", "dep:ctrlc"]
+# SDK type emission — off by default. `ts-export` turns on ts-rs
+# derives so the CLI contract + verb response types can be emitted
+# as TypeScript sources. `schema-export` does the same for
+# schemars (JSON Schema). Both are build-time only; zero cost in
+# production builds. Trigger via the emission test at
+# `cargo test -p akua-cli --features schema-export,ts-export`.
+ts-export = ["akua-core/ts-export", "dep:ts-rs"]
+schema-export = ["akua-core/schema-export", "dep:schemars"]
 
 [dependencies]
 akua-core = { path = "../akua-core", default-features = false, features = ["engine-kcl", "engine-helm", "engine-kustomize", "git-fetch"] }
@@ -42,6 +50,11 @@ thiserror = { workspace = true }
 # libc. Feature-gated under `dev-watch` so headless builds don't
 # pull it.
 ctrlc = { version = "3", optional = true }
+
+# SDK type-emission deps. Optional; pulled in only when the
+# `ts-export` / `schema-export` features are enabled.
+ts-rs = { version = "11", optional = true }
+schemars = { version = "1", optional = true }
 
 # Phase 4: per-render sandbox. Single wasmtime Engine shared with
 # engine-host-wasm (helm, kustomize) — one Config, one Engine, many

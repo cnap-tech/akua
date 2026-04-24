@@ -15,6 +15,7 @@ vars:
   RENDER_WORKER_WASM: target/wasm32-wasip1/release/akua-render-worker.wasm
   AKUA_WASM_RAW: target/wasm32-unknown-unknown/release/akua_wasm.wasm
   AKUA_WASM_PKG: crates/akua-wasm/pkg
+  SDK_TYPES_DIR: packages/sdk/src/types
 
 tasks:
   default:
@@ -157,6 +158,58 @@ tasks:
       - crates/akua-wasm/pkg-nodejs/akua_wasm.js
     cmds:
       - wasm-pack build crates/akua-wasm --target nodejs --release --out-dir pkg-nodejs
+
+  sdk:gen:
+    desc: Regenerate packages/sdk/src/types/*.ts and src/schemas/akua.json from Rust serde types
+    cmds:
+      # ts-rs's `#[ts(export)]` emits one file per type when the
+      # auto-generated `export_bindings_*` test runs. We pin the
+      # output dir via `TS_RS_EXPORT_DIR` since the macro leaves
+      # `export_to` empty. Run the lib tests for every crate that
+      # declares a `contract_type!` — akua-core owns the shared
+      # primitives, akua-cli owns per-verb response shapes.
+      - |
+        TS_RS_EXPORT_DIR="$(pwd)/{{.SDK_TYPES_DIR}}" \
+          cargo test -p akua-core --features ts-export --lib cli_contract
+      - |
+        TS_RS_EXPORT_DIR="$(pwd)/{{.SDK_TYPES_DIR}}" \
+          cargo test -p akua-cli --features schema-export,ts-export --lib verbs::
+      # schemars bundle — single `akua.json` with every type in
+      # `$defs`. Triggered by the dedicated emission test.
+      - cargo test -p akua-cli --features schema-export,ts-export --test export_sdk_bundle
+
+  sdk:check:
+    desc: Fail if generated SDK artifacts drift from the Rust source
+    cmds:
+      - task: sdk:gen
+      - git diff --exit-code -- packages/sdk/src/types packages/sdk/src/schemas
+
+  sdk:install:
+    desc: Install @akua/sdk deps (bun)
+    dir: packages/sdk
+    cmds:
+      - bun install --frozen-lockfile
+
+  sdk:test:
+    desc: Run @akua/sdk TS unit tests (bun — native TS, no transpile step)
+    deps: [sdk:install]
+    dir: packages/sdk
+    cmds:
+      - bun test
+
+  sdk:e2e:
+    desc: End-to-end — build akua, then run @akua/sdk against the real binary
+    deps: [sdk:install]
+    cmds:
+      - cargo build -p akua-cli
+      - cd packages/sdk && AKUA_E2E=1 bun test src/e2e.test.ts
+
+  sdk:publish:check:
+    desc: Dry-run `jsr publish` — catches manifest + slow-type issues before tag push
+    deps: [sdk:install]
+    dir: packages/sdk
+    cmds:
+      - bunx jsr publish --dry-run --allow-dirty
 
   test:akua-wasm:
     desc: Smoke test — call akua-wasm `render()` from Node, assert YAML output

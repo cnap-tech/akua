@@ -10,11 +10,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::contract::{Context, OutputMode};
 
+akua_core::contract_type! {
 /// Version response shape.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct VersionOutput {
     /// Semver version of the `akua` binary.
     pub version: String,
+}
 }
 
 impl Default for VersionOutput {

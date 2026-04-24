@@ -1,0 +1,11 @@
+{
+	"name": "@akua/sdk",
+	"version": "0.0.0",
+	"description": "TypeScript SDK for akua — shells out to the akua CLI, returns types generated from the Rust serde types that define the --json surface.",
+	"license": "Apache-2.0",
+	"exports": "./src/mod.ts",
+	"publish": {
+		"include": ["src/**/*.ts", "src/schemas/akua.json", "README.md"],
+		"exclude": ["src/**/*.test.ts"]
+	}
+}

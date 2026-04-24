@@ -1,0 +1,18 @@
+{
+  "name": "@akua/sdk",
+  "version": "0.0.0-spike",
+  "description": "TypeScript SDK for akua — shells out to the `akua` binary, returns typed results generated from the same serde types the CLI emits.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/mod.ts"
+  },
+  "private": true,
+  "engines": {
+    "bun": ">=1.3"
+  },
+  "dependencies": {
+    "@standard-schema/spec": "^1.1.0",
+    "ajv": "^8.18.0"
+  }
+}

@@ -1,0 +1,219 @@
+{
+  "$defs": {
+    "AgentContext": {
+      "description": "Result of agent-context detection at process start.\n\nWhen `detected == true`, the CLI layer should (per §1.5) auto-enable\n`--json`, `--log=json`, `--no-color`, `--no-progress`, `--no-interactive`.\nExplicit user flags win over these defaults.",
+      "properties": {
+        "detected": {
+          "type": "boolean"
+        },
+        "disabled_via_env": {
+          "description": "Whether detection was disabled via `AKUA_NO_AGENT_DETECT=1`.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "The value of the detected env var (e.g. `\"goose\"` for `AGENT=goose`).\nFor bool-style markers (`CLAUDECODE=1`) this is the raw string.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Which env var surfaced the agent (present iff `detected`)."
+        }
+      },
+      "required": [
+        "detected",
+        "disabled_via_env"
+      ],
+      "type": "object"
+    },
+    "AgentSource": {
+      "description": "Which env var triggered agent detection. Recorded in `akua whoami`\noutput for introspection and in debug-level logs for post-hoc diagnosis.",
+      "oneOf": [
+        {
+          "const": "agent",
+          "description": "Generic `AGENT=<name>` variable (Goose, Amp, Codex, Cline, OpenCode).",
+          "type": "string"
+        },
+        {
+          "const": "claude_code",
+          "description": "Claude Code (`CLAUDECODE=1`).",
+          "type": "string"
+        },
+        {
+          "const": "gemini_cli",
+          "description": "Gemini CLI (`GEMINI_CLI=1`).",
+          "type": "string"
+        },
+        {
+          "const": "cursor_cli",
+          "description": "Cursor CLI (`CURSOR_CLI=1`).",
+          "type": "string"
+        },
+        {
+          "const": "akua_agent",
+          "description": "akua-specific fallback (`AKUA_AGENT=<name>`).",
+          "type": "string"
+        }
+      ]
+    },
+    "ExitCode": {
+      "description": "The seven typed exit codes every akua verb may produce.\n\nAgents branch on these. Humans read them. The stability contract is\nthat meanings never change; new codes require a major version bump.\n\nSerialized as the stable kebab-case name (`\"success\"`, `\"user-error\"`,\n`\"policy-deny\"`, etc.) — same string [`ExitCode::name`] returns. The\nSDK maps from the numeric `child.exitCode` (0..=6) to this name.",
+      "oneOf": [
+        {
+          "const": "success",
+          "description": "`0` — operation completed as requested.",
+          "type": "string"
+        },
+        {
+          "const": "user-error",
+          "description": "`1` — invalid inputs, bad flags, missing required arguments.\nSomething the caller got wrong.",
+          "type": "string"
+        },
+        {
+          "const": "system-error",
+          "description": "`2` — unexpected failure (disk, network, bug). Something akua\ncouldn't recover from that isn't the caller's fault.",
+          "type": "string"
+        },
+        {
+          "const": "policy-deny",
+          "description": "`3` — the policy engine rejected the operation.",
+          "type": "string"
+        },
+        {
+          "const": "rate-limited",
+          "description": "`4` — registry / API rate limits. Retry with backoff.",
+          "type": "string"
+        },
+        {
+          "const": "needs-approval",
+          "description": "`5` — the operation is allowed but requires human approval\nbefore it can proceed.",
+          "type": "string"
+        },
+        {
+          "const": "timeout",
+          "description": "`6` — operation did not complete within `--timeout`.",
+          "type": "string"
+        }
+      ]
+    },
+    "Level": {
+      "description": "Log severity. Almost always `Error`; `Warn` for recoverable issues.",
+      "enum": [
+        "error",
+        "warn"
+      ],
+      "type": "string"
+    },
+    "StructuredError": {
+      "description": "The canonical error shape. One struct; every verb reuses it.\n\n`code` is the stable, load-bearing identifier. `message` is the one-line\nsummary. The rest are optional pointers — a file path, a field name, a\nsuggestion, a docs URL.",
+      "properties": {
+        "code": {
+          "description": "Stable, machine-readable identifier (SHOUTY_SNAKE_CASE).\nExample: `E_SCHEMA_INVALID`, `E_OCI_DIGEST_MISMATCH`.",
+          "type": "string"
+        },
+        "docs": {
+          "description": "URL to the error's documentation page. Convention:\n`https://akua.dev/errors/<CODE>`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "field": {
+          "description": "Dotted field path inside `path` when the error is field-specific.\nExample: `spec.replicas`, `metadata.labels.team`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "level": {
+          "$ref": "#/$defs/Level",
+          "default": "error",
+          "description": "Log level. Always `\"error\"` for hard failures; `\"warn\"` for\nrecoverable issues emitted alongside a success exit."
+        },
+        "line": {
+          "description": "1-based line number in `path` when applicable.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "message": {
+          "description": "Human-readable one-line summary.",
+          "type": "string"
+        },
+        "next_actions": {
+          "description": "Machine-executable recovery steps. Agents can use these to fix\nthe error programmatically. Each entry is a complete command.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "description": "File path, OCI ref, or resource identifier the error refers to.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "suggestion": {
+          "description": "Actionable suggestion — a one-liner the caller can apply.\nAbsent when there's no generic fix.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "VersionOutput": {
+      "description": "Version response shape.",
+      "properties": {
+        "version": {
+          "description": "Semver version of the `akua` binary.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "type": "object"
+    },
+    "WhoamiOutput": {
+      "description": "Whoami response shape. Part of the stability contract — new fields\nmay be added (backward-compatible); existing field semantics never\nchange.",
+      "properties": {
+        "agent_context": {
+          "$ref": "#/$defs/AgentContext",
+          "description": "Agent-context detection result per cli-contract §1.5."
+        },
+        "version": {
+          "description": "akua binary version (same as `akua --version`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_context",
+        "version"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://akua.dev/schemas/v1/akua.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Machine-readable shape of every type akua emits under `--json`. Bind any validator (ajv, Zod, pydantic, gojsonschema, ...) against this.",
+  "title": "akua CLI contract"
+}
