@@ -1,0 +1,27 @@
+[package]
+name = "akua-render-worker"
+description = "Sandboxed render path — `akua render` target compiled to `wasm32-wasip1` and hosted inside the akua-cli wasmtime."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+# Binary target — akua-cli instantiates this as a wasmtime module and
+# invokes `_start`. Native builds compile + run the same path for
+# quick local iteration; wasip1 builds produce the shipping artifact.
+[[bin]]
+name = "akua-render-worker"
+path = "src/main.rs"
+
+[dependencies]
+# Intentionally empty in the scaffold — we'll grow the dep set in
+# the Phase 4 integration step (#410). Until then, the worker is a
+# smoke-test binary: read a JSON request from stdin, echo a JSON
+# response on stdout. Lets wasmtime host plumbing land before the
+# KCL evaluator + engine hosts move into the worker.
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Native-only: the worker runs on the host for local dev + CI
+# parity checks. wasm32 pulls the same deps; they all support wasip1.

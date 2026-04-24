@@ -3,6 +3,7 @@ resolver = "2"
 members = [
 	"crates/akua-core",
 	"crates/akua-cli",
+	"crates/akua-render-worker",
 	"crates/engine-host-wasm",
 	"crates/helm-engine-wasm",
 	"crates/kustomize-engine-wasm",

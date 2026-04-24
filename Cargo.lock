@@ -94,6 +94,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "akua-render-worker"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
