@@ -26,9 +26,7 @@ jobs:
           cache: true
 
       - name: Install rustfmt + clippy components + wasm32-wasip1 target
-        run: |
-          mise exec -- rustup component add rustfmt clippy
-          mise exec -- rustup target add wasm32-wasip1
+        run: mise exec -- rustup component add rustfmt clippy && mise exec -- rustup target add wasm32-wasip1
 
       - uses: Swatinem/rust-cache@v2
 

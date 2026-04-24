@@ -33,16 +33,14 @@ tasks:
   test:
     desc: Run all Rust tests
     deps:
-      # Rendering tests instantiate the embedded wasmtime sandbox, which
-      # needs the worker module + helm/kustomize engine wasms on disk
-      # before akua-cli's build.rs precompiles them into the binary.
-      - build:render-worker
-      - build:engines
+      - sandbox-artifacts
     cmds:
       - cargo test --workspace
 
   check:
     desc: cargo check + clippy
+    deps:
+      - sandbox-artifacts
     cmds:
       - cargo check --workspace
       - cargo clippy --workspace --all-targets -- -D warnings
@@ -59,13 +57,36 @@ tasks:
 
   lint:
     desc: Run cargo clippy with warnings as errors
+    deps:
+      - sandbox-artifacts
     cmds:
       - cargo clippy --workspace --all-targets -- -D warnings
 
+  # Rendering verbs (and clippy --all-targets, which compiles them) need
+  # the embedded wasmtime sandbox artifacts on disk: akua-cli's build.rs
+  # precompiles them into the binary, and emits E_SANDBOX_UNAVAILABLE
+  # when any is missing. Both lint + test depend on this.
+  #
+  # `deps:` runs children in parallel — the three builds are independent
+  # toolchains (Rust→wasip1 + Go→wasip1 × 2) so concurrency is a
+  # straightforward win.
+  sandbox-artifacts:
+    desc: Build every embedded wasm needed by akua-cli's build.rs
+    deps:
+      - build:render-worker
+      - build:helm-engine-wasm
+      - build:kustomize-engine-wasm
+
   ci:
     desc: Run the full CI pipeline locally
+    # fmt:check has no build deps; fan it out alongside the heavy tasks
+    # so it finishes during the first few seconds of cargo compilation.
+    # lint and test share sandbox-artifacts (built once, parallel
+    # internal fan-out) and share cargo's target/ cache — the second
+    # is mostly incremental.
+    deps:
+      - fmt:check
     cmds:
-      - task: fmt:check
       - task: lint
       - task: test
 
@@ -128,9 +149,9 @@ tasks:
 
   build:engines:
     desc: Build every embedded engine
-    cmds:
-      - task: build:helm-engine-wasm
-      - task: build:kustomize-engine-wasm
+    deps:
+      - build:helm-engine-wasm
+      - build:kustomize-engine-wasm
 
   # ---- Render worker (Rust → wasip1; the Phase 4 sandbox) ------------------
 
