@@ -24,6 +24,7 @@ pub mod push;
 pub mod sign;
 pub mod remove;
 pub mod render;
+pub mod repl;
 pub mod test;
 pub mod tree;
 pub mod update;

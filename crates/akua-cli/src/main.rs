@@ -14,8 +14,8 @@ use akua_cli::verbs::{
     diff as diff_verb, fmt as fmt_verb, init as init_verb, inspect as inspect_verb,
     lint as lint_verb, lock as lock_verb, pack as pack_verb, publish as publish_verb,
     pull as pull_verb, push as push_verb, remove as remove_verb, render as render_verb,
-    test as test_verb, tree as tree_verb, update as update_verb, verify as verify_verb,
-    version as version_verb, whoami as whoami_verb,
+    repl as repl_verb, test as test_verb, tree as tree_verb, update as update_verb,
+    verify as verify_verb, version as version_verb, whoami as whoami_verb,
 };
 #[cfg(feature = "cosign-verify")]
 use akua_cli::verbs::sign as sign_verb;
@@ -342,6 +342,17 @@ enum Commands {
         #[cfg(feature = "cosign-verify")]
         #[arg(long)]
         sig: Option<PathBuf>,
+    },
+
+    /// Interactive KCL shell — accumulates submitted lines into a
+    /// growing `.k` source, re-evaluates on each entry, prints the
+    /// top-level bindings. Meta commands start with `.`
+    /// (`.load <path>`, `.reset`, `.show`, `.help`, `.exit`). No
+    /// engine callables (`helm.template`, `pkg.render`, etc.) — use
+    /// `akua render` against a workspace for those.
+    Repl {
+        #[command(flatten)]
+        args: UniversalArgs,
     },
 
     /// Pack the workspace into a local `.tar.gz` — same shape as the
@@ -697,6 +708,7 @@ fn dispatch(command: Commands) -> ExitCode {
             workspace,
             dep,
         } => run_update(&args, &workspace, dep.as_deref()),
+        Commands::Repl { args } => run_repl(&args),
         #[cfg(feature = "cosign-verify")]
         Commands::Sign {
             args,
@@ -769,6 +781,17 @@ fn run_sign(
     };
     let mut stdout = io::stdout().lock();
     match sign_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
+    }
+}
+
+fn run_repl(args: &UniversalArgs) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let stdin = io::stdin();
+    let mut stdin_lock = stdin.lock();
+    let mut stdout = io::stdout().lock();
+    match repl_verb::run(&ctx, &repl_verb::ReplArgs, &mut stdin_lock, &mut stdout) {
         Ok(code) => code,
         Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
@@ -1373,6 +1396,15 @@ mod tests {
             .err()
             .expect("should fail");
         assert!(err.to_string().contains("cannot be used"));
+    }
+
+    #[test]
+    fn parses_repl_bare_verb() {
+        let cli = Cli::parse_from(["akua", "repl"]);
+        match cli.command {
+            Commands::Repl { .. } => {}
+            _ => panic!("expected repl"),
+        }
     }
 
     #[test]

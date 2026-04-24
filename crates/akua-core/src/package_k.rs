@@ -363,6 +363,24 @@ pub fn format_kcl(source: &str) -> Result<String, PackageKError> {
     }
 }
 
+/// Evaluate a KCL source buffer and return the top-level YAML dict
+/// as a string. Unlike [`PackageK::render`], this doesn't require
+/// `resources = [...]` — it returns whatever top-level bindings the
+/// program produces. Used by `akua repl` where operators type
+/// arbitrary expressions, not fully-formed Packages.
+///
+/// `path` is a display-only filename for error messages; no file is
+/// read. KCL's upstream `rustc_span` rejects paths ending in `>`, so
+/// use `repl.k` / `line-N.k` rather than `<repl:N>`. No plugins are
+/// installed + no `charts` pkg — the repl is a pure KCL evaluator.
+/// Engine callables (helm/kustomize/pkg.render) belong inside a
+/// workspace that `akua render` picks up.
+pub fn eval_source(path: &Path, source: &str) -> Result<String, PackageKError> {
+    let inputs = serde_yaml::Value::Mapping(Default::default());
+    let json = serde_json::to_string(&inputs)?;
+    eval_kcl(path, source, &json, None)
+}
+
 fn eval_kcl(
     path: &Path,
     code: &str,
@@ -639,5 +657,31 @@ resources = [{
         assert_eq!(cm["metadata"]["name"], Value::String("checkout".into()));
         assert_eq!(cm["data"]["user"], Value::String("checkout_app".into()));
         assert_eq!(cm["data"]["port"], Value::String("6543".into()));
+    }
+
+    #[test]
+    fn eval_source_returns_top_level_bindings_without_resources() {
+        // Bare bindings — no `resources = [...]`. `PackageK::render`
+        // would reject this with MissingResources; eval_source
+        // doesn't care.
+        let yaml = eval_source(Path::new("repl.k"), "x = 42\ny = \"hello\"\n")
+            .expect("eval_source");
+        let top: Value = serde_yaml::from_str(&yaml).unwrap();
+        let map = top.as_mapping().expect("top-level mapping");
+        assert_eq!(
+            map.get(Value::String("x".into())),
+            Some(&Value::Number(42.into()))
+        );
+        assert_eq!(
+            map.get(Value::String("y".into())),
+            Some(&Value::String("hello".into()))
+        );
+    }
+
+    #[test]
+    fn eval_source_surfaces_kcl_syntax_errors_verbatim() {
+        let err = eval_source(Path::new("repl.k"), "this is not kcl")
+            .expect_err("malformed KCL should error");
+        assert!(matches!(err, PackageKError::KclEval(_)), "got {err:?}");
     }
 }
