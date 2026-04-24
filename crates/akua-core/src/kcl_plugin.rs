@@ -448,16 +448,33 @@ pub unsafe extern "C-unwind" fn dispatch(
         .into_raw()
 }
 
-fn panic_envelope(msg: &str) -> String {
-    serde_json::json!({ "__kcl_PanicInfo__": msg }).to_string()
+/// Top-level key KCL's plugin-invoke glue looks for to treat a
+/// plugin response as a runtime panic. Part of KCL's wire contract;
+/// producers and readers must agree on the exact string.
+pub const PANIC_INFO_KEY: &str = "__kcl_PanicInfo__";
+
+pub fn panic_envelope(msg: &str) -> String {
+    serde_json::json!({ PANIC_INFO_KEY: msg }).to_string()
 }
 
-fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
+pub fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     payload
         .downcast_ref::<&str>()
         .map(|s| (*s).to_string())
         .or_else(|| payload.downcast_ref::<String>().cloned())
         .unwrap_or_else(|| "plugin handler panicked".to_string())
+}
+
+/// Inverse of [`panic_envelope`]: if `response` is a `{"__kcl_PanicInfo__":
+/// "..."}` object, return the inner message. Byte-prefix gate avoids
+/// parsing multi-KB handler responses (helm.template output) on the
+/// happy path.
+pub fn extract_panic_info(response: &str) -> Option<String> {
+    if !response.starts_with("{\"__kcl_PanicInfo__\"") {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(response).ok()?;
+    v.get(PANIC_INFO_KEY)?.as_str().map(str::to_owned)
 }
 
 /// Wasmtime-host entry for the Phase 4 plugin bridge. Host function

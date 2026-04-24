@@ -132,6 +132,12 @@ pub enum WorkerError {
     #[error("worker trapped: {0}")]
     Trap(String),
 
+    /// KCL plugin handler panicked; message preserved out-of-band
+    /// around the wasip1 trap boundary so callers can classify the
+    /// diagnostic (e.g. strict-mode chart rejections).
+    #[error("plugin panic: {0}")]
+    PluginPanic(String),
+
     #[error("encode request: {0}")]
     EncodeRequest(#[source] serde_json::Error),
 
@@ -271,6 +277,7 @@ impl RenderHost {
             limits: wasmtime::StoreLimitsBuilder::new()
                 .memory_size(limits.memory_bytes)
                 .build(),
+            last_plugin_panic: None,
         };
 
         let mut store = Store::new(self.engine, host);
@@ -294,6 +301,7 @@ impl RenderHost {
         // here so the stdout pipe still gets read. Non-zero exits
         // are passed through as worker-side errors.
         let trap_result = start.call(&mut store, ());
+        let plugin_panic = store.data_mut().last_plugin_panic.take();
         drop(store);
         let out_bytes = stdout_pipe.contents();
         let err_bytes = stderr_pipe.contents();
@@ -308,9 +316,17 @@ impl RenderHost {
                     )));
                 }
                 None => {
-                    // Append captured stderr so a panic inside the
-                    // guest surfaces its message, not just a bare
-                    // wasm backtrace.
+                    // If the bridge captured a plugin panic message
+                    // during this invocation, the trap is KCL
+                    // panicking on `__kcl_PanicInfo__`. Surface the
+                    // typed diagnostic; callers need it to classify
+                    // errors (e.g. strict-mode chart paths).
+                    if let Some(msg) = plugin_panic {
+                        return Err(WorkerError::PluginPanic(msg));
+                    }
+                    // Otherwise append captured stderr so a panic
+                    // inside the guest surfaces its message, not
+                    // just a bare wasm backtrace.
                     let stderr = String::from_utf8_lossy(&err_bytes);
                     return Err(WorkerError::Trap(if stderr.is_empty() {
                         e.to_string()
@@ -336,6 +352,11 @@ impl RenderHost {
 struct HostState {
     wasi: WasiP1Ctx,
     limits: wasmtime::StoreLimits,
+    /// First `__kcl_PanicInfo__` the bridge saw during this
+    /// invocation. Out-of-band channel around KCL's wasip1 panic →
+    /// wasm-trap loss. First-wins: a nested plugin callout that also
+    /// panics must not clobber the outer diagnostic.
+    last_plugin_panic: Option<String>,
 }
 
 /// KCL declares `extern "C-unwind" fn kcl_plugin_invoke_json_wasm(...)`
@@ -406,20 +427,34 @@ fn plugin_bridge_call(
         eprintln!("[bridge] method={method} args={args} kwargs={kwargs}");
     }
 
-    let response =
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    // Two envelope sources: a handler returning `Err(...)` produces
+    // one via `invoke_bridge`'s `Ok(s)` (s starts with the envelope
+    // shape); a handler that panics outright lands in `Err(payload)`
+    // and we know the message here without a round-trip. Both paths
+    // stash the message on HostState so `invoke_inner` can promote
+    // the resulting wasip1 trap to `WorkerError::PluginPanic`.
+    let (response, panic_msg) = match std::panic::catch_unwind(
+        std::panic::AssertUnwindSafe(|| {
             akua_core::kcl_plugin::invoke_bridge(&method, &args, &kwargs)
-        })) {
-            Ok(s) => s,
-            Err(payload) => {
-                let msg = payload
-                    .downcast_ref::<&str>()
-                    .map(|s| (*s).to_string())
-                    .or_else(|| payload.downcast_ref::<String>().cloned())
-                    .unwrap_or_else(|| "plugin bridge: handler panicked".to_string());
-                format!("{{\"__kcl_PanicInfo__\":{}}}", serde_json::to_string(&msg).ok()?)
-            }
-        };
+        }),
+    ) {
+        Ok(s) => {
+            let msg = akua_core::kcl_plugin::extract_panic_info(&s);
+            (s, msg)
+        }
+        Err(payload) => {
+            let msg = akua_core::kcl_plugin::panic_message(payload);
+            let envelope = akua_core::kcl_plugin::panic_envelope(&msg);
+            (envelope, Some(msg))
+        }
+    };
+
+    if let Some(msg) = panic_msg {
+        let state = caller.data_mut();
+        if state.last_plugin_panic.is_none() {
+            state.last_plugin_panic = Some(msg);
+        }
+    }
 
     // C-string: response bytes + one NUL terminator. KCL's
     // c_str_required/c_str_or_default on the guest side expects
@@ -623,6 +658,47 @@ mod tests {
                 );
             }
             _ => panic!("expected Render"),
+        }
+    }
+
+    #[test]
+    fn plugin_panic_message_survives_wasip1_trap() {
+        let Some(host) = host_or_skip() else { return };
+
+        // `Err(msg)` from a handler goes through `panic_envelope(msg)`
+        // in `invoke_bridge`, which produces the `__kcl_PanicInfo__`
+        // JSON shape. KCL then panics on that envelope inside the
+        // guest — on wasip1 the unwind surfaces as a wasm trap whose
+        // message is lost. Without the bridge's out-of-band capture
+        // we'd only see a backtrace; with it, the original marker
+        // round-trips as `WorkerError::PluginPanic`.
+        const MARKER: &str = "strict mode requires every chart to be declared in akua.toml";
+        akua_core::kcl_plugin::register("strict_fail.trigger", |_args, _kwargs| {
+            Err(MARKER.to_string())
+        });
+
+        let source = "import kcl_plugin.strict_fail\n\
+                      _ignored = strict_fail.trigger({})\n";
+        let err = host
+            .invoke(
+                &WorkerRequest::Render {
+                    package_filename: "package.k".into(),
+                    source: source.into(),
+                    inputs: None,
+                    charts_pkg_path: None,
+                },
+                ResourceLimits::default(),
+            )
+            .expect_err("handler should trap");
+
+        match err {
+            WorkerError::PluginPanic(msg) => {
+                assert!(
+                    msg.contains(MARKER),
+                    "captured panic should carry handler marker, got: {msg}"
+                );
+            }
+            other => panic!("expected PluginPanic, got: {other:?}"),
         }
     }
 
