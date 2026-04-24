@@ -171,9 +171,14 @@ impl Session {
         // Shared Engine has `epoch_interruption` enabled (for the
         // render worker's wall-clock cap). Engine plugins (helm,
         // kustomize) don't want a deadline — the host-Rust caller
-        // above us owns their whole-call timeouts. Set the highest
-        // deadline so the epoch-ticker never trips their Store.
-        store.set_epoch_deadline(u64::MAX);
+        // above us owns their whole-call timeouts. Pick a ceiling
+        // high enough that the ticker never trips their Store: the
+        // `set_epoch_deadline(delta)` API internally does
+        // `current_epoch + delta`, so `u64::MAX` overflows once the
+        // ticker has advanced past zero. `i64::MAX` (2^63-1) at the
+        // 100ms ticker rate is ~29 billion years — comfortably
+        // effectively-infinite.
+        store.set_epoch_deadline(i64::MAX as u64);
         let mut linker: Linker<WasiP1Ctx> = Linker::new(&engine);
         p1::add_to_linker_sync(&mut linker, |s: &mut WasiP1Ctx| s).map_err(wasm_err)?;
 

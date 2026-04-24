@@ -237,11 +237,24 @@ impl RenderHost {
         wasi.stdout(stdout_pipe.clone());
         wasi.stderr(stderr_pipe.clone());
         wasi.arg("akua-render-worker");
-        // The one optional preopen: a host tempdir populated by
+        // Always-on preopen: the akua KCL stdlib (`akua.helm`,
+        // `akua.kustomize`, `akua.pkg`, `akua.ctx`). Materialized on
+        // the host because `std::env::temp_dir()` panics on wasip1,
+        // so the guest can't produce it itself. Mounted read-only at
+        // `/akua-stdlib`; the worker registers a matching `ExternalPkg`
+        // so `import akua.helm` resolves through the mount.
+        wasi.preopened_dir(
+            akua_core::stdlib::stdlib_root(),
+            "/akua-stdlib",
+            wasmtime_wasi::DirPerms::READ,
+            wasmtime_wasi::FilePerms::READ,
+        )
+        .map_err(|e| WorkerError::Wasmtime(format!("preopen akua stdlib: {e}")))?;
+        // Optional preopen: a host tempdir populated by
         // `akua_core::stdlib::materialize_charts`. Mounts read-only
         // at `/charts` inside the guest; KCL's import resolver
         // reads `charts.*.k` from here when the Package does
-        // `import charts.<name>`. No other filesystem is reachable.
+        // `import charts.<name>`.
         if let Some(dir) = charts_preopen {
             wasi.preopened_dir(
                 dir,

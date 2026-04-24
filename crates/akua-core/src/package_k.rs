@@ -428,13 +428,20 @@ fn eval_kcl(
     let api = API {
         plugin_agent: crate::kcl_plugin::plugin_agent_ptr(),
     };
-    // `stdlib_root()` calls `std::env::temp_dir()` + `std::fs::write` —
-    // both unconditional panics on `wasm32-wasip1` (no filesystem).
-    // Inside the Phase 4 render worker we skip the stdlib ExternalPkg
-    // on wasm32 entirely; Packages that `import akua.helm` / `akua.pkg`
-    // are handled on the host today (not yet bridged through the
-    // worker's plugin imports). Pure-KCL Packages work on both paths.
+    // On host we materialize the akua KCL stdlib under $TMPDIR and
+    // hand its absolute path to KCL as an ExternalPkg. On wasip1 we
+    // can't do that — `std::env::temp_dir()` + `std::fs::write` are
+    // unconditional panics. The host instead preopens its own
+    // materialized stdlib into the worker's WasiCtx at `/akua-stdlib`
+    // (see `akua_cli::render_worker::invoke_inner`), and we hand
+    // KCL that guest-visible path. Identical import shape on both
+    // sides: `import akua.helm` resolves either way.
     let mut external_pkgs: Vec<ExternalPkg> = Vec::new();
+    #[cfg(target_arch = "wasm32")]
+    external_pkgs.push(ExternalPkg {
+        pkg_name: "akua".to_string(),
+        pkg_path: "/akua-stdlib".to_string(),
+    });
     #[cfg(not(target_arch = "wasm32"))]
     external_pkgs.push(ExternalPkg {
         pkg_name: "akua".to_string(),
