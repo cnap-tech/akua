@@ -151,6 +151,20 @@ impl RenderHost {
         if WORKER_CWASM.is_empty() {
             return Err(WorkerError::SandboxUnavailable);
         }
+        // Install the host-side plugin handlers so bridge callouts
+        // from sandboxed KCL (`helm.template`, `kustomize.build`,
+        // `pkg.render`, etc.) resolve to the engine-host-wasm-backed
+        // implementations. Engines run in their OWN wasmtime
+        // Engine/Store (see crates/engine-host-wasm), separate from
+        // the worker's — so the sandbox boundary is preserved:
+        // untrusted KCL stays inside the worker, engine execution
+        // stays inside its own sandbox, and the Rust glue on the
+        // host owns the dispatch.
+        //
+        // Idempotent — safe to call once per RenderHost construction
+        // (typically once per process).
+        akua_core::kcl_plugin::install_builtin_plugins();
+
         let engine = Engine::new(&worker_config()).map_err(|e| WorkerError::Wasmtime(format!("init: {e}")))?;
         // SAFETY: WORKER_CWASM was produced by the same wasmtime
         // version + config in build.rs; deserialize is the fast path
