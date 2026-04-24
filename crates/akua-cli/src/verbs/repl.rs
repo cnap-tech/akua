@@ -1,7 +1,8 @@
 //! `akua repl` — interactive KCL shell.
 //!
 //! Accumulates every submitted line into a growing `.k` source
-//! buffer, re-evaluates on each submit via [`akua_core::eval_source`],
+//! buffer, re-evaluates on each submit via the wasmtime-hosted
+//! render worker (see `verbs::render::eval_source_in_worker`),
 //! prints new top-level bindings. Users can explore schemas, build up
 //! data structures, and load files from disk (`.load <path>`) without
 //! setting up a full workspace.
@@ -29,7 +30,7 @@
 //!
 //! - KCL's upstream `rustc_span` asserts filenames don't end with `>`,
 //!   so the repl tags every eval as `repl.k` rather than the natural
-//!   `<repl:N>`. See [`akua_core::eval_source`].
+//!   `<repl:N>`.
 //! - Single-letter identifiers like `y` / `n` collide with YAML's
 //!   bool scalars and get emitted quoted (`'y': 2`). Tests use
 //!   longer names (`alpha`, `beta`) to keep substring assertions
@@ -39,7 +40,7 @@
 use std::io::{BufRead, Write};
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
-use akua_core::{eval_source, PackageKError};
+use akua_core::PackageKError;
 
 use crate::contract::Context;
 
@@ -147,7 +148,7 @@ impl Session {
         // Keep each submit on its own line so KCL parses statements
         // as distinct top-level items.
         let trial = format!("{}{input}\n", self.buffer);
-        match eval_source(std::path::Path::new("repl.k"), &trial) {
+        match crate::verbs::render::eval_source_in_worker("repl.k", &trial) {
             Ok(yaml) => {
                 self.buffer = trial;
                 SessionOutcome::Render(yaml)
@@ -187,7 +188,7 @@ impl Session {
                     }
                 };
                 let trial = format!("{}{body}\n", self.buffer);
-                match eval_source(std::path::Path::new("repl.k"), &trial) {
+                match crate::verbs::render::eval_source_in_worker("repl.k", &trial) {
                     Ok(yaml) => {
                         self.buffer = trial;
                         SessionOutcome::Render(yaml)

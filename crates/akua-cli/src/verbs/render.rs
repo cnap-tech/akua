@@ -389,6 +389,29 @@ fn worker_to_render_err(e: crate::render_worker::WorkerError) -> RenderError {
     RenderError::PackageK(PackageKError::KclEval(e.to_string()))
 }
 
+/// Thin sandboxed equivalent of `akua_core::eval_source`. Runs
+/// inline KCL through the render worker with no inputs and no
+/// `charts/` preopen — for REPL-style evaluation where the user
+/// hasn't declared dependencies.
+pub(crate) fn eval_source_in_worker(
+    package_filename: &str,
+    source: &str,
+) -> Result<String, PackageKError> {
+    use crate::render_worker::{RenderHost, ResourceLimits, WorkerRequest};
+
+    let host = RenderHost::shared().map_err(|e| PackageKError::KclEval(e.to_string()))?;
+    let request = WorkerRequest::Render {
+        package_filename: package_filename.to_string(),
+        source: source.to_string(),
+        inputs: None,
+        charts_pkg_path: None,
+    };
+    let response = host
+        .invoke(&request, ResourceLimits::default())
+        .map_err(|e| PackageKError::KclEval(e.to_string()))?;
+    response.into_render_yaml().map_err(PackageKError::KclEval)
+}
+
 fn load_inputs(path: Option<&Path>) -> Result<serde_yaml::Value, RenderError> {
     let Some(path) = path else {
         return Ok(serde_yaml::Value::Mapping(Default::default()));
