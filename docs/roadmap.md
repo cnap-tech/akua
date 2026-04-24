@@ -324,22 +324,40 @@ rather than authors. Small, composable, agent-friendly.
 
 Concrete boxes to check before cutting the alpha tag. Everything under "core verbs + format" is already shipped per the phases above; this is the "are we actually ready to release?" gate.
 
+### Build + test
+
 - [ ] Release notes draft — what's in, what's caveated, what comes in v0.2.0
 - [ ] `cargo test -p akua-core -p akua-cli` green on CI across Linux + macOS
 - [ ] `akua --version` matches the tag
-- [ ] [docs/security-model.md](security-model.md) reviewed — section "Operational guidance today (pre-Phase 4)" calls out the containerize-per-render recommendation
-- [ ] [docs/cli.md](cli.md) lists every shipped verb + every exit code they emit
-- [ ] [docs/package-format.md](package-format.md) matches the `PackageK` loader's current parse (no drift since last doc refresh)
-- [ ] [docs/lockfile-format.md](lockfile-format.md) matches `AkuaLock::save` output
 - [ ] Every `examples/<name>/` renders through `akua render` without errors
 - [ ] Every `examples/<name>/` passes `akua check && akua lint && akua test`
-- [ ] `akua verify --tarball` end-to-end flow documented with a runnable snippet (example → pack → sign → verify)
-- [ ] `publishing` story documented: `akua publish` + cosign public key config + what consumers see
-- [ ] Benchmark numbers in [docs/performance.md](performance.md) refreshed from main
-- [ ] `docs/agent-usage.md` lists the verbs agents are expected to invoke and the JSON shapes they should parse
-- [ ] README top-of-repo reflects the shipped surface (no phantom verbs, no stale caveats)
-- [ ] Package author's README template — `akua init` produces something that actually compiles on first `akua render`
 - [ ] One curated upstream Package published to a public OCI registry for `akua pull` smoke-testing
+
+### Docs sweep — sharpen + remove outdated claims
+
+Many markdown files predate recent shipping and make claims that no longer match reality. A single focused pass before release, not phase-by-phase.
+
+- [ ] **[CLAUDE.md](../CLAUDE.md)** — strip aspirational language that reads as current. Today the file says "every render executes inside a wasmtime WASI sandbox" and "untrusted Packages are safe to render on shared hosts" — both are Phase-4 goals, not v0.1.0 reality. Reword to `**target state**:` vs `**today**:` so new readers aren't misled. Same treatment for the capability table (`akua fmt` only handles `.k` today, not `.rego`; `akua test` is KCL-only; `akua repl` KCL-only; `akua lint` runs kcl-lint, not Regal yet; `akua policy` / `akua deploy` / `akua infra` / `akua audit` / `akua query` are Phase 9, not shipped).
+- [ ] **README.md** (repo root) — reflect the shipped verb set (~25 today, not the "thirty verbs" line from CLAUDE.md). Remove phantom verbs. Single clear paragraph on the v0.1.0 caveats: process-sandbox is Phase 4, Rego layer is post-0.5.0.
+- [ ] **[docs/cli.md](cli.md)** — list every shipped verb + every exit code they emit. Drop any entry for verbs that don't yet exist (`policy`, `deploy`, `query`, `trace`, `audit`, `infra`, `export`).
+- [ ] **[docs/cli-contract.md](cli-contract.md)** — audit against what the universal args actually accept today. Every "MUST" must be true of every verb.
+- [ ] **[docs/package-format.md](package-format.md)** — matches the `PackageK` loader's current parse (no drift since last doc refresh).
+- [ ] **[docs/lockfile-format.md](lockfile-format.md)** — matches `AkuaLock::save` output byte-for-byte.
+- [ ] **[docs/security-model.md](security-model.md)** — section "Operational guidance today (pre-Phase 4)" must call out the containerize-per-render recommendation prominently. Verify the feature-status table matches Cargo.toml.
+- [ ] **[docs/embedded-engines.md](embedded-engines.md)** — list only engines that actually ship (helm + kustomize today). Mark OPA / Regal / CEL / Kyverno / kro as future.
+- [ ] **[docs/policy-format.md](policy-format.md)** — if Rego isn't wired up yet, mark the whole doc as target-state with a prominent "NOT YET SHIPPED" banner.
+- [ ] **[docs/agent-usage.md](agent-usage.md)** — lists the verbs agents are expected to invoke and the JSON shapes they should parse. Remove any verb that's not yet shipped.
+- [ ] **[docs/performance.md](performance.md)** — benchmark numbers refreshed from main; drop shell-out baseline references if present.
+- [ ] **[docs/impl-plan.md](impl-plan.md)** — cross-check against roadmap.md; remove duplication, or collapse to a pointer if this file has drifted past usefulness.
+- [ ] **[docs/sdk.md](sdk.md)** — if the TypeScript SDK isn't shipped, mark as target-state or remove the reference from CLAUDE.md.
+- [ ] **`examples/*/README.md`** — every example's README describes what it actually does today. Remove "shell-out" references; point to Phase 1/3 WASM engines.
+- [ ] **Package author's README template** — `akua init` scaffolds a README that compiles on first `akua render`.
+
+### Feature-docs for shipped surface
+
+- [ ] Air-gap flow end-to-end: `akua pack` → `akua sign` → transfer → `akua verify --tarball` → `akua push --sig`, runnable snippet with a freshly-generated key.
+- [ ] Publishing story: `akua publish` + `[signing]` config + what a consumer sees on `akua pull` + `akua verify`.
+- [ ] Operational verbs crib sheet: `akua cache`, `akua auth`, `akua lock [--check]`, `akua update`.
 
 ---
 
