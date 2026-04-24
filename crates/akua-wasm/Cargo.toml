@@ -1,0 +1,38 @@
+[package]
+name = "akua-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# Phase 4B: minimal JS-facing surface for `@akua/sdk`. Exports a
+# `render()` function that evaluates pure-KCL Packages inside the
+# browser / Node / Deno / Bun via `wasm-bindgen`. Engine callouts
+# (`helm.template`, `kustomize.build`) are not yet wired — Packages
+# that import them fail with a typed error pointing at the CLI.
+# Target is `wasm32-unknown-unknown`, NOT `wasm32-wasip1`: the SDK
+# runs in environments without a WASI host.
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Core render path. We pull only the engine-kcl feature and skip
+# everything wasip1-only (filesystem, process, cosign, oci).
+akua-core = { path = "../akua-core", default-features = false, features = ["engine-kcl"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+wasm-bindgen = "0.2"
+
+# KCL spike finding: `uuid` uses `getrandom` which needs the `js`
+# backend on wasm32-unknown-unknown. Opt-in here so the dep graph
+# resolves a compatible `getrandom` feature.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+uuid = { version = "1", features = ["js", "v4"] }
+
+[package.metadata.docs.rs]
+targets = ["wasm32-unknown-unknown"]
