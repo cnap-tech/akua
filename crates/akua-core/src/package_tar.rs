@@ -185,12 +185,11 @@ pub struct TarballInspection {
 /// `akua.toml`. Both passes stream over the same bytes; no
 /// filesystem i/o beyond decompression buffers.
 pub fn inspect(tar_gz: &[u8]) -> Result<TarballInspection, PackageTarError> {
-    use std::collections::BTreeSet;
     use std::io::Read;
 
     let mut file_count: usize = 0;
     let mut uncompressed: u64 = 0;
-    let mut vendored: BTreeSet<String> = BTreeSet::new();
+    let mut vendored: Vec<String> = Vec::new();
     let mut manifest_text: Option<String> = None;
 
     let gz = flate2::read::GzDecoder::new(tar_gz);
@@ -216,13 +215,13 @@ pub fn inspect(tar_gz: &[u8]) -> Result<TarballInspection, PackageTarError> {
         if let Ok(stripped) = path.strip_prefix(".akua/vendor") {
             if let Some(name) = stripped.components().next() {
                 if let Some(s) = name.as_os_str().to_str() {
-                    vendored.insert(s.to_string());
+                    vendored.push(s.to_string());
                 }
             }
         }
 
         // Root-level akua.toml → read into memory for parsing below.
-        if path == std::path::Path::new("akua.toml") {
+        if path.to_str() == Some("akua.toml") {
             let mut buf = String::new();
             e.read_to_string(&mut buf)
                 .map_err(|source| PackageTarError::Io {
@@ -232,6 +231,9 @@ pub fn inspect(tar_gz: &[u8]) -> Result<TarballInspection, PackageTarError> {
             manifest_text = Some(buf);
         }
     }
+
+    vendored.sort();
+    vendored.dedup();
 
     let (package_name, package_version, package_edition) = match manifest_text
         .as_deref()
@@ -253,7 +255,7 @@ pub fn inspect(tar_gz: &[u8]) -> Result<TarballInspection, PackageTarError> {
         package_name,
         package_version,
         package_edition,
-        vendored_deps: vendored.into_iter().collect(),
+        vendored_deps: vendored,
     })
 }
 

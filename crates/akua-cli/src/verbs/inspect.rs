@@ -96,7 +96,10 @@ impl InspectError {
                 StructuredError::new(codes::E_INSPECT_FAIL, e.to_string()).with_default_docs()
             }
             InspectError::Tarball(e) => {
-                StructuredError::new(codes::E_INSPECT_FAIL, e.to_string()).with_default_docs()
+                // PackageTarError is gzip/tar I/O in practice —
+                // E_IO matches the actual failure mode better than
+                // E_INSPECT_FAIL (which is KCL-parse-style).
+                StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
             }
             InspectError::StdoutWrite(e) => {
                 StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()

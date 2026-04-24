@@ -256,6 +256,7 @@ rather than authors. Small, composable, agent-friendly.
 - [x] `akua auth list | add | remove` — manage `$XDG_CONFIG_HOME/akua/auth.toml` without hand-editing TOML. `add --username`/`--token` reads the secret from stdin (mirrors `docker login --password-stdin` — no secret on argv, no TTY dependency). `list` tags each entry with source ("akua" / "docker" / "both") and auth_kind, never echoing secrets. (2026-04-23)
 - [x] `akua pack` — local-file sibling of `akua publish`. Writes the same deterministic `.tar.gz` to disk instead of pushing. Unlocks air-gap transfers, offline signing, and bit-diff archival. Defaults to `<workspace>/dist/<name>-<version>.tar.gz` (walker-skipped subdir so re-packing is idempotent); `--no-vendor` skips embedding deps. Emits `layer_digest` matching the OCI layer digest the registry would assign. (2026-04-23)
 - [x] `akua push --tarball <path> --ref <oci://...> --tag <t>` — upload a pre-packed tarball. The push half of `akua publish`, decomposed so air-gap flows complete: pack here, transfer, push there. No signing / attestation (publish remains the all-in-one). (2026-04-24)
+- [x] `akua inspect --tarball <path>` — triage a packed `.tar.gz` in-memory without unpacking. Reports `{package_name, version, edition}` parsed from the embedded `akua.toml`, `layer_digest`, `{compressed,uncompressed}_size_bytes`, `file_count`, sorted `vendored_deps`. Completes the air-gap triad: pack → transfer → inspect → push. (2026-04-24)
 
 ---
 
