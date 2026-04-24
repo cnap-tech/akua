@@ -108,7 +108,12 @@ pub fn run<W: Write>(
 fn render_once(args: &DevArgs<'_>, _changed: &[PathBuf]) -> Result<String, String> {
     let pkg = PackageK::load(&args.package_path).map_err(|e| e.to_string())?;
     let inputs = load_inputs(args)?;
-    let rendered = pkg.render(&inputs).map_err(|e| e.to_string())?;
+    // `akua dev` today doesn't resolve `[dependencies]` or expose
+    // strict mode — defer both until the watch loop gets flags for
+    // them. Rendering still runs in the sandbox.
+    let charts = akua_core::chart_resolver::ResolvedCharts::default();
+    let rendered = crate::verbs::render::render_in_worker(&pkg, &inputs, &charts, false)
+        .map_err(|e| e.to_string())?;
     let summary = akua_core::package_render::render(&rendered, &args.out_dir, false)
         .map_err(|e| e.to_string())?;
     Ok(format!(
