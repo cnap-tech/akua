@@ -376,8 +376,19 @@ pub fn format_kcl(source: &str) -> Result<String, PackageKError> {
 /// Engine callables (helm/kustomize/pkg.render) belong inside a
 /// workspace that `akua render` picks up.
 pub fn eval_source(path: &Path, source: &str) -> Result<String, PackageKError> {
-    let inputs = serde_yaml::Value::Mapping(Default::default());
-    let json = serde_json::to_string(&inputs)?;
+    eval_source_with_inputs(path, source, &serde_yaml::Value::Mapping(Default::default()))
+}
+
+/// Like [`eval_source`] but injects the given inputs as the KCL
+/// `option("input")` value. Used by the render worker to carry
+/// `inputs.yaml` / `--inputs` into the sandbox — `eval_source` stays
+/// for the REPL + tests that don't need inputs.
+pub fn eval_source_with_inputs(
+    path: &Path,
+    source: &str,
+    inputs: &Value,
+) -> Result<String, PackageKError> {
+    let json = serde_json::to_string(inputs)?;
     eval_kcl(path, source, &json, None)
 }
 

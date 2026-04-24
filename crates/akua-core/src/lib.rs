@@ -82,8 +82,8 @@ pub use chart_resolver::{ChartResolveError, ResolvedChart, ResolvedCharts};
 pub use dir_diff::{diff as dir_diff, DirDiff, DirDiffError, FileChange};
 #[cfg(feature = "engine-kcl")]
 pub use package_k::{
-    eval_source, format_kcl, lint_kcl, list_options_kcl, LintIssue, OptionInfo, PackageK,
-    PackageKError,
+    eval_source, eval_source_with_inputs, format_kcl, lint_kcl, list_options_kcl, LintIssue,
+    OptionInfo, PackageK, PackageKError,
     RenderedPackage,
 };
 #[cfg(feature = "engine-kcl")]

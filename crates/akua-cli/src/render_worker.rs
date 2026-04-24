@@ -568,6 +568,41 @@ mod tests {
     }
 
     #[test]
+    fn render_inputs_reach_the_kcl_option_input() {
+        let Some(host) = host_or_skip() else { return };
+        // KCL's `option("input")` returns whatever the host injects
+        // under the `input` argument. We pass { name: "alpha" } and
+        // assert the binding round-trips into the output YAML.
+        let source = "greeting = option(\"input\").name\n";
+        let inputs = serde_json::json!({ "name": "alpha" });
+        let resp = host
+            .invoke(
+                &WorkerRequest::Render {
+                    package_filename: "package.k".into(),
+                    source: source.into(),
+                    inputs: Some(inputs),
+                },
+                ResourceLimits::default(),
+            )
+            .expect("invoke");
+        match resp {
+            WorkerResponse::Render {
+                status,
+                yaml,
+                message,
+                ..
+            } => {
+                assert_eq!(status, "ok", "diagnostic: {message}");
+                assert!(
+                    yaml.contains("greeting: alpha"),
+                    "inputs didn't reach KCL: {yaml}"
+                );
+            }
+            _ => panic!("expected Render"),
+        }
+    }
+
+    #[test]
     fn render_malformed_kcl_is_fail_status_not_trap() {
         let Some(host) = host_or_skip() else { return };
         let resp = host

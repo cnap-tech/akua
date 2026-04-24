@@ -139,26 +139,12 @@ fn run() -> Result<(), WorkerError> {
         // Evaluate the KCL source in-process (already inside the
         // per-render sandbox) and package the outcome. Eval errors
         // become `status: "fail"` with the diagnostic in `message` —
-        // never a trap. `inputs` is reserved for a future slice —
-        // `eval_source` doesn't take them today.
+        // never a trap.
         Request::Render {
             package_filename,
             source,
-            inputs: _inputs,
-        } => match akua_core::eval_source(std::path::Path::new(&package_filename), &source) {
-            Ok(yaml) => Response::Render {
-                status: "ok",
-                yaml,
-                message: String::new(),
-                worker_version: env!("CARGO_PKG_VERSION"),
-            },
-            Err(e) => Response::Render {
-                status: "fail",
-                yaml: String::new(),
-                message: e.to_string(),
-                worker_version: env!("CARGO_PKG_VERSION"),
-            },
-        },
+            inputs,
+        } => render_request(package_filename, source, inputs),
     };
 
     let out = serde_json::to_string(&resp).map_err(|source| WorkerError::EncodeResponse { source })?;
@@ -166,6 +152,51 @@ fn run() -> Result<(), WorkerError> {
         .write_all(out.as_bytes())
         .map_err(|source| WorkerError::StdoutWrite { source })?;
     Ok(())
+}
+
+fn render_request(
+    package_filename: String,
+    source: String,
+    inputs: Option<serde_json::Value>,
+) -> Response {
+    let ver = env!("CARGO_PKG_VERSION");
+
+    // Protocol accepts inputs as JSON, akua-core wants a
+    // serde_yaml::Value. Null / absent → empty mapping so Package's
+    // `option("input")` resolves to a map, not a missing-option trap.
+    let inputs_value: serde_yaml::Value = match inputs {
+        Some(json) => match serde_json::from_value(json) {
+            Ok(y) => y,
+            Err(e) => {
+                return Response::Render {
+                    status: "fail",
+                    yaml: String::new(),
+                    message: format!("inputs must be a JSON object: {e}"),
+                    worker_version: ver,
+                };
+            }
+        },
+        None => serde_yaml::Value::Mapping(Default::default()),
+    };
+
+    match akua_core::eval_source_with_inputs(
+        std::path::Path::new(&package_filename),
+        &source,
+        &inputs_value,
+    ) {
+        Ok(yaml) => Response::Render {
+            status: "ok",
+            yaml,
+            message: String::new(),
+            worker_version: ver,
+        },
+        Err(e) => Response::Render {
+            status: "fail",
+            yaml: String::new(),
+            message: e.to_string(),
+            worker_version: ver,
+        },
+    }
 }
 
 #[derive(Debug)]

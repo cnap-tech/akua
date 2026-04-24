@@ -29,3 +29,4 @@ path = "src/main.rs"
 akua-core = { path = "../akua-core", default-features = false, features = ["engine-kcl"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
