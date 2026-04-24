@@ -15,6 +15,7 @@ pub mod fmt;
 pub mod init;
 pub mod inspect;
 pub mod lint;
+pub mod lock;
 pub mod pack;
 pub mod publish;
 pub mod pull;

@@ -12,9 +12,10 @@ use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::{
     add as add_verb, auth as auth_verb, cache as cache_verb, check as check_verb,
     diff as diff_verb, fmt as fmt_verb, init as init_verb, inspect as inspect_verb,
-    lint as lint_verb, pack as pack_verb, publish as publish_verb, pull as pull_verb,
-    push as push_verb, remove as remove_verb, render as render_verb, test as test_verb,
-    tree as tree_verb, verify as verify_verb, version as version_verb, whoami as whoami_verb,
+    lint as lint_verb, lock as lock_verb, pack as pack_verb, publish as publish_verb,
+    pull as pull_verb, push as push_verb, remove as remove_verb, render as render_verb,
+    test as test_verb, tree as tree_verb, verify as verify_verb, version as version_verb,
+    whoami as whoami_verb,
 };
 #[cfg(feature = "dev-watch")]
 use akua_cli::verbs::dev as dev_verb;
@@ -236,6 +237,23 @@ enum Commands {
         /// Workspace root containing akua.toml.
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
+    },
+
+    /// Regenerate `akua.lock` from `akua.toml`. Resolves every dep
+    /// (online — path, OCI, git) and writes the merged lock back.
+    /// `--check` mode diffs without writing; exits 1 on drift.
+    /// Analogue of `cargo generate-lockfile`.
+    Lock {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
+
+        /// Don't write; exit 1 if the lock would change. Use in
+        /// CI / pre-commit to catch stale lockfiles.
+        #[arg(long)]
+        check: bool,
     },
 
     /// Upload a pre-packed `.tar.gz` (from `akua pack`) to an OCI
@@ -594,6 +612,11 @@ fn dispatch(command: Commands) -> ExitCode {
             oci_ref,
             tag,
         } => run_push(&args, &tarball, &oci_ref, &tag),
+        Commands::Lock {
+            args,
+            workspace,
+            check,
+        } => run_lock(&args, &workspace, check),
     }
 }
 
@@ -611,6 +634,16 @@ fn run_pack(
     };
     let mut stdout = io::stdout().lock();
     match pack_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
+    }
+}
+
+fn run_lock(args: &UniversalArgs, workspace: &std::path::Path, check: bool) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = lock_verb::LockArgs { workspace, check };
+    let mut stdout = io::stdout().lock();
+    match lock_verb::run(&ctx, &verb_args, &mut stdout) {
         Ok(code) => code,
         Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
@@ -1198,6 +1231,34 @@ mod tests {
             .err()
             .expect("should fail");
         assert!(err.to_string().contains("cannot be used"));
+    }
+
+    #[test]
+    fn parses_lock_defaults_workspace_and_check() {
+        let cli = Cli::parse_from(["akua", "lock"]);
+        match cli.command {
+            Commands::Lock {
+                workspace, check, ..
+            } => {
+                assert_eq!(workspace, PathBuf::from("."));
+                assert!(!check);
+            }
+            _ => panic!("expected lock"),
+        }
+    }
+
+    #[test]
+    fn parses_lock_with_check_flag() {
+        let cli = Cli::parse_from(["akua", "lock", "--check", "--workspace", "./ws"]);
+        match cli.command {
+            Commands::Lock {
+                workspace, check, ..
+            } => {
+                assert_eq!(workspace, PathBuf::from("./ws"));
+                assert!(check);
+            }
+            _ => panic!("expected lock"),
+        }
     }
 
     #[test]
