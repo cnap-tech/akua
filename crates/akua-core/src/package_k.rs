@@ -388,8 +388,29 @@ pub fn eval_source_with_inputs(
     source: &str,
     inputs: &Value,
 ) -> Result<String, PackageKError> {
+    eval_source_full(path, source, inputs, None)
+}
+
+/// Full-surface eval: inputs + a generated `charts` KCL pkg dir.
+///
+/// The render worker calls this with a preopened path where the host
+/// has dropped the output of
+/// [`crate::stdlib::materialize_charts`]. KCL's import resolver sees
+/// the `charts` ExternalPkg and resolves `import charts.<name>` to
+/// the files there. Plugin callouts from those imports still flow
+/// through the host-side plugin bridge (helm / kustomize handlers
+/// live on akua-cli's side, not in the worker).
+///
+/// `charts_pkg_dir = None` is equivalent to [`eval_source_with_inputs`]
+/// — no `charts.*` resolution, bare-KCL only.
+pub fn eval_source_full(
+    path: &Path,
+    source: &str,
+    inputs: &Value,
+    charts_pkg_dir: Option<&Path>,
+) -> Result<String, PackageKError> {
     let json = serde_json::to_string(inputs)?;
-    eval_kcl(path, source, &json, None)
+    eval_kcl(path, source, &json, charts_pkg_dir)
 }
 
 fn eval_kcl(

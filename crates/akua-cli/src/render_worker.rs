@@ -86,6 +86,11 @@ pub enum WorkerRequest {
         source: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         inputs: Option<serde_json::Value>,
+        /// Guest-visible path to the preopened `charts` pkg dir.
+        /// Set by [`RenderHost::invoke_with_charts`]; omit for
+        /// Packages that don't `import charts.*`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        charts_pkg_path: Option<String>,
     },
 }
 
@@ -185,10 +190,39 @@ impl RenderHost {
 
     /// Run one worker invocation with the given limits + request.
     /// Every call gets a fresh `Store`; caps are re-applied every time.
+    /// No preopens — use [`invoke_with_charts`](Self::invoke_with_charts)
+    /// for Packages that `import charts.*`.
     pub fn invoke(
         &self,
         req: &WorkerRequest,
         limits: ResourceLimits,
+    ) -> Result<WorkerResponse, WorkerError> {
+        self.invoke_inner(req, limits, None)
+    }
+
+    /// As [`invoke`](Self::invoke), but preopens `charts_host_dir`
+    /// read-only at the guest path `/charts`. The `Render` request's
+    /// `charts_pkg_path` must be `Some("/charts".into())` for the
+    /// guest's evaluator to see the mount.
+    ///
+    /// `charts_host_dir` is typically the tempdir returned by
+    /// [`akua_core::stdlib::materialize_charts`]. It stays on the
+    /// host until this call returns; the WASI layer holds its own
+    /// file-descriptor handle while the guest runs.
+    pub fn invoke_with_charts(
+        &self,
+        req: &WorkerRequest,
+        limits: ResourceLimits,
+        charts_host_dir: &std::path::Path,
+    ) -> Result<WorkerResponse, WorkerError> {
+        self.invoke_inner(req, limits, Some(charts_host_dir))
+    }
+
+    fn invoke_inner(
+        &self,
+        req: &WorkerRequest,
+        limits: ResourceLimits,
+        charts_preopen: Option<&std::path::Path>,
     ) -> Result<WorkerResponse, WorkerError> {
         let req_bytes = serde_json::to_vec(req).map_err(WorkerError::EncodeRequest)?;
 
@@ -202,11 +236,21 @@ impl RenderHost {
         wasi.stdin(stdin_pipe);
         wasi.stdout(stdout_pipe.clone());
         wasi.stderr(stderr_pipe.clone());
-        // argv[0] is conventional. No args, no env, no preopens
-        // (Ping doesn't need filesystem access). Render + the
-        // kcl-driver wasm32 follow-up will add a per-invocation
-        // scratch preopen once the upstream panic is patched.
         wasi.arg("akua-render-worker");
+        // The one optional preopen: a host tempdir populated by
+        // `akua_core::stdlib::materialize_charts`. Mounts read-only
+        // at `/charts` inside the guest; KCL's import resolver
+        // reads `charts.*.k` from here when the Package does
+        // `import charts.<name>`. No other filesystem is reachable.
+        if let Some(dir) = charts_preopen {
+            wasi.preopened_dir(
+                dir,
+                "/charts",
+                wasmtime_wasi::DirPerms::READ,
+                wasmtime_wasi::FilePerms::READ,
+            )
+            .map_err(|e| WorkerError::Wasmtime(format!("preopen charts: {e}")))?;
+        }
 
         let wasi_ctx = wasi.build_p1();
         let host = HostState {
@@ -502,6 +546,7 @@ mod tests {
                     package_filename: "package.k".into(),
                     source: "x = 42\ngreeting = \"hello\"\n".into(),
                     inputs: None,
+                    charts_pkg_path: None,
                 },
                 ResourceLimits::default(),
             )
@@ -546,6 +591,7 @@ mod tests {
                     package_filename: "package.k".into(),
                     source: source.into(),
                     inputs: None,
+                    charts_pkg_path: None,
                 },
                 ResourceLimits::default(),
             )
@@ -581,6 +627,7 @@ mod tests {
                     package_filename: "package.k".into(),
                     source: source.into(),
                     inputs: Some(inputs),
+                    charts_pkg_path: None,
                 },
                 ResourceLimits::default(),
             )
@@ -611,6 +658,7 @@ mod tests {
                     package_filename: "package.k".into(),
                     source: "this is not valid kcl".into(),
                     inputs: None,
+                    charts_pkg_path: None,
                 },
                 ResourceLimits::default(),
             )

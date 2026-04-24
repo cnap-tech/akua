@@ -73,15 +73,25 @@ enum Request {
         note: Option<String>,
     },
     /// Evaluate a KCL source buffer and return its top-level YAML.
-    /// Source lives in-band — no filesystem access. Multi-file
-    /// Packages + chart imports land in a later slice via preopened
-    /// workspace dirs + host-function plugin bridges.
+    /// Source lives in-band — no filesystem access needed for bare
+    /// Packages. When the Package does `import charts.<name>`, the
+    /// host materializes the `charts` KCL pkg into a tempdir,
+    /// preopens it into the worker's WASI context at
+    /// `charts_pkg_path`, and the evaluator resolves imports via
+    /// that mount. Plugin callouts (`helm.template` / `kustomize.
+    /// build`) still flow back to host-registered handlers via the
+    /// `kcl_plugin_invoke_json_wasm` bridge.
     Render {
         #[serde(default = "default_package_filename")]
         package_filename: String,
         source: String,
         #[serde(default)]
         inputs: Option<serde_json::Value>,
+        /// Guest-visible path to the preopened `charts` pkg dir.
+        /// Absent → no `charts.*` imports resolvable; the Package
+        /// must be bare-KCL + plugin-call-only.
+        #[serde(default)]
+        charts_pkg_path: Option<String>,
     },
 }
 
@@ -144,7 +154,8 @@ fn run() -> Result<(), WorkerError> {
             package_filename,
             source,
             inputs,
-        } => render_request(package_filename, source, inputs),
+            charts_pkg_path,
+        } => render_request(package_filename, source, inputs, charts_pkg_path),
     };
 
     let out = serde_json::to_string(&resp).map_err(|source| WorkerError::EncodeResponse { source })?;
@@ -158,6 +169,7 @@ fn render_request(
     package_filename: String,
     source: String,
     inputs: Option<serde_json::Value>,
+    charts_pkg_path: Option<String>,
 ) -> Response {
     let ver = env!("CARGO_PKG_VERSION");
 
@@ -179,10 +191,14 @@ fn render_request(
         None => serde_yaml::Value::Mapping(Default::default()),
     };
 
-    match akua_core::eval_source_with_inputs(
+    let charts_path_buf = charts_pkg_path.map(std::path::PathBuf::from);
+    let charts_ref = charts_path_buf.as_deref();
+
+    match akua_core::eval_source_full(
         std::path::Path::new(&package_filename),
         &source,
         &inputs_value,
+        charts_ref,
     ) {
         Ok(yaml) => Response::Render {
             status: "ok",
