@@ -404,12 +404,10 @@ fn eval_kcl(
     // worker's plugin imports). Pure-KCL Packages work on both paths.
     let mut external_pkgs: Vec<ExternalPkg> = Vec::new();
     #[cfg(not(target_arch = "wasm32"))]
-    {
-        external_pkgs.push(ExternalPkg {
-            pkg_name: "akua".to_string(),
-            pkg_path: crate::stdlib::stdlib_root().to_string_lossy().into_owned(),
-        });
-    }
+    external_pkgs.push(ExternalPkg {
+        pkg_name: "akua".to_string(),
+        pkg_path: crate::stdlib::stdlib_root().to_string_lossy().into_owned(),
+    });
     if let Some(dir) = charts_pkg_dir {
         external_pkgs.push(ExternalPkg {
             pkg_name: "charts".to_string(),

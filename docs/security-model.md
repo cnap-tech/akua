@@ -45,9 +45,9 @@ akua is a **sandboxed-by-default** render substrate. Every render runs inside a 
 | Write files outside scope | Same mechanism. Output dir preopened with `DirPerms::MUTATE + FilePerms::WRITE`; nothing else writable. |
 | Network | **wasip1 has no socket syscalls, period.** Not "denied by default" — denied by construction. No `connect()`, no DNS, no TLS initiation. The guest cannot fabricate a socket. |
 | Subprocess | No `fork`/`exec` in wasip1. Shell-out is unavailable at the host-ABI level. |
-| Memory | `StoreLimitsBuilder::memory_size(256 << 20)` caps each Store at 256 MiB (tunable). `memory.grow` fails beyond the cap; wasm traps. |
-| CPU (deterministic) | `Config::consume_fuel(true)` + `store.set_fuel(N)`. Fuel counts wasm instructions executed. Deterministic across runs — same render hits the same fuel-exhaustion point, always. |
-| CPU (wall-clock) | `Config::epoch_interruption(true)` + background thread calling `engine.increment_epoch()` on a fixed tick. `store.set_epoch_deadline(K)` traps when the current epoch exceeds deadline. Cheap to check (compiled into every loop backedge). Non-deterministic but fast. |
+| Memory | `StoreLimitsBuilder::memory_size(256 << 20)` caps each Store at 256 MiB (tunable). `memory.grow` fails beyond the cap; wasm traps. Default: **256 MiB per render**. |
+| CPU (deterministic) | `Config::consume_fuel(true)` + `store.set_fuel(N)`. Fuel counts wasm instructions executed. Deterministic across runs — same render hits the same fuel-exhaustion point, always. Default: **10 billion fuel units per render** (~10s of cranelift-JITted integer work, well beyond any legitimate render). |
+| CPU (wall-clock) | `Config::epoch_interruption(true)` + background thread calling `engine.increment_epoch()` on a fixed tick. `store.set_epoch_deadline(K)` traps when the current epoch exceeds deadline. Cheap to check (compiled into every loop backedge). Non-deterministic but fast. Default: **30 ticks × 100 ms/tick = 3 s wall-clock deadline per render**. |
 | Stack overflow | `Config::max_wasm_stack(bytes)` caps the wasm-side stack. Default 512 KiB; lower for defense-in-depth. |
 | Instance count / table bloat | `StoreLimitsBuilder::instances(N)`, `tables(N)`. Prevents wasm from inflating host memory via many small allocations. |
 

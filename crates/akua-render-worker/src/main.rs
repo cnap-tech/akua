@@ -117,11 +117,29 @@ fn run() -> Result<(), WorkerError> {
             echoed: note,
             worker_version: env!("CARGO_PKG_VERSION"),
         },
+        // Evaluate the KCL source in-process (already inside the
+        // per-render sandbox) and package the outcome. Eval errors
+        // become `status: "fail"` with the diagnostic in `message` —
+        // never a trap. `inputs` is reserved for a future slice —
+        // `eval_source` doesn't take them today.
         Request::Render {
             package_filename,
             source,
             inputs: _inputs,
-        } => render(&package_filename, &source),
+        } => match akua_core::eval_source(std::path::Path::new(&package_filename), &source) {
+            Ok(yaml) => Response::Render {
+                status: "ok",
+                yaml,
+                message: String::new(),
+                worker_version: env!("CARGO_PKG_VERSION"),
+            },
+            Err(e) => Response::Render {
+                status: "fail",
+                yaml: String::new(),
+                message: e.to_string(),
+                worker_version: env!("CARGO_PKG_VERSION"),
+            },
+        },
     };
 
     let out = serde_json::to_string(&resp).map_err(|source| WorkerError::EncodeResponse { source })?;
@@ -129,29 +147,6 @@ fn run() -> Result<(), WorkerError> {
         .write_all(out.as_bytes())
         .map_err(|source| WorkerError::StdoutWrite { source })?;
     Ok(())
-}
-
-/// Evaluate the KCL source in-process (we're already inside the
-/// per-render sandbox) and return the result as a `Response::Render`.
-/// Any eval error becomes a `status: "fail"` with the diagnostic in
-/// `message` — never a trap. Inputs are reserved for a future slice;
-/// `eval_source` doesn't take them today.
-fn render(package_filename: &str, source: &str) -> Response {
-    use std::path::Path;
-    match akua_core::eval_source(Path::new(package_filename), source) {
-        Ok(yaml) => Response::Render {
-            status: "ok",
-            yaml,
-            message: String::new(),
-            worker_version: env!("CARGO_PKG_VERSION"),
-        },
-        Err(e) => Response::Render {
-            status: "fail",
-            yaml: String::new(),
-            message: e.to_string(),
-            worker_version: env!("CARGO_PKG_VERSION"),
-        },
-    }
 }
 
 #[derive(Debug)]

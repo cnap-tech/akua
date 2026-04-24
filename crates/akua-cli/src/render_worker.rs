@@ -40,8 +40,9 @@ use wasmtime_wasi::WasiCtxBuilder;
 /// build time — see [`WorkerError::SandboxUnavailable`].
 const WORKER_CWASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/akua-render-worker.cwasm"));
 
-/// Per-render resource caps. Tunable via ResourceLimits at call-time;
-/// these defaults match the security-model.md budget.
+/// Per-render resource caps. Defaults documented in
+/// [docs/security-model.md](../../../../docs/security-model.md) under
+/// the sandbox-layers table — keep the two in sync when tuning.
 #[derive(Debug, Clone, Copy)]
 pub struct ResourceLimits {
     /// Hard cap on linear memory. Default 256 MiB.
@@ -113,11 +114,12 @@ pub enum WorkerError {
     )]
     SandboxUnavailable,
 
-    #[error("wasmtime init: {0}")]
-    Init(String),
-
-    #[error("wasmtime instantiate: {0}")]
-    Instantiate(String),
+    /// Any wasmtime-side setup or instantiation failure. Phase is
+    /// embedded in the string (e.g. `"init: Module::deserialize: ..."`
+    /// or `"instantiate: _start lookup: ..."`). Programmer-side bugs;
+    /// consumers don't match on the specific phase.
+    #[error("wasmtime {0}")]
+    Wasmtime(String),
 
     #[error("worker trapped: {0}")]
     Trap(String),
@@ -149,14 +151,14 @@ impl RenderHost {
         if WORKER_CWASM.is_empty() {
             return Err(WorkerError::SandboxUnavailable);
         }
-        let engine = Engine::new(&worker_config()).map_err(|e| WorkerError::Init(e.to_string()))?;
+        let engine = Engine::new(&worker_config()).map_err(|e| WorkerError::Wasmtime(format!("init: {e}")))?;
         // SAFETY: WORKER_CWASM was produced by the same wasmtime
         // version + config in build.rs; deserialize is the fast path
         // (memcpy + fixup), no Cranelift pass. If build.rs and runtime
         // ever drift the compat-hash check rejects the artifact.
         let module = unsafe {
             Module::deserialize(&engine, WORKER_CWASM)
-                .map_err(|e| WorkerError::Init(format!("Module::deserialize: {e}")))?
+                .map_err(|e| WorkerError::Wasmtime(format!("init: Module::deserialize: {e}")))?
         };
         spawn_epoch_ticker(engine.clone());
         Ok(Self { engine, module })
@@ -199,20 +201,20 @@ impl RenderHost {
         store.limiter(|h: &mut HostState| &mut h.limits);
         store
             .set_fuel(limits.fuel)
-            .map_err(|e| WorkerError::Init(format!("set_fuel: {e}")))?;
+            .map_err(|e| WorkerError::Wasmtime(format!("init: set_fuel: {e}")))?;
         store.set_epoch_deadline(limits.epoch_deadline);
 
         let mut linker: Linker<HostState> = Linker::new(&self.engine);
         wasmtime_wasi::p1::add_to_linker_sync(&mut linker, |h: &mut HostState| &mut h.wasi)
-            .map_err(|e| WorkerError::Init(format!("add_to_linker: {e}")))?;
+            .map_err(|e| WorkerError::Wasmtime(format!("init: add_to_linker: {e}")))?;
         install_kcl_plugin_stub(&mut linker);
 
         let instance = linker
             .instantiate(&mut store, &self.module)
-            .map_err(|e| WorkerError::Instantiate(e.to_string()))?;
+            .map_err(|e| WorkerError::Wasmtime(format!("instantiate: {e}")))?;
         let start = instance
             .get_typed_func::<(), ()>(&mut store, "_start")
-            .map_err(|e| WorkerError::Instantiate(format!("_start lookup: {e}")))?;
+            .map_err(|e| WorkerError::Wasmtime(format!("instantiate: _start lookup: {e}")))?;
 
         // A successful `std::process::exit(0)` on wasip1 surfaces as
         // an `I32Exit(0)` trap, which is NOT an error. Peel it off
