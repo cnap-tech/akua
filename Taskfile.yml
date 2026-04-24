@@ -8,6 +8,11 @@ version: "3"
 vars:
   HELM_ENGINE_WASM: crates/helm-engine-wasm/assets/helm-engine.wasm
   KUSTOMIZE_ENGINE_WASM: crates/kustomize-engine-wasm/assets/kustomize-engine.wasm
+  # Produced by `task build:render-worker`. Embedded in the CLI at
+  # build time via akua-cli's build.rs — AOT-compiled to a .cwasm
+  # matching the runtime wasmtime Config hash so per-render
+  # Module::deserialize is a memcpy, not a Cranelift pass.
+  RENDER_WORKER_WASM: target/wasm32-wasip1/release/akua-render-worker.wasm
 
 tasks:
   default:
@@ -110,6 +115,19 @@ tasks:
     cmds:
       - task: build:helm-engine-wasm
       - task: build:kustomize-engine-wasm
+
+  # ---- Render worker (Rust → wasip1; the Phase 4 sandbox) ------------------
+
+  build:render-worker:
+    desc: Build akua-render-worker for wasm32-wasip1 (embedded in akua-cli)
+    sources:
+      - crates/akua-render-worker/**/*.rs
+      - crates/akua-render-worker/Cargo.toml
+    generates:
+      - "{{.RENDER_WORKER_WASM}}"
+    cmds:
+      - cargo build --release -p akua-render-worker --target wasm32-wasip1
+      - ls -lh {{.RENDER_WORKER_WASM}}
 
   # ---- Sandbox test harness (Phase 4+) -------------------------------------
 

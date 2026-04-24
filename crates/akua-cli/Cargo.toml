@@ -15,6 +15,12 @@ path = "src/lib.rs"
 name = "akua"
 path = "src/main.rs"
 
+# Runs at build time to AOT-compile the render-worker .wasm into a
+# platform-specific .cwasm. Module::deserialize at run time is a
+# memcpy + fixup; Module::new would spend seconds in Cranelift per
+# startup.
+build = "build.rs"
+
 [features]
 # Pass-through gates mirroring akua-core. Lets call-sites in the CLI
 # tree `#[cfg(feature = "cosign-verify")]` their own bits (e.g. the
@@ -36,6 +42,18 @@ thiserror = { workspace = true }
 # libc. Feature-gated under `dev-watch` so headless builds don't
 # pull it.
 ctrlc = { version = "3", optional = true }
+
+# Phase 4: per-render sandbox. Version pinned to 43.x matching
+# engine-host-wasm so a single Engine/Module/Store shape can cross
+# crate boundaries without compat-hash drift.
+wasmtime = "43"
+wasmtime-wasi = "43"
+
+[build-dependencies]
+# build.rs AOT-compiles the render-worker .wasm into a .cwasm. Must
+# use the same wasmtime version + Config shape as the runtime host
+# or Module::deserialize fails the compat-hash check.
+wasmtime = "43"
 
 [dev-dependencies]
 tempfile = "3"

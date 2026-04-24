@@ -3,4 +3,5 @@
 //! emission) every verb shares.
 
 pub mod contract;
+pub mod render_worker;
 pub mod verbs;
