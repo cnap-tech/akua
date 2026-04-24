@@ -64,53 +64,40 @@ fn helm_render_direct_no_sandbox() {
 /// `pkgroot not found: "charts.nginx"` from KCL itself. Re-enable
 /// (drop `ignore`) once #420 is resolved.
 #[test]
-#[ignore = "blocked on #420: KCL Path::exists through wasip1 preopen"]
 fn charts_import_resolves_inside_sandbox_via_preopen() {
-    // Materialize a one-chart `charts` pkg on the host (same helper
-    // the native render uses), preopen it into the worker's WasiCtx
-    // at /charts, and evaluate a Package that does
-    // `import charts.nginx`. The sandboxed KCL evaluator should
-    // resolve the import against the preopen.
-    use akua_core::chart_resolver::{ResolvedChart, ResolvedCharts, ResolvedSource};
+    // Narrow scope: verify that an absolute preopen path (`/charts`)
+    // resolves `import charts.<name>` inside the wasmtime sandbox.
+    // Decoupled from `materialize_charts` on purpose — the generated
+    // `<name>.k` imports `akua.helm`, which needs the akua stdlib
+    // preopened too (tracked separately). The mechanics of preopen
+    // resolution are what this test proves.
 
-    let chart = chart_dir();
-    assert!(chart.is_dir());
+    let temp = tempfile::Builder::new()
+        .prefix("akua-charts-preopen-")
+        .tempdir()
+        .expect("charts tempdir");
 
-    // Build a ResolvedCharts with one entry pointing at the fixture
-    // chart dir — same shape `akua render`'s resolver produces.
-    let mut entries = std::collections::BTreeMap::new();
-    entries.insert(
-        "nginx".to_string(),
-        ResolvedChart {
-            name: "nginx".to_string(),
-            abs_path: chart.clone(),
-            sha256: "sha256:test".to_string(),
-            source: ResolvedSource::Path {
-                declared: chart.display().to_string(),
-            },
-        },
-    );
-    let resolved = ResolvedCharts { entries };
-
-    let charts_dir = akua_core::stdlib::materialize_charts(&resolved)
-        .expect("materialize charts");
-
-    // Package.k resolution: RenderScope from the chart's parent,
-    // plus `charts` pkg preopened for the guest.
-    let package_k = chart.parent().unwrap().join("package.k");
-    let _scope = akua_core::kcl_plugin::RenderScope::enter(&package_k);
+    // Minimal `charts` pkg: kcl.mod + a single-file `nginx.k` exposing
+    // a `marker` binding we can assert on.
+    std::fs::write(
+        temp.path().join("kcl.mod"),
+        "[package]\nname = \"charts\"\nedition = \"0.0.1\"\nversion = \"0.0.1\"\n",
+    )
+    .expect("write kcl.mod");
+    let marker = "preopen-reached-nginx";
+    std::fs::write(
+        temp.path().join("nginx.k"),
+        format!("marker: str = \"{marker}\"\n"),
+    )
+    .expect("write nginx.k");
 
     let Ok(host) = RenderHost::new() else {
         eprintln!("skipping: worker .wasm not built");
         return;
     };
 
-    // Verify the import resolves + surfaces the chart's `path`
-    // binding. materialize_charts generates `charts/nginx.k` with a
-    // `path = "<abs>"` top-level binding (one of several) — asserting
-    // on it proves the import reached the preopened file.
     let src = "import charts.nginx\n\
-         chart_path = nginx.path\n"
+               chart_marker = nginx.marker\n"
         .to_string();
 
     let resp = host
@@ -125,18 +112,15 @@ fn charts_import_resolves_inside_sandbox_via_preopen() {
                 epoch_deadline: 300,
                 ..ResourceLimits::default()
             },
-            charts_dir.path(),
+            temp.path(),
         )
         .expect("invoke_with_charts");
     match resp {
         WorkerResponse::Render { status, yaml, message, .. } => {
             assert_eq!(status, "ok", "diagnostic: {message}");
-            // nginx.path is the absolute host path baked in by
-            // materialize_charts. Contains the canonical chart dir.
-            let chart_canon = chart.canonicalize().unwrap();
             assert!(
-                yaml.contains(&chart_canon.display().to_string()),
-                "chart path should appear in rendered YAML: {yaml}"
+                yaml.contains(marker),
+                "marker should round-trip through preopened import: {yaml}"
             );
         }
         _ => panic!("expected Render"),
