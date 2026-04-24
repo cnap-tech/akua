@@ -15,11 +15,17 @@ name = "akua-render-worker"
 path = "src/main.rs"
 
 [dependencies]
-# Scaffold phase: just serde. The akua-core + engine-kcl integration
-# is held up on a narrow kcl-driver fix (current_dir() panic on
-# wasm32). See docs/spikes/kcl-wasm-feasibility.md + Phase 4 step 2
-# note. Once kcl-driver's `get_pkg_list` is cfg-guarded / patched,
-# the worker flips back to depending on akua-core and grows a Render
-# request variant.
+# Render path via akua-core with only engine-kcl. No engine hosts,
+# no OCI fetch, no cosign, no dev-watch — those are host-CLI
+# concerns. Plugin callouts from KCL to engines + the chart
+# resolver will wire through wasmtime imported host functions in a
+# later slice; today's worker supports pure-KCL Packages (no
+# charts.* imports, no helm.template / kustomize.build).
+#
+# kcl-driver's wasm32 current_dir() panic is patched via the
+# workspace-root `[patch."https://github.com/kcl-lang/kcl"]` block
+# pointing at cnap-tech/kcl#akua-wasm32. See
+# docs/spikes/kcl-wasm-feasibility.md for the story.
+akua-core = { path = "../akua-core", default-features = false, features = ["engine-kcl"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

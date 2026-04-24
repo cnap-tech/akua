@@ -17,7 +17,7 @@ Built against `kcl-lang` commit `bde7439b` (git dep in Cargo.toml).
 
 ## Findings
 
-### wasm32-wasip1 — yellow (compile-time green, runtime one-line blocker)
+### wasm32-wasip1 — green (runtime unblocked 2026-04-24)
 
 ```text
 cargo build --target wasm32-wasip1
@@ -26,26 +26,15 @@ cargo build --target wasm32-wasip1
   Finished `dev` profile in 25.45s
 ```
 
-Produces a 145 MB wasip1 binary (unoptimized debug). No upstream fixes needed to COMPILE.
+Produces a 145 MB wasip1 binary (unoptimized debug). Compile is clean.
 
-**Runtime blocker discovered 2026-04-24 during Phase 4 step 2 integration.** When the worker (bundled akua-core + engine-kcl) actually evaluates a Package, KCL panics with `thread 'main' panicked at library/std/src/sys/pal/wasip1/os.rs:119:5: no filesystem on wasm`. The call chain:
+**Two runtime blockers hit during Phase 4 step 2 integration, both fixed same-day:**
 
-- `akua_core::eval_source` → `kcl_lang::API::exec_program`
-- → `kcl-driver::get_pkg_list` at `crates/driver/src/lib.rs:328` (git ref `c164bf7`):
-  ```rust
-  let cwd = std::env::current_dir()?;
-  ```
-- wasip1 `std::env::current_dir()` is an unconditional panic (wasip1 has no cwd concept).
+1. **`kcl-driver::get_pkg_list`** at `crates/driver/src/lib.rs:328` calls `std::env::current_dir()` — unconditional panic on wasip1. Fixed via [cnap-tech/kcl@akua-wasm32](https://github.com/cnap-tech/kcl/tree/akua-wasm32) (pinned via workspace `[patch]`) + upstream PR [kcl-lang/kcl#2086](https://github.com/kcl-lang/kcl/pull/2086).
 
-**Fix is narrow.** `get_pkg_list` uses `cwd` only when `pkgpath.is_empty()`. Three paths, ranked by preference:
+2. **`akua_core::stdlib::stdlib_root`** calls `std::env::temp_dir()` — also an unconditional panic on wasip1 (`sys/pal/wasip1/os.rs:119:5`, same error message as the kcl issue but a different call site). Fixed in-tree: skip the "akua" stdlib `ExternalPkg` on wasm32 (pure-KCL Packages work; stdlib-requiring Packages will land later when the plugin bridge forwards `akua.*` callouts from worker to host).
 
-1. **Upstream PR** against `kcl-lang/kcl` — cfg-guard the `current_dir()` call on wasm32 + fall back to `PathBuf::from(".")`. Single-file diff. Should merge quickly.
-2. **Fork as `cnap-tech/kcl`** on branch `akua-wasm32` with the same patch. Tracked as a Cargo `[patch]` override pointing at the fork commit.
-3. **Local Cargo patch** via `[patch."https://github.com/kcl-lang/kcl"]` on a vendored `kcl-driver` source.
-
-Estimated effort: ~1 hour for the patch itself. Upstream acceptance: weeks. Fork-and-pin: same-day.
-
-**Go signal for Phase 4 — conditional on the patch.** Host plumbing in akua-cli (wasmtime + build.rs + per-render Store + WASI pipes + plugin-stub import) is shipped and tested via a Ping round-trip; Render integration in the worker is blocked on this single upstream fix.
+**Go signal for Phase 4 — confirmed.** End-to-end test shipped: `render_pure_kcl_returns_yaml_end_to_end` evaluates `x = 42\ngreeting = "hello"\n` inside the per-render wasmtime sandbox and recovers the top-level YAML with correct values. Sandbox resources (fuel / epoch / 256 MiB memory) active throughout. Test runs on every `cargo test -p akua-cli` invocation.
 
 ### wasm32-unknown-unknown — yellow, two fixable issues
 

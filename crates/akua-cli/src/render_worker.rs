@@ -69,9 +69,6 @@ impl Default for ResourceLimits {
 /// One invocation of the worker. Kept in sync with the request
 /// protocol in `crates/akua-render-worker/src/main.rs` — serialize
 /// shape must match the worker's `Deserialize` shape exactly.
-///
-/// Today only `Ping` is implemented. `Render` lands with the
-/// kcl-driver wasm32 follow-up — see the roadmap's Phase 4 section.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkerRequest {
@@ -79,14 +76,31 @@ pub enum WorkerRequest {
         #[serde(skip_serializing_if = "Option::is_none")]
         note: Option<String>,
     },
+    Render {
+        #[serde(default)]
+        package_filename: String,
+        source: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        inputs: Option<serde_json::Value>,
+    },
 }
 
 #[derive(Debug, Clone, serde::Deserialize, PartialEq, Eq)]
-pub struct WorkerResponse {
-    pub status: String,
-    #[serde(default)]
-    pub echoed: Option<String>,
-    pub worker_version: String,
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WorkerResponse {
+    Ping {
+        status: String,
+        #[serde(default)]
+        echoed: Option<String>,
+        worker_version: String,
+    },
+    Render {
+        status: String,
+        yaml: String,
+        #[serde(default)]
+        message: String,
+        worker_version: String,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -322,9 +336,18 @@ mod tests {
                 ResourceLimits::default(),
             )
             .expect("invoke");
-        assert_eq!(resp.status, "ok");
-        assert_eq!(resp.echoed.as_deref(), Some("from-test"));
-        assert!(!resp.worker_version.is_empty());
+        match resp {
+            WorkerResponse::Ping {
+                status,
+                echoed,
+                worker_version,
+            } => {
+                assert_eq!(status, "ok");
+                assert_eq!(echoed.as_deref(), Some("from-test"));
+                assert!(!worker_version.is_empty());
+            }
+            _ => panic!("expected Ping"),
+        }
     }
 
     #[test]
@@ -333,7 +356,59 @@ mod tests {
         let resp = host
             .invoke(&WorkerRequest::Ping { note: None }, ResourceLimits::default())
             .expect("invoke");
-        assert_eq!(resp.status, "ok");
-        assert_eq!(resp.echoed, None);
+        match resp {
+            WorkerResponse::Ping { echoed, .. } => assert_eq!(echoed, None),
+            _ => panic!("expected Ping"),
+        }
+    }
+
+    #[test]
+    fn render_pure_kcl_returns_yaml_end_to_end() {
+        let Some(host) = host_or_skip() else { return };
+        let resp = host
+            .invoke(
+                &WorkerRequest::Render {
+                    package_filename: "package.k".into(),
+                    source: "x = 42\ngreeting = \"hello\"\n".into(),
+                    inputs: None,
+                },
+                ResourceLimits::default(),
+            )
+            .expect("invoke");
+        match resp {
+            WorkerResponse::Render {
+                status,
+                yaml,
+                message,
+                ..
+            } => {
+                assert_eq!(status, "ok", "diagnostic: {message}");
+                assert!(yaml.contains("x: 42"), "yaml missing x: {yaml}");
+                assert!(yaml.contains("hello"), "yaml missing greeting: {yaml}");
+            }
+            _ => panic!("expected Render"),
+        }
+    }
+
+    #[test]
+    fn render_malformed_kcl_is_fail_status_not_trap() {
+        let Some(host) = host_or_skip() else { return };
+        let resp = host
+            .invoke(
+                &WorkerRequest::Render {
+                    package_filename: "package.k".into(),
+                    source: "this is not valid kcl".into(),
+                    inputs: None,
+                },
+                ResourceLimits::default(),
+            )
+            .expect("invoke");
+        match resp {
+            WorkerResponse::Render { status, message, .. } => {
+                assert_eq!(status, "fail");
+                assert!(!message.is_empty(), "empty diagnostic");
+            }
+            _ => panic!("expected Render"),
+        }
     }
 }

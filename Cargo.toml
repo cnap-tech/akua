@@ -29,6 +29,33 @@ thiserror = "2"
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
 
+# Patch kcl-driver to cfg-guard its `std::env::current_dir()` call on
+# wasm32 — unblocks Phase 4's per-render wasmtime sandbox for every
+# kcl-derived crate in the workspace. Single-line fix lives on the
+# `akua-wasm32` branch of cnap-tech/kcl; upstream PR in flight.
+# Remove this block once the fix merges upstream.
+[patch."https://github.com/kcl-lang/kcl"]
+kcl-api = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-ast = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-ast-pretty = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-config = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-driver = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-error = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-evaluator = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-language-server = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-lexer = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-loader = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-parser = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-primitives = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-query = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-runner = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-runtime = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-sema = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-span = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-tools = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-utils = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+kcl-version = { git = "https://github.com/cnap-tech/kcl", branch = "akua-wasm32" }
+
 [profile.release]
 lto = true
 codegen-units = 1

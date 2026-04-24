@@ -197,9 +197,9 @@ are no host-side preopens to grant.
 
 Sandbox becomes the default execution path for akua itself. User-invoked `akua render` wraps a wasip1-compiled `akua-render-worker` inside wasmtime. Delivers CLAUDE.md's "sandboxed by default" invariant at the process level — **the precondition for cutting v0.1.0**. No release before this lands.
 
-- [~] **Spike complete 2026-04-24** ([docs/spikes/kcl-wasm-feasibility.md](spikes/kcl-wasm-feasibility.md)) — `kcl-lang` 0.12.3 compiles cleanly on `wasm32-wasip1` with no upstream fixes needed. **Runtime blocker discovered Step 2 integration**: `kcl-driver::get_pkg_list` at `lib.rs:328` calls `std::env::current_dir()` which panics on wasip1. One-line cfg-guard; PR or `cnap-tech/kcl` fork on `akua-wasm32` branch pinned via Cargo `[patch]`. Tracked as task #416.
-- [x] `akua-render-worker` binary targeting `wasm32-wasip1` — Ping-only scaffold shipped (task #409). Render variant lands after #416.
-- [~] Wasmtime host harness in `akua-cli`: per-render Store with `StoreLimits::memory_size(256 MiB)`, `consume_fuel`, `epoch_interruption`, background epoch ticker. Ping round-trip tested end-to-end. `akua render` dispatch wiring blocked on #416.
+- [x] **Spike complete 2026-04-24** ([docs/spikes/kcl-wasm-feasibility.md](spikes/kcl-wasm-feasibility.md)) — compile + runtime both green on `wasm32-wasip1`. Two runtime panics resolved same day: `kcl-driver::get_pkg_list` via [cnap-tech/kcl@akua-wasm32](https://github.com/cnap-tech/kcl/tree/akua-wasm32) fork + upstream PR [kcl-lang/kcl#2086](https://github.com/kcl-lang/kcl/pull/2086), `stdlib::stdlib_root` via cfg-guard in akua-core.
+- [x] `akua-render-worker` binary targeting `wasm32-wasip1` — Ping + Render requests both handled. akua-core + engine-kcl compiled into the worker via the `[patch]` pin.
+- [x] Wasmtime host harness in `akua-cli`: per-render Store with `StoreLimits::memory_size(256 MiB)`, `consume_fuel`, `epoch_interruption`, background epoch ticker. `akua render` verb dispatch through the worker — next slice.
 - [ ] AOT-compile `.cwasm` at akua's build time; embed in akua binary
 - [ ] Wasmtime host harness: `InstanceAllocationStrategy::pooling(...)` + `Config::consume_fuel(true)` + `Config::epoch_interruption(true)` + `StoreLimitsBuilder::memory_size(256 << 20)` + preopens only
 - [ ] `akua render` dispatches through worker by default. No opt-out.

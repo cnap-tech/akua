@@ -21,23 +21,19 @@
 //! return the `RenderSummary`. Task #412 adds the adversarial test
 //! suite that validates the sandbox holds.
 //!
-//! ## Protocol (scaffold)
+//! ## Protocol
 //!
 //! Request on stdin (one JSON object):
 //!
 //! ```json
 //! { "kind": "ping", "note": "optional" }
+//! { "kind": "render", "package_filename": "package.k",
+//!   "source": "...kcl...", "inputs": {...} }
 //! ```
 //!
-//! Response on stdout (one JSON object):
-//!
-//! ```json
-//! { "status": "ok", "echoed": "optional", "worker_version": "0.1.0" }
-//! ```
-//!
-//! A `Render` variant + akua-core integration land once the narrow
-//! kcl-driver wasm32 fix (get_pkg_list's `current_dir()` call) is
-//! patched. See docs/spikes/kcl-wasm-feasibility.md for findings.
+//! Response on stdout — tagged by `kind` matching the request, plus a
+//! `status` of `"ok" | "fail"`. Render carries `yaml` on success, a
+//! `message` diagnostic on failure.
 //!
 //! Parse failure → exit 2 (UserError in the CLI contract). Other
 //! I/O failure → exit 3 (SystemError). The host owns stderr for
@@ -51,20 +47,45 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Request {
-    /// Smoke request — the only shape the scaffold understands.
-    /// Render lands once the kcl-driver wasm32 fix is patched.
+    /// Smoke request — kept in the protocol so host liveness tests
+    /// can hit the worker without spinning up a real Package.
     Ping {
         #[serde(default)]
         note: Option<String>,
     },
+    /// Evaluate a KCL source buffer and return its top-level YAML.
+    /// Source lives in-band — no filesystem access. Multi-file
+    /// Packages + chart imports land in a later slice via preopened
+    /// workspace dirs + host-function plugin bridges.
+    Render {
+        #[serde(default = "default_package_filename")]
+        package_filename: String,
+        source: String,
+        #[serde(default)]
+        inputs: Option<serde_json::Value>,
+    },
+}
+
+fn default_package_filename() -> String {
+    "package.k".to_string()
 }
 
 #[derive(Debug, Serialize)]
-struct Response {
-    status: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    echoed: Option<String>,
-    worker_version: &'static str,
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum Response {
+    Ping {
+        status: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        echoed: Option<String>,
+        worker_version: &'static str,
+    },
+    Render {
+        status: &'static str,
+        yaml: String,
+        #[serde(skip_serializing_if = "String::is_empty")]
+        message: String,
+        worker_version: &'static str,
+    },
 }
 
 fn main() {
@@ -91,11 +112,16 @@ fn run() -> Result<(), WorkerError> {
         .map_err(|source| WorkerError::ParseRequest { source })?;
 
     let resp = match req {
-        Request::Ping { note } => Response {
+        Request::Ping { note } => Response::Ping {
             status: "ok",
             echoed: note,
             worker_version: env!("CARGO_PKG_VERSION"),
         },
+        Request::Render {
+            package_filename,
+            source,
+            inputs: _inputs,
+        } => render(&package_filename, &source),
     };
 
     let out = serde_json::to_string(&resp).map_err(|source| WorkerError::EncodeResponse { source })?;
@@ -103,6 +129,29 @@ fn run() -> Result<(), WorkerError> {
         .write_all(out.as_bytes())
         .map_err(|source| WorkerError::StdoutWrite { source })?;
     Ok(())
+}
+
+/// Evaluate the KCL source in-process (we're already inside the
+/// per-render sandbox) and return the result as a `Response::Render`.
+/// Any eval error becomes a `status: "fail"` with the diagnostic in
+/// `message` — never a trap. Inputs are reserved for a future slice;
+/// `eval_source` doesn't take them today.
+fn render(package_filename: &str, source: &str) -> Response {
+    use std::path::Path;
+    match akua_core::eval_source(Path::new(package_filename), source) {
+        Ok(yaml) => Response::Render {
+            status: "ok",
+            yaml,
+            message: String::new(),
+            worker_version: env!("CARGO_PKG_VERSION"),
+        },
+        Err(e) => Response::Render {
+            status: "fail",
+            yaml: String::new(),
+            message: e.to_string(),
+            worker_version: env!("CARGO_PKG_VERSION"),
+        },
+    }
 }
 
 #[derive(Debug)]

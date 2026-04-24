@@ -396,10 +396,20 @@ fn eval_kcl(
     let api = API {
         plugin_agent: crate::kcl_plugin::plugin_agent_ptr(),
     };
-    let mut external_pkgs = vec![ExternalPkg {
-        pkg_name: "akua".to_string(),
-        pkg_path: crate::stdlib::stdlib_root().to_string_lossy().into_owned(),
-    }];
+    // `stdlib_root()` calls `std::env::temp_dir()` + `std::fs::write` —
+    // both unconditional panics on `wasm32-wasip1` (no filesystem).
+    // Inside the Phase 4 render worker we skip the stdlib ExternalPkg
+    // on wasm32 entirely; Packages that `import akua.helm` / `akua.pkg`
+    // are handled on the host today (not yet bridged through the
+    // worker's plugin imports). Pure-KCL Packages work on both paths.
+    let mut external_pkgs: Vec<ExternalPkg> = Vec::new();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        external_pkgs.push(ExternalPkg {
+            pkg_name: "akua".to_string(),
+            pkg_path: crate::stdlib::stdlib_root().to_string_lossy().into_owned(),
+        });
+    }
     if let Some(dir) = charts_pkg_dir {
         external_pkgs.push(ExternalPkg {
             pkg_name: "charts".to_string(),
