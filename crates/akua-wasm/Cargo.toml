@@ -33,6 +33,20 @@ wasm-bindgen = "0.2"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
 uuid = { version = "1", features = ["js", "v4"] }
+# `instant` defaults to an `env::now` extern on wasm32; the
+# `wasm-bindgen` feature makes it use `Date.now()` instead — no
+# host-provided extern required, works in any JS runtime.
+instant = { version = "0.1", features = ["wasm-bindgen"] }
+# Same story for `chrono` — the `wasmbind` feature routes
+# clock calls through `js-sys::Date` instead of an env extern.
+chrono = { version = "0.4", default-features = false, features = ["wasmbind"] }
 
 [package.metadata.docs.rs]
 targets = ["wasm32-unknown-unknown"]
+
+# wasm-pack ships a bundled `wasm-opt` that rejects bulk-memory ops,
+# which current Rust emits unconditionally. Skip the optimizer here;
+# the release-profile LTO still produces a tight bundle, and the
+# final JSR artifact will be opt'd via a newer `wasm-opt` in CI.
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

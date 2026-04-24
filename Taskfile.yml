@@ -13,6 +13,8 @@ vars:
   # matching the runtime wasmtime Config hash so per-render
   # Module::deserialize is a memcpy, not a Cranelift pass.
   RENDER_WORKER_WASM: target/wasm32-wasip1/release/akua-render-worker.wasm
+  AKUA_WASM_RAW: target/wasm32-unknown-unknown/release/akua_wasm.wasm
+  AKUA_WASM_PKG: crates/akua-wasm/pkg
 
 tasks:
   default:
@@ -128,6 +130,40 @@ tasks:
     cmds:
       - cargo build --release -p akua-render-worker --target wasm32-wasip1
       - ls -lh {{.RENDER_WORKER_WASM}}
+
+  build:akua-wasm:
+    desc: Build the @akua/sdk WASM bundle (wasm32-unknown-unknown + wasm-bindgen)
+    sources:
+      - crates/akua-wasm/**/*.rs
+      - crates/akua-wasm/Cargo.toml
+    generates:
+      - "{{.AKUA_WASM_PKG}}/akua_wasm_bg.wasm"
+      - "{{.AKUA_WASM_PKG}}/akua_wasm.js"
+      - "{{.AKUA_WASM_PKG}}/akua_wasm.d.ts"
+    cmds:
+      # `--target bundler` leaves the import shape neutral — the
+      # eventual `@akua/sdk` wrapper adds the runtime-aware loader
+      # (Node fs.readFile vs fetch() in the browser). `web`/`nodejs`
+      # targets lock in one runtime; we want one artifact for all.
+      - wasm-pack build crates/akua-wasm --target bundler --release --out-dir pkg
+      - ls -lh {{.AKUA_WASM_PKG}}
+
+  build:akua-wasm:nodejs:
+    desc: Build a Node-loadable copy of akua-wasm (smoke-test only; SDK uses bundler build)
+    sources:
+      - crates/akua-wasm/**/*.rs
+      - crates/akua-wasm/Cargo.toml
+    generates:
+      - crates/akua-wasm/pkg-nodejs/akua_wasm.js
+    cmds:
+      - wasm-pack build crates/akua-wasm --target nodejs --release --out-dir pkg-nodejs
+
+  test:akua-wasm:
+    desc: Smoke test — call akua-wasm `render()` from Node, assert YAML output
+    deps:
+      - build:akua-wasm:nodejs
+    cmds:
+      - node crates/akua-wasm/smoke.mjs
 
   # ---- Sandbox test harness (Phase 4+) -------------------------------------
 
