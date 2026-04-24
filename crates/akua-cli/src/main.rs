@@ -17,6 +17,8 @@ use akua_cli::verbs::{
     test as test_verb, tree as tree_verb, update as update_verb, verify as verify_verb,
     version as version_verb, whoami as whoami_verb,
 };
+#[cfg(feature = "cosign-verify")]
+use akua_cli::verbs::sign as sign_verb;
 #[cfg(feature = "dev-watch")]
 use akua_cli::verbs::dev as dev_verb;
 use akua_core::cli_contract::{AgentContext, ExitCode, StructuredError};
@@ -237,6 +239,45 @@ enum Commands {
         /// Workspace root containing akua.toml.
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
+    },
+
+    /// Produce a cosign signature for a packed tarball without
+    /// touching a registry. Writes an `.akuasig` sidecar next to
+    /// the tarball for a later `akua push --sig` to upload. Unlocks
+    /// the air-gap flow: pack + sign here, transfer, push + upload-
+    /// sig there.
+    #[cfg(feature = "cosign-verify")]
+    Sign {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Pre-packed tarball to sign.
+        #[arg(long)]
+        tarball: PathBuf,
+
+        /// Target repository the tarball will be pushed to. The
+        /// signature is bound to this ref + tag — sidecar is not
+        /// portable across repositories.
+        #[arg(long = "ref")]
+        oci_ref: String,
+
+        #[arg(long)]
+        tag: String,
+
+        /// Path to a PEM-encoded PKCS#8 P-256 private key. When
+        /// absent, loads from `akua.toml [signing].cosign_private_key`.
+        #[arg(long)]
+        key: Option<PathBuf>,
+
+        /// Workspace root (used to resolve the manifest signing key
+        /// when `--key` isn't passed). Defaults to `.`.
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
+
+        /// Where to write the sidecar. Defaults to
+        /// `<tarball>.akuasig`.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
 
     /// Intentionally bump `akua.lock` against whatever upstream now
@@ -639,6 +680,24 @@ fn dispatch(command: Commands) -> ExitCode {
             workspace,
             dep,
         } => run_update(&args, &workspace, dep.as_deref()),
+        #[cfg(feature = "cosign-verify")]
+        Commands::Sign {
+            args,
+            tarball,
+            oci_ref,
+            tag,
+            key,
+            workspace,
+            out,
+        } => run_sign(
+            &args,
+            &tarball,
+            &oci_ref,
+            &tag,
+            key.as_deref(),
+            &workspace,
+            out.as_deref(),
+        ),
     }
 }
 
@@ -666,6 +725,33 @@ fn run_lock(args: &UniversalArgs, workspace: &std::path::Path, check: bool) -> E
     let verb_args = lock_verb::LockArgs { workspace, check };
     let mut stdout = io::stdout().lock();
     match lock_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
+    }
+}
+
+#[cfg(feature = "cosign-verify")]
+#[allow(clippy::too_many_arguments)]
+fn run_sign(
+    args: &UniversalArgs,
+    tarball: &std::path::Path,
+    oci_ref: &str,
+    tag: &str,
+    key: Option<&std::path::Path>,
+    workspace: &std::path::Path,
+    out: Option<&std::path::Path>,
+) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = sign_verb::SignArgs {
+        tarball,
+        oci_ref,
+        tag,
+        key,
+        workspace,
+        out,
+    };
+    let mut stdout = io::stdout().lock();
+    match sign_verb::run(&ctx, &verb_args, &mut stdout) {
         Ok(code) => code,
         Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }

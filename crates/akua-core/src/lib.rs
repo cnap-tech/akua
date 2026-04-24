@@ -22,6 +22,8 @@ pub mod chart_resolver;
 pub mod git_fetcher;
 #[cfg(feature = "cosign-verify")]
 pub mod cosign;
+#[cfg(feature = "cosign-verify")]
+pub mod cosign_sidecar;
 #[cfg(feature = "oci-fetch")]
 pub mod oci_auth;
 #[cfg(feature = "oci-fetch")]

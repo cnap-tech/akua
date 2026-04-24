@@ -20,6 +20,8 @@ pub mod pack;
 pub mod publish;
 pub mod pull;
 pub mod push;
+#[cfg(feature = "cosign-verify")]
+pub mod sign;
 pub mod remove;
 pub mod render;
 pub mod test;

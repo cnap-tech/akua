@@ -88,57 +88,35 @@ pub fn push(
     let registry_creds = oci_auth::for_registry(creds, &parsed.registry);
     let mut token = TokenCache::default();
 
-    // 1. Layer upload. sha256 the bytes up front so the URL-query
-    //    digest matches what we PUT.
-    let layer_digest = format!("sha256:{}", hex_encode(&Sha256::digest(layer_bytes)));
-    let layer_size = layer_bytes.len() as u64;
+    // Pre-compute all three digests + serialized bytes locally. The
+    // registry's `sha256:` is a function of these bytes, so the
+    // digests we compute offline == the digests the registry will
+    // advertise post-PUT. This invariant is what makes `akua sign`
+    // able to produce a valid signature without a network round-trip.
+    let d = compute_publish_digests(layer_bytes);
+
     upload_blob(
         &client,
         &parsed,
         layer_bytes,
-        &layer_digest,
+        &d.layer_digest,
         registry_creds.as_ref(),
         &mut token,
     )?;
-
-    // 2. Config upload. The config blob is a minimal JSON stub today;
-    //    future slices may embed akua.toml + akua.lock metadata.
-    let config_bytes =
-        serde_json::to_vec(&MinimalConfig { akua_version: env!("CARGO_PKG_VERSION").to_string() })?;
-    let config_digest = format!("sha256:{}", hex_encode(&Sha256::digest(&config_bytes)));
     upload_blob(
         &client,
         &parsed,
-        &config_bytes,
-        &config_digest,
+        &d.config_bytes,
+        &d.config_digest,
         registry_creds.as_ref(),
         &mut token,
     )?;
-
-    // 3. Manifest put. Compute its digest from our own bytes — that's
-    //    what we serialize, so it's what `sha256:` the registry will
-    //    advertise regardless of header ordering on the wire.
-    let manifest = OciManifest {
-        schema_version: 2,
-        media_type: OCI_MANIFEST_MEDIA_TYPE.to_string(),
-        config: Descriptor {
-            media_type: AKUA_PACKAGE_CONFIG_MEDIA_TYPE.to_string(),
-            size: config_bytes.len() as u64,
-            digest: config_digest,
-        },
-        layers: vec![Descriptor {
-            media_type: AKUA_PACKAGE_LAYER_MEDIA_TYPE.to_string(),
-            size: layer_size,
-            digest: layer_digest.clone(),
-        }],
-    };
-    let manifest_bytes = serde_json::to_vec(&manifest)?;
-    let manifest_digest = format!("sha256:{}", hex_encode(&Sha256::digest(&manifest_bytes)));
 
     let manifest_url = format!(
         "https://{}/v2/{}/manifests/{}",
         parsed.registry, parsed.repository, tag
     );
+    let manifest_bytes = d.manifest_bytes.clone();
     send_with_auth(
         &client,
         &manifest_url,
@@ -155,10 +133,70 @@ pub fn push(
     Ok(PushedArtifact {
         oci_ref: oci_ref.to_string(),
         tag: tag.to_string(),
-        manifest_digest,
-        layer_digest: manifest.layers[0].digest.clone(),
-        layer_size,
+        manifest_digest: d.manifest_digest,
+        layer_digest: d.layer_digest,
+        layer_size: d.layer_size,
     })
+}
+
+/// Deterministic publish-side digests for `layer_bytes`. Pure function:
+/// identical inputs → identical outputs, no network, no I/O. Used by
+/// [`push`] for the actual upload, and by `akua sign` to compute the
+/// manifest digest to sign without a registry round-trip.
+///
+/// **Version coupling.** The config blob embeds the akua binary
+/// version (`env!("CARGO_PKG_VERSION")`) to let consumers reject
+/// artifacts built by a version they don't understand. That means
+/// `akua sign`-then-`akua push` must be run by the *same* akua
+/// version — a signature produced on akua 0.1.0 is invalid for an
+/// artifact pushed by akua 0.2.0 if the config shape drifted. Air-gap
+/// flows should pin the binary.
+#[derive(Debug, Clone)]
+pub struct PublishDigests {
+    pub layer_digest: String,
+    pub layer_size: u64,
+    pub config_digest: String,
+    pub config_bytes: Vec<u8>,
+    pub manifest_digest: String,
+    pub manifest_bytes: Vec<u8>,
+}
+
+pub fn compute_publish_digests(layer_bytes: &[u8]) -> PublishDigests {
+    let layer_digest = format!("sha256:{}", hex_encode(&Sha256::digest(layer_bytes)));
+    let layer_size = layer_bytes.len() as u64;
+
+    let config_bytes = serde_json::to_vec(&MinimalConfig {
+        akua_version: env!("CARGO_PKG_VERSION").to_string(),
+    })
+    .expect("MinimalConfig serialization must not fail");
+    let config_digest = format!("sha256:{}", hex_encode(&Sha256::digest(&config_bytes)));
+
+    let manifest = OciManifest {
+        schema_version: 2,
+        media_type: OCI_MANIFEST_MEDIA_TYPE.to_string(),
+        config: Descriptor {
+            media_type: AKUA_PACKAGE_CONFIG_MEDIA_TYPE.to_string(),
+            size: config_bytes.len() as u64,
+            digest: config_digest.clone(),
+        },
+        layers: vec![Descriptor {
+            media_type: AKUA_PACKAGE_LAYER_MEDIA_TYPE.to_string(),
+            size: layer_size,
+            digest: layer_digest.clone(),
+        }],
+    };
+    let manifest_bytes =
+        serde_json::to_vec(&manifest).expect("OciManifest serialization must not fail");
+    let manifest_digest = format!("sha256:{}", hex_encode(&Sha256::digest(&manifest_bytes)));
+
+    PublishDigests {
+        layer_digest,
+        layer_size,
+        config_digest,
+        config_bytes,
+        manifest_digest,
+        manifest_bytes,
+    }
 }
 
 /// Push a DSSE-wrapped attestation (SLSA v1 provenance) as an `.att`
