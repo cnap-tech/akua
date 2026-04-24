@@ -1,0 +1,61 @@
+name: pages
+
+# Publishes akua.dev. Composition:
+#
+#   site/index.html      → /           (landing)
+#   scripts/install.sh   → /install    (served without extension, Bun-style)
+#   scripts/install.ps1  → /install.ps1 (Windows)
+#
+# The curl one-liner users paste is `curl -fsSL https://akua.dev/install | sh`.
+# `curl | sh` doesn't care about Content-Type, so hosting the script at a
+# no-extension path is fine — and keeps the URL clean.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'scripts/install.sh'
+      - 'scripts/install.ps1'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one in-flight deploy at a time; queue the next, skip the rest.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble site
+        run: |
+          set -eu
+          mkdir -p _site
+          cp -r site/. _site/
+          cp scripts/install.sh _site/install
+          cp scripts/install.ps1 _site/install.ps1
+          # sanity check — fail loud if the site is empty or missing the installer
+          test -s _site/index.html
+          test -s _site/install
+          test -s _site/install.ps1
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
