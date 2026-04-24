@@ -63,6 +63,16 @@ pub enum SidecarError {
     Serialize(#[from] serde_json::Error),
 }
 
+/// Canonical default sidecar location next to a tarball:
+/// `<tarball>.akuasig`. Uses OS-string append (not `set_extension`)
+/// so `.tar.gz` isn't clobbered. Shared by `akua sign` (writer) and
+/// `akua verify --tarball` (reader) — keep them from drifting.
+pub fn default_sidecar_path(tarball: &Path) -> std::path::PathBuf {
+    let mut s = tarball.as_os_str().to_os_string();
+    s.push(".akuasig");
+    std::path::PathBuf::from(s)
+}
+
 impl SignSidecar {
     /// Write the sidecar as pretty JSON so operators can `cat` it.
     /// Over-the-wire bytes don't matter (unlike the signed payload

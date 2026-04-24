@@ -260,11 +260,12 @@ rather than authors. Small, composable, agent-friendly.
 - [x] `akua lock [--check]` — regenerate `akua.lock` from `akua.toml` (cargo `generate-lockfile` analogue). `--check` diffs without writing and exits `E_LOCK_DRIFT` on staleness — pre-commit / CI gate to catch "author edited akua.toml but forgot to re-lock." Preserves signatures on unchanged entries via `merge_into_lock`; canonical TOML byte-compare for drift detection. (2026-04-24)
 - [x] `akua update [--dep <name>]` — intentionally bump the lock against whatever upstream now serves. Inverse stance to `akua lock`: where `lock` rejects OCI digest drift (security), `update` accepts it and records the new digest. `--dep` scopes the lockfile write to one entry (cargo `update -p foo` analogue). Output lists `{updated, unchanged, skipped}` so operators see exactly what moved. (2026-04-24)
 - [x] `akua sign` + `akua push --sig` — offline signing pair that completes the air-gap flow. `akua sign --tarball --ref --tag [--key]` computes `oci_pusher::compute_publish_digests()` locally (pure function, matches registry-side math post-push) and writes a `.akuasig` sidecar (JSON; carries `{oci_ref, tag, manifest_digest, simple_signing_payload, signature_b64, akua_version}`). `akua push --sig <path>` validates ref/tag/digest against the push target pre-upload, then pushes the `.sig` tag via the existing cosign push path. Sign + push hosts must pin the same akua binary (config blob embeds `env!("CARGO_PKG_VERSION")`). (2026-04-24)
+- [x] `akua verify --tarball <path> [--sig <path>] [--public-key <path>]` — offline verify against a `.akuasig`, no registry round-trip. Three checks: sidecar readable, local manifest_digest matches sidecar's, ECDSA signature verifies (skipped when no public key). Falls back to `akua.toml [signing].cosign_public_key`. Closes the air-gap loop: pack → sign → transfer → verify → push. Full chain smoke-tested end-to-end. (2026-04-24)
 
 ### Planned
 
 - [ ] `akua attest` + `akua push --att` — offline attestation pair symmetric to `akua sign`. Signs an SLSA v1 DSSE envelope bound to the tarball's manifest digest; sidecar format `.akuaatt` mirrors `.akuasig`. Completes the air-gap crypto story alongside signing.
-- [ ] `akua verify --tarball <path> [--sig <path>] [--att <path>] [--public-key <path>]` — verify a local tarball + sidecars against a public key without touching a registry. Closes the triangle: sign → transfer → verify → push. Pairs with `akua inspect --tarball` for the full offline triage toolkit.
+- [ ] Extend `akua verify --tarball` with `--att <path>` — DSSE attestation verify. Lands with `akua attest`.
 
 ---
 

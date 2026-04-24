@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
 use akua_core::cosign::{self, CosignError};
-use akua_core::cosign_sidecar::SignSidecar;
+use akua_core::cosign_sidecar::{self, SignSidecar};
 use akua_core::{oci_pusher, AkuaManifest, ManifestLoadError};
 use serde::Serialize;
 
@@ -116,11 +116,18 @@ pub enum VerifyTarballError {
 
 impl VerifyTarballError {
     pub fn to_structured(&self) -> StructuredError {
+        // Explicit per-variant arms so a new variant added to this
+        // enum forces a conscious choice rather than silently
+        // inheriting E_IO via a catch-all.
         match self {
             VerifyTarballError::Manifest(e) => {
                 StructuredError::new(codes::E_MANIFEST_PARSE, e.to_string()).with_default_docs()
             }
-            _ => StructuredError::new(codes::E_IO, self.to_string()).with_default_docs(),
+            VerifyTarballError::ReadTarball { .. }
+            | VerifyTarballError::ReadPublicKey { .. }
+            | VerifyTarballError::StdoutWrite(_) => {
+                StructuredError::new(codes::E_IO, self.to_string()).with_default_docs()
+            }
         }
     }
 
@@ -260,11 +267,7 @@ fn describe_cosign_err(err: &CosignError) -> String {
 fn resolve_sidecar_path(args: &VerifyTarballArgs<'_>) -> PathBuf {
     match args.sig {
         Some(p) => p.to_path_buf(),
-        None => {
-            let mut s = args.tarball.as_os_str().to_os_string();
-            s.push(".akuasig");
-            PathBuf::from(s)
-        }
+        None => cosign_sidecar::default_sidecar_path(args.tarball),
     }
 }
 

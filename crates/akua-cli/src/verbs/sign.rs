@@ -23,8 +23,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
-use akua_core::cosign_sidecar::SignSidecar;
-use akua_core::{cosign, cosign_sidecar, oci_pusher, AkuaManifest, ManifestLoadError};
+use akua_core::cosign_sidecar::{self, SignSidecar};
+use akua_core::{cosign, oci_pusher, AkuaManifest, ManifestLoadError};
 use serde::Serialize;
 
 use crate::contract::{emit_output, Context};
@@ -154,7 +154,7 @@ pub fn run<W: Write>(
         akua_version: env!("CARGO_PKG_VERSION").to_string(),
     };
 
-    let out_path = default_sidecar_path(args);
+    let out_path = resolve_out_path(args);
     sidecar.write_to(&out_path)?;
 
     let output = SignOutput {
@@ -169,14 +169,10 @@ pub fn run<W: Write>(
     Ok(ExitCode::Success)
 }
 
-fn default_sidecar_path(args: &SignArgs<'_>) -> PathBuf {
+fn resolve_out_path(args: &SignArgs<'_>) -> PathBuf {
     match args.out {
         Some(p) => p.to_path_buf(),
-        None => {
-            let mut s = args.tarball.as_os_str().to_os_string();
-            s.push(".akuasig");
-            PathBuf::from(s)
-        }
+        None => cosign_sidecar::default_sidecar_path(args.tarball),
     }
 }
 
