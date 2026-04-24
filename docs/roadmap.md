@@ -10,55 +10,62 @@
 
 The roadmap is ordered by implementation phase, but releases cut across phases. This section lists the minimum boxes each release ships with. Phases below give the detail.
 
-### v0.1.0 — alpha (candidate ready soon)
+> **Release principle.** The first number anyone sees is the one they judge the project by. akua's brand promise — CLAUDE.md's "Sandboxed by default. No shell-out, ever. Untrusted Packages are safe to render on shared hosts." — is not something we ship alongside a "but actually…" caveat in v0.1.0 release notes. Either the invariant holds, or we don't cut v0.1.0. Pre-release work that would normally land as an alpha is shipping on `main` today under the explicit **pre-alpha** label in CLAUDE.md; contributors and early adopters who want to preview can build from `main` themselves.
 
-**Target:** solo authors + internal CI pipelines + agent consumers. Users who trust their own Package inputs and want the author/render/publish/verify loop end-to-end, plus a typed SDK for programmatic use.
+### v0.1.0 — first release (the invariant holds)
 
-**Shipped and load-bearing for v0.1.0:**
+**Target:** anyone CLAUDE.md promises safety to. Solo authors, internal CI pipelines, agent consumers, **and** hosted build services accepting PR-submitted Packages, in-browser dev loops loading third-party examples, multi-tenant operators. If the security model doesn't let us include the last three, v0.1.0 isn't ready.
+
+**Security invariant — v0.1.0 blocks until this holds end-to-end:**
+
+- Phase 4 shipped — every `akua render` invocation (CLI or SDK) runs inside a wasmtime WASI sandbox with memory / fuel / epoch caps + capability-model filesystem preopens. No native render fallback.
+- Phase 4B shipped — `@akua/sdk` delivers the same render path via `wasm32-unknown-unknown` inside the host JS runtime's own sandbox. Identical guarantees for SDK consumers — same invariant, different sandbox.
+- Path-escape + symlink-escape rejected at the plugin boundary (shipped Phase 0 — guard existing tests).
+- No shell-out in any render path. No `--unsafe-host` flag. No feature gate that opens one (shipped Phase 0 — guard this at code review forever).
+- `docs/security-model.md` "Operational guidance today (pre-Phase 4)" section deleted — the guidance exists only because the invariant doesn't yet hold; once it holds, it goes.
+- Adversarial integration tests: fuel-exhaustion, epoch-exhaustion, memory-bomb, path-escape, symlink-escape, import-escape (KCL `import foo` against forbidden dirs) — each surfaces a typed error, not a panic or a timeout.
+
+**Shipped on `main` today (all load-bearing for v0.1.0):**
 
 - CLI contract + ~25 verbs (`init`, `render`, `check`, `lint`, `fmt`, `test`, `dev`, `repl`, `add`, `remove`, `tree`, `lock`, `update`, `verify`, `diff`, `inspect`, `pack`, `push`, `sign`, `pull`, `publish`, `cache`, `auth`, `whoami`, `version`)
 - Deterministic raw-YAML render writer + per-output sha256
 - `Package.k` loader via `kcl_lang::API` + the `akua.*` KCL stdlib
-- Helm + Kustomize WASM engines (no shell-out, ever)
+- Helm + Kustomize WASM engines
 - Typed `charts.*` deps over path / OCI / git with `replace` + lockfile digests
 - Cosign keyed verify + SLSA v1 attestation on publish
 - Full air-gap crypto loop: `akua pack` → `akua sign` → transfer → `akua verify --tarball` → `akua push --sig`
 - Operational verbs: `akua cache`, `akua auth`, `akua lock [--check]`, `akua update [--dep]`
 
-**Still to ship for v0.1.0:**
+**Still to ship for v0.1.0 (ordered by blast radius if skipped):**
 
-- **`@akua/sdk` — TypeScript SDK with in-process WASM transport, shipped via JSR.** The SDK does NOT shell out to an `akua` binary. Consumers install `@akua/sdk` from JSR and the render engine executes in-process — Node.js, Deno, Bun, and modern browsers all work without a separate CLI install. Contract layer (ts-rs + schemars → typed TS + ajv-validated JSON Schema bundle + Standard Schema v1 adapter) lands in [PR #19](https://github.com/cnap-tech/akua/pull/19); the shell-out transport prototyped there is explicitly superseded.
+1. **Phase 4** — wasmtime-hosted `akua render`. Security invariant for the CLI.
+2. **Phase 4B** — `akua-wasm` bundle via JSR. Security invariant for the SDK + full verb coverage.
+3. Adversarial test suite targeting the sandbox (listed above).
+4. Docs sweep — see [v0.1.0 release punch list](#v010-release-punch-list). Explicitly: the "this doesn't yet hold" caveats in security-model.md go.
 
-**Honest caveats shipped alongside v0.1.0:**
+**What v0.1.0 does NOT promise (and says so in release notes):**
 
-- **Render is not yet process-sandboxed (CLI).** CLAUDE.md's "sandboxed by default" invariant is aspirational at the process level for the CLI — today the CLI's render path is native Rust + in-process WASM engines, not per-render wasmtime. The SDK's in-process WASM transport happens to run inside the JS runtime's own sandbox (V8, JavaScriptCore), which is a meaningfully stronger boundary than the CLI's today, but CLI-side Phase 4 still delivers the full invariant.
-- **Rego test runner + policy engine not implemented.** `akua test` covers KCL only.
-- **Cosign keyless (fulcio + rekor) not implemented.** Keyed flow only.
+- Rego test runner + policy engine — KCL test runner only.
+- Cosign keyless (fulcio + rekor) — keyed verify + SLSA attestation only.
+- Hosted multi-tenant serve — `akua serve` is v0.2.0.
+- Recursive attestation walk over transitive deps — direct deps only.
 
-**Dependency pulled into v0.1.0:** delivering the SDK as a WASM bundle via JSR requires an `akua-wasm` crate that compiles the render path (KCL loader + `akua.*` stdlib + Helm/Kustomize engine host) to a browser-compatible target. This overlaps with Phase 4's wasip1 worker but is a distinct target (wasm32-unknown-unknown + wasm-bindgen/N-API, not wasip1). Plan work on this track under [Phase 4B](#phase-4b--akua-wasm-for-jsr-delivery-blocks-v010).
+These are feature absences, not invariant violations. Users know exactly what they're getting.
 
-**Exit gate for v0.1.0:** everything above shipped (CLI + SDK via WASM on JSR, all verbs covered, drift guards clean, benchmarks green), security-model.md matches reality, release notes call out the remaining caveats.
+**Exit gate for v0.1.0:** CLAUDE.md's invariants (sandbox + no-shell-out + signed-by-default + deterministic) each hold against the adversarial test suite, docs reflect reality, release notes list only feature absences (never caveats that make the brand promise weaker).
 
-### v0.2.0 — beta ("sandboxed by default" actually delivered)
+### v0.2.0 — hosted multi-tenant
 
-**Target:** hosted build services, CI pipelines accepting PR-submitted Packages, in-browser dev loops loading third-party examples. Drops the "containerize yourself" caveat.
+- Phase 5 — `akua serve` (~2-3 weeks). Single process handles N concurrent renders with per-tenant isolation. v0.1.0 already delivers the per-render sandbox; v0.2.0 adds the concurrent-tenants HTTP surface on top.
+- `akua attest` + `akua verify --att` — offline DSSE/SLSA alongside the existing signature flow.
 
-- Phase 4 — wasmtime-hosted `akua render` (~2-3 weeks). Delivers the CLAUDE.md invariant at the process level.
-- `akua attest` + `akua verify --att` (queued under Phase 8.5 Planned). Offline DSSE/SLSA alongside the existing signature flow.
-
-**Exit gate for v0.2.0:** every `akua render` runs inside wasmtime with memory/fuel/epoch caps + capability-model preopens. Native render path no longer exists.
-
-### v0.3.0 — hosted multi-tenant
-
-- Phase 5 — `akua serve` (~2-3 weeks). Single process handles N concurrent renders with per-tenant isolation.
-
-### v0.4.0 — supply-chain completeness
+### v0.3.0 — supply-chain completeness
 
 - Phase 6 B — cosign keyless verify (fulcio + rekor).
 - Phase 7 C follow-up — recursive attestation walk over transitive deps.
 - Phase 7 D — HSM / cosign-native key formats.
 
-### v0.5.0+ — policy + operator surface
+### v0.4.0+ — policy + operator surface
 
 - Policy engine phase (design open — regorus vs OPA→WASM).
 - Phase 8 — Rego test runner (depends on policy engine).
@@ -186,9 +193,9 @@ are no host-side preopens to grant.
 
 ---
 
-## Phase 4 — Wasmtime-hosted `akua render` (2-3 weeks) — **blocks v0.2.0**
+## Phase 4 — Wasmtime-hosted `akua render` (2-3 weeks) — **blocks v0.1.0**
 
-Sandbox becomes the default execution path for akua itself. User-invoked `akua render` wraps a wasip1-compiled `akua-render-worker` inside wasmtime. This delivers CLAUDE.md's "sandboxed by default" invariant at the process level — v0.1.0 documents it as aspirational until this phase ships.
+Sandbox becomes the default execution path for akua itself. User-invoked `akua render` wraps a wasip1-compiled `akua-render-worker` inside wasmtime. Delivers CLAUDE.md's "sandboxed by default" invariant at the process level — **the precondition for cutting v0.1.0**. No release before this lands.
 
 - [ ] Upstream KCL fixes: `uuid` `features = ["js"]` on wasm32; `kcl-language-server` gated with `#[cfg(not(target_arch = "wasm32"))]` around `lsp_types::Url::{to_file_path, from_file_path}` — file two PRs
 - [ ] **Fork `kcl-lang/kcl` as `cnap-tech/kcl` if PRs stall** (expected); branch `akua-wasip1` maintained against upstream
@@ -221,9 +228,9 @@ Compiles the render path to a browser-compatible WASM bundle so `@akua/sdk` ship
 
 ---
 
-## Phase 5 — `akua serve` multi-tenant (2-3 weeks) — **blocks v0.3.0**
+## Phase 5 — `akua serve` multi-tenant (2-3 weeks) — **blocks v0.2.0**
 
-HTTP front end for concurrent render requests. Per-request `Store` with preopens + limits. Depends on Phase 4 (per-render `Store` semantics).
+HTTP front end for concurrent render requests. Per-request `Store` with preopens + limits. Depends on Phase 4 (per-render `Store` semantics), which v0.1.0 already ships.
 
 - [ ] `akua serve` verb — HTTP API + worker pool sized by CPU count
 - [ ] Per-request preopens: tenant's Package dir (read) + output dir (write) only
@@ -245,7 +252,7 @@ HTTP front end for concurrent render requests. Per-request `Store` with preopens
 - [x] `akua.toml [signing] cosign_public_key = "./keys/cosign.pub"` config. `ResolverOptions.cosign_public_key_pem` threads through to the fetcher. `akua render` loads the key off disk.
 - [x] Typed CLI code `E_COSIGN_VERIFY` — agents branch on "bytes failed the supply-chain gate" separately from "couldn't resolve the chart."
 
-### Phase 6 slice B — deferred — **targets v0.4.0**
+### Phase 6 slice B — deferred — **targets v0.3.0**
 
 - [ ] Keyless verify via sigstore-rs (Fulcio cert chain + Rekor transparency log)
 - [x] SLSA v1 predicate generation on `akua publish` (shipped Phase 7 B)
@@ -294,10 +301,10 @@ HTTP front end for concurrent render requests. Per-request `Store` with preopens
 - [x] Resolver consults `<workspace>/.akua/vendor/<name>/` before attempting network fetch. Offline-after-pull renders now succeed for a published Package with OCI or git deps.
 - [x] End-to-end round-trip integration test: pack-with-vendor → unpack → offline resolve → assert nginx resolved from `.akua/vendor/` with matching digest.
 
-### Phase 7 slice C — still deferred — **targets v0.4.0**
+### Phase 7 slice C — still deferred — **targets v0.3.0**
 
 - [ ] Recursive attestation walk over transitive deps — a published Package's own deps must themselves be attested. Blocked on fixture Packages that attest their dep graph.
-- [ ] HSM / cosign-native key formats (PKCS#11 / cosign-cli key ref) — targets v0.4.0.
+- [ ] HSM / cosign-native key formats (PKCS#11 / cosign-cli key ref) — targets v0.3.0.
 
 **Exit gate (full phase):** Published Package round-trips `akua publish` → `akua pull` → `akua render` with cosign signatures validated at each hop. ✅ slice A covers the core round-trip; slice B adds SLSA + offline-render-from-published-digests on top.
 
@@ -338,7 +345,7 @@ rather than authors. Small, composable, agent-friendly.
 
 ---
 
-## Phase 9 — Deploy + operator surface — **post-v0.5.0**
+## Phase 9 — Deploy + operator surface — **post-v0.4.0**
 
 `akua deploy`, `akua query`, `akua trace`, `akua policy` — cluster-facing operational verbs. Out of scope for the sandbox-first core; ship when there's demand.
 
@@ -348,9 +355,25 @@ rather than authors. Small, composable, agent-friendly.
 
 Concrete boxes to check before cutting the alpha tag. Everything under "core verbs + format" is already shipped per the phases above; this is the "are we actually ready to release?" gate.
 
+### Sandbox invariant — the release blocker
+
+v0.1.0 doesn't cut until CLAUDE.md's promise holds end-to-end. No caveats in release notes say otherwise.
+
+- [ ] Phase 4 shipped — every `akua render` runs inside wasmtime. No native render path exists.
+- [ ] Phase 4B shipped — `@akua/sdk` runs the same render path inside the host JS runtime's sandbox.
+- [ ] Adversarial integration test: fuel-exhaustion loop in Package.k surfaces a typed `E_RENDER_FUEL` (or similar), never a panic, never a hang past the budget.
+- [ ] Adversarial test: memory-bomb allocation fails cleanly against the per-render `StoreLimitsBuilder::memory_size` cap.
+- [ ] Adversarial test: epoch-deadline exhaustion (a Package.k that sleeps / spins past the wall-clock deadline) surfaces typed error within ~1s of deadline.
+- [ ] Adversarial test: path-traversal via `pkg.render({ path: "../../etc/passwd" })` rejected with `E_PATH_ESCAPE`.
+- [ ] Adversarial test: symlink escape (vendor dir contains a symlink to `/etc`) rejected.
+- [ ] Adversarial test: KCL `import foo.bar` against a dep path not listed under `charts.*` rejected under `--strict`.
+- [ ] Adversarial test: no `$PATH` binary reachable from a render. Running the suite with `PATH=/nonexistent` still passes.
+- [ ] Security model doc — delete the "Operational guidance today (pre-Phase 4)" section. Once the invariant holds, that section should not exist.
+- [ ] CI runs the adversarial suite on every PR. A failure blocks merge.
+
 ### Build + test
 
-- [ ] Release notes draft — what's in, what's caveated, what comes in v0.2.0
+- [ ] Release notes draft — what's in (feature absences only, never invariant caveats), what comes in v0.2.0 (hosted multi-tenant via `akua serve`)
 - [ ] `cargo test -p akua-core -p akua-cli` green on CI across Linux + macOS
 - [ ] `akua --version` matches the tag
 - [ ] Every `examples/<name>/` renders through `akua render` without errors
