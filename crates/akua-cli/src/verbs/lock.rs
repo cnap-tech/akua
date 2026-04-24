@@ -10,7 +10,7 @@
 //! catch "author edited `akua.toml` but forgot to re-lock."
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use akua_core::chart_resolver::{self, ChartResolveError, ResolvedSource, ResolverOptions};
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
@@ -79,7 +79,7 @@ impl LockError {
                 StructuredError::new(codes::E_CHART_RESOLVE, e.to_string()).with_default_docs()
             }
             LockError::Drift => {
-                StructuredError::new(codes::E_LOCK_PARSE, self.to_string()).with_default_docs()
+                StructuredError::new(codes::E_LOCK_DRIFT, self.to_string()).with_default_docs()
             }
             LockError::StdoutWrite(e) => {
                 StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
@@ -90,7 +90,6 @@ impl LockError {
     pub fn exit_code(&self) -> ExitCode {
         match self {
             LockError::StdoutWrite(_) => ExitCode::SystemError,
-            LockError::Drift => ExitCode::UserError,
             _ => ExitCode::UserError,
         }
     }
@@ -128,8 +127,8 @@ pub fn run<W: Write>(
     // Canonical diff: serialize both to TOML via save()'s formatter
     // and compare byte-wise. save() sorts packages, so the strings
     // are deterministic and semantic equality reduces to string eq.
-    let prior_bytes = lock_to_canonical_toml(&prior_lock)?;
-    let new_bytes = lock_to_canonical_toml(&new_lock)?;
+    let prior_bytes = lock_to_canonical_toml(&prior_lock);
+    let new_bytes = lock_to_canonical_toml(&new_lock);
     let drift = prior_bytes != new_bytes;
 
     if args.check {
@@ -183,15 +182,15 @@ fn source_kind_for(src: &ResolvedSource) -> &'static str {
 }
 
 /// Serialize a lock to its canonical TOML form — same bytes `save()`
-/// would write to disk. Used for equality comparison.
-fn lock_to_canonical_toml(lock: &AkuaLock) -> Result<String, LockError> {
+/// would write to disk. Used for equality comparison. `to_toml` only
+/// fails when the struct can't serialize to TOML, which is a
+/// programmer invariant for a well-formed `AkuaLock` we just
+/// constructed — determinism is load-bearing here (see CLAUDE.md).
+fn lock_to_canonical_toml(lock: &AkuaLock) -> String {
     let mut copy = lock.clone();
     copy.sort();
     copy.to_toml()
-        .map_err(|source| LockError::Lock(LockLoadError::Parse {
-            path: PathBuf::from("<memory>"),
-            source,
-        }))
+        .expect("canonical lock serialization must not fail")
 }
 
 fn write_text<W: Write>(w: &mut W, out: &LockOutput) -> std::io::Result<()> {

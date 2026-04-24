@@ -12,6 +12,9 @@ pub const E_MANIFEST_MISSING: &str = "E_MANIFEST_MISSING";
 pub const E_MANIFEST_PARSE: &str = "E_MANIFEST_PARSE";
 pub const E_LOCK_MISSING: &str = "E_LOCK_MISSING";
 pub const E_LOCK_PARSE: &str = "E_LOCK_PARSE";
+/// `akua.lock` is out of sync with `akua.toml` — `akua lock --check`
+/// found drift. Re-run `akua lock` without `--check` to refresh.
+pub const E_LOCK_DRIFT: &str = "E_LOCK_DRIFT";
 
 // ----- Render --------------------------------------------------------------
 
