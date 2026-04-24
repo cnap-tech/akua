@@ -337,8 +337,9 @@ Concrete boxes to check before cutting the alpha tag. Everything under "core ver
 
 Many markdown files predate recent shipping and make claims that no longer match reality. A single focused pass before release, not phase-by-phase.
 
-- [ ] **[CLAUDE.md](../CLAUDE.md)** — strip aspirational language that reads as current. Today the file says "every render executes inside a wasmtime WASI sandbox" and "untrusted Packages are safe to render on shared hosts" — both are Phase-4 goals, not v0.1.0 reality. Reword to `**target state**:` vs `**today**:` so new readers aren't misled. Same treatment for the capability table (`akua fmt` only handles `.k` today, not `.rego`; `akua test` is KCL-only; `akua repl` KCL-only; `akua lint` runs kcl-lint, not Regal yet; `akua policy` / `akua deploy` / `akua infra` / `akua audit` / `akua query` are Phase 9, not shipped).
-- [ ] **README.md** (repo root) — reflect the shipped verb set (~25 today, not the "thirty verbs" line from CLAUDE.md). Remove phantom verbs. Single clear paragraph on the v0.1.0 caveats: process-sandbox is Phase 4, Rego layer is post-0.5.0.
+**Out of scope for this sweep: [CLAUDE.md](../CLAUDE.md).** That file is read by agents every session and describes the target invariants (sandboxed by default, signed + attested by default, no shell-out ever, thirty-verb surface). Pinning it to "today's state" would rot within days as phases ship. Agents need the north star — reality lives in the human-facing docs below and the [Release tracks](#release-tracks) section above.
+
+- [ ] **README.md** (repo root) — reflect the shipped verb set (~25 today, not the "thirty verbs" line from CLAUDE.md's target state). Name the v0.1.0 caveats explicitly: process-sandbox is Phase 4, Rego layer is post-0.5.0, full verb roster is CLAUDE.md's target, not v0.1.0. Humans read this; agents read CLAUDE.md.
 - [ ] **[docs/cli.md](cli.md)** — list every shipped verb + every exit code they emit. Drop any entry for verbs that don't yet exist (`policy`, `deploy`, `query`, `trace`, `audit`, `infra`, `export`).
 - [ ] **[docs/cli-contract.md](cli-contract.md)** — audit against what the universal args actually accept today. Every "MUST" must be true of every verb.
 - [ ] **[docs/package-format.md](package-format.md)** — matches the `PackageK` loader's current parse (no drift since last doc refresh).
