@@ -212,6 +212,22 @@ impl RenderScope {
         });
         Self { _private: () }
     }
+
+    /// Push a scope for the wasmtime-hosted render path. Derives the
+    /// allowed-roots from a [`ResolvedCharts`] so callers can't inject
+    /// arbitrary paths — every root is the absolute directory of a
+    /// chart the resolver already produced. Mirrors what
+    /// `package_k::render_opts` does internally, just from outside
+    /// the crate.
+    pub fn enter_for_render(
+        package: &Path,
+        charts: &crate::chart_resolver::ResolvedCharts,
+        strict: bool,
+    ) -> Self {
+        let allowed_roots: Vec<PathBuf> =
+            charts.entries.values().map(|c| c.abs_path.clone()).collect();
+        Self::enter_with(package, &allowed_roots, strict)
+    }
 }
 
 impl Drop for RenderScope {

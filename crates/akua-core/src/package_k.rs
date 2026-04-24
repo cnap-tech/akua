@@ -196,6 +196,15 @@ impl PackageK {
     }
 }
 
+/// Parse a rendered Package's top-level YAML (the `yaml_result` KCL
+/// produced, or an equivalent string the sandboxed render worker
+/// returns) into a typed [`RenderedPackage`]. Exposed so the
+/// wasmtime-hosted render path in `akua-cli` can share the same
+/// parse + validation rules as the native in-process path.
+pub fn parse_rendered_yaml(yaml: &str) -> Result<RenderedPackage, PackageKError> {
+    parse_rendered(yaml)
+}
+
 fn parse_rendered(yaml: &str) -> Result<RenderedPackage, PackageKError> {
     let top: Value = serde_yaml::from_str(yaml)?;
     let got = value_kind(&top);
