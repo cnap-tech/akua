@@ -18,7 +18,7 @@ use akua_cli::verbs::{
     verify as verify_verb, version as version_verb, whoami as whoami_verb,
 };
 #[cfg(feature = "cosign-verify")]
-use akua_cli::verbs::sign as sign_verb;
+use akua_cli::verbs::{sign as sign_verb, verify_tarball as verify_tarball_verb};
 #[cfg(feature = "dev-watch")]
 use akua_cli::verbs::dev as dev_verb;
 use akua_core::cli_contract::{AgentContext, ExitCode, StructuredError};
@@ -61,14 +61,37 @@ enum Commands {
         args: UniversalArgs,
     },
 
-    /// Lockfile ↔ manifest consistency check.
+    /// Lockfile ↔ manifest consistency check (workspace mode, default)
+    /// OR offline verify of a local tarball against its `.akuasig`
+    /// sidecar via `--tarball` (requires `cosign-verify` feature).
     Verify {
         #[command(flatten)]
         args: UniversalArgs,
 
-        /// Workspace root (default: current directory).
+        /// Workspace root (default: current directory). Ignored when
+        /// `--tarball` is set for anything other than resolving a
+        /// default public key from `akua.toml [signing]`.
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
+
+        /// Verify a packed `.tar.gz` instead of a workspace. Pair
+        /// with `akua sign` for the offline / air-gap flow.
+        #[cfg(feature = "cosign-verify")]
+        #[arg(long)]
+        tarball: Option<PathBuf>,
+
+        /// Path to the `.akuasig` sidecar. Defaults to
+        /// `<tarball>.akuasig`. Only meaningful with `--tarball`.
+        #[cfg(feature = "cosign-verify")]
+        #[arg(long)]
+        sig: Option<PathBuf>,
+
+        /// Path to a PEM-encoded cosign public key. Falls back to
+        /// `akua.toml [signing].cosign_public_key`. Only meaningful
+        /// with `--tarball`. Absent → signature_verify is skipped.
+        #[cfg(feature = "cosign-verify")]
+        #[arg(long)]
+        public_key: Option<PathBuf>,
     },
 
     /// Execute a `Package.k` against inputs and write manifests.
@@ -604,7 +627,35 @@ fn dispatch(command: Commands) -> ExitCode {
         Commands::Init { args, name, force } => run_init(&args, name.as_deref(), force),
         Commands::Whoami { args } => run_whoami(&args),
         Commands::Version { args } => run_version(&args),
-        Commands::Verify { args, workspace } => run_verify(&args, &workspace),
+        Commands::Verify {
+            args,
+            workspace,
+            #[cfg(feature = "cosign-verify")]
+            tarball,
+            #[cfg(feature = "cosign-verify")]
+            sig,
+            #[cfg(feature = "cosign-verify")]
+            public_key,
+        } => {
+            #[cfg(feature = "cosign-verify")]
+            {
+                if let Some(tar) = tarball {
+                    run_verify_tarball(
+                        &args,
+                        &tar,
+                        sig.as_deref(),
+                        public_key.as_deref(),
+                        &workspace,
+                    )
+                } else {
+                    run_verify(&args, &workspace)
+                }
+            }
+            #[cfg(not(feature = "cosign-verify"))]
+            {
+                run_verify(&args, &workspace)
+            }
+        }
         Commands::Render { args, render_args } => run_render(&args, &render_args),
         Commands::Fmt {
             args,
@@ -781,6 +832,28 @@ fn run_sign(
     };
     let mut stdout = io::stdout().lock();
     match sign_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
+    }
+}
+
+#[cfg(feature = "cosign-verify")]
+fn run_verify_tarball(
+    args: &UniversalArgs,
+    tarball: &std::path::Path,
+    sig: Option<&std::path::Path>,
+    public_key: Option<&std::path::Path>,
+    workspace: &std::path::Path,
+) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = verify_tarball_verb::VerifyTarballArgs {
+        tarball,
+        sig,
+        public_key,
+        workspace,
+    };
+    let mut stdout = io::stdout().lock();
+    match verify_tarball_verb::run(&ctx, &verb_args, &mut stdout) {
         Ok(code) => code,
         Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }

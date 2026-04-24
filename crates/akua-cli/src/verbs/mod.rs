@@ -30,5 +30,7 @@ pub mod tree;
 pub mod update;
 pub mod vendor;
 pub mod verify;
+#[cfg(feature = "cosign-verify")]
+pub mod verify_tarball;
 pub mod version;
 pub mod whoami;
