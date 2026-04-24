@@ -157,6 +157,106 @@ pub fn layer_digest(tar_gz: &[u8]) -> String {
     format!("sha256:{}", crate::hex::hex_encode(&Sha256::digest(tar_gz)))
 }
 
+/// Summary of a packed tarball's contents — read in-memory without
+/// unpacking to disk. Used by `akua inspect --tarball` for operator
+/// triage ("what's in this thing?") of artifacts that came over
+/// air-gap transfer.
+///
+/// `package_name` / `version` / `edition` mirror `[package]` in
+/// `akua.toml`. They're `None` when the tarball doesn't contain a
+/// manifest at its root (malformed, but don't hard-fail — surface
+/// what we *can* read).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TarballInspection {
+    pub layer_digest: String,
+    pub compressed_size_bytes: u64,
+    pub uncompressed_size_bytes: u64,
+    pub file_count: usize,
+    pub package_name: Option<String>,
+    pub package_version: Option<String>,
+    pub package_edition: Option<String>,
+    /// Sorted names under `.akua/vendor/`. Empty when the tarball
+    /// was packed with `--no-vendor` or carries no OCI/git deps.
+    pub vendored_deps: Vec<String>,
+}
+
+/// Inspect a packed tarball without unpacking to disk. Reads the
+/// archive twice: once to sum sizes + list entries, once to extract
+/// `akua.toml`. Both passes stream over the same bytes; no
+/// filesystem i/o beyond decompression buffers.
+pub fn inspect(tar_gz: &[u8]) -> Result<TarballInspection, PackageTarError> {
+    use std::collections::BTreeSet;
+    use std::io::Read;
+
+    let mut file_count: usize = 0;
+    let mut uncompressed: u64 = 0;
+    let mut vendored: BTreeSet<String> = BTreeSet::new();
+    let mut manifest_text: Option<String> = None;
+
+    let gz = flate2::read::GzDecoder::new(tar_gz);
+    let mut ar = tar::Archive::new(gz);
+    let entries = ar.entries().map_err(|source| PackageTarError::Io {
+        path: PathBuf::from("<tarball>"),
+        source,
+    })?;
+
+    for entry in entries {
+        let mut e = entry.map_err(|source| PackageTarError::Io {
+            path: PathBuf::from("<tarball>"),
+            source,
+        })?;
+        if !e.header().entry_type().is_file() {
+            continue;
+        }
+        file_count += 1;
+        uncompressed += e.size();
+        let path = e.path().map(|p| p.into_owned()).unwrap_or_default();
+
+        // Top-level .akua/vendor/<name>/... — capture just <name>.
+        if let Ok(stripped) = path.strip_prefix(".akua/vendor") {
+            if let Some(name) = stripped.components().next() {
+                if let Some(s) = name.as_os_str().to_str() {
+                    vendored.insert(s.to_string());
+                }
+            }
+        }
+
+        // Root-level akua.toml → read into memory for parsing below.
+        if path == std::path::Path::new("akua.toml") {
+            let mut buf = String::new();
+            e.read_to_string(&mut buf)
+                .map_err(|source| PackageTarError::Io {
+                    path: path.clone(),
+                    source,
+                })?;
+            manifest_text = Some(buf);
+        }
+    }
+
+    let (package_name, package_version, package_edition) = match manifest_text
+        .as_deref()
+        .and_then(|txt| crate::mod_file::AkuaManifest::parse(txt).ok())
+    {
+        Some(m) => (
+            Some(m.package.name),
+            Some(m.package.version),
+            Some(m.package.edition),
+        ),
+        None => (None, None, None),
+    };
+
+    Ok(TarballInspection {
+        layer_digest: layer_digest(tar_gz),
+        compressed_size_bytes: tar_gz.len() as u64,
+        uncompressed_size_bytes: uncompressed,
+        file_count,
+        package_name,
+        package_version,
+        package_edition,
+        vendored_deps: vendored.into_iter().collect(),
+    })
+}
+
 /// Per-file exclusions unique to publish. Directory-level skips
 /// (`deploy`, `target`, hidden dirs) are handled by the shared
 /// [`crate::walk`] module.
@@ -361,5 +461,87 @@ mod tests {
             }
         }
         panic!("package.k not in tarball");
+    }
+
+    #[test]
+    fn inspect_reads_akua_toml_fields_and_counts_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "akua.toml",
+            b"[package]\nname = \"demo\"\nversion = \"1.2.3\"\nedition = \"akua.dev/v1alpha1\"\n",
+        );
+        write(tmp.path(), "package.k", b"resources = []\n");
+        write(tmp.path(), "inputs.example.yaml", b"hello: world\n");
+
+        let tar_gz = pack_workspace(tmp.path()).unwrap();
+        let got = inspect(&tar_gz).unwrap();
+
+        assert_eq!(got.package_name.as_deref(), Some("demo"));
+        assert_eq!(got.package_version.as_deref(), Some("1.2.3"));
+        assert_eq!(got.package_edition.as_deref(), Some("akua.dev/v1alpha1"));
+        assert_eq!(got.file_count, 3);
+        assert!(got.uncompressed_size_bytes > 0);
+        assert_eq!(got.compressed_size_bytes, tar_gz.len() as u64);
+        assert!(got.layer_digest.starts_with("sha256:"));
+        assert!(got.vendored_deps.is_empty());
+    }
+
+    #[test]
+    fn inspect_surfaces_vendored_deps_sorted() {
+        let tmp = tempfile::tempdir().unwrap();
+        write(
+            tmp.path(),
+            "akua.toml",
+            b"[package]\nname = \"x\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n",
+        );
+        write(tmp.path(), "package.k", b"resources = []\n");
+
+        // Build two vendored chart dirs outside the workspace and
+        // pack them in via pack_workspace_with_vendored_deps.
+        let chart_root = tempfile::tempdir().unwrap();
+        let redis_dir = chart_root.path().join("redis");
+        let nginx_dir = chart_root.path().join("nginx");
+        std::fs::create_dir_all(&redis_dir).unwrap();
+        std::fs::create_dir_all(&nginx_dir).unwrap();
+        std::fs::write(redis_dir.join("Chart.yaml"), b"name: redis\n").unwrap();
+        std::fs::write(nginx_dir.join("Chart.yaml"), b"name: nginx\n").unwrap();
+
+        let tar_gz = pack_workspace_with_vendored_deps(
+            tmp.path(),
+            &[
+                ("redis".to_string(), redis_dir),
+                ("nginx".to_string(), nginx_dir),
+            ],
+        )
+        .unwrap();
+
+        let got = inspect(&tar_gz).unwrap();
+        assert_eq!(got.vendored_deps, vec!["nginx".to_string(), "redis".to_string()]);
+    }
+
+    #[test]
+    fn inspect_tolerates_missing_manifest() {
+        // Build an ad-hoc tarball by hand so pack_workspace's
+        // MissingManifest check doesn't short-circuit us — inspect
+        // must degrade gracefully on malformed bytes from arbitrary
+        // sources.
+        let mut buf = Vec::new();
+        {
+            let gz = flate2::write::GzEncoder::new(&mut buf, flate2::Compression::default());
+            let mut b = tar::Builder::new(gz);
+            let bytes = b"resources = []\n";
+            let mut hdr = tar::Header::new_gnu();
+            hdr.set_size(bytes.len() as u64);
+            hdr.set_mode(0o644);
+            hdr.set_cksum();
+            b.append_data(&mut hdr, "package.k", &bytes[..]).unwrap();
+            b.finish().unwrap();
+        }
+
+        let got = inspect(&buf).unwrap();
+        assert_eq!(got.package_name, None);
+        assert_eq!(got.package_version, None);
+        assert_eq!(got.file_count, 1);
     }
 }

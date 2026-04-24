@@ -325,13 +325,24 @@ enum Commands {
         package: PathBuf,
     },
 
-    /// Report a `package.k`'s input surface (options) without executing.
+    /// Report a Package's input surface (via `--package`) OR a
+    /// packed tarball's metadata (via `--tarball`) without executing
+    /// anything. Tarball mode pairs with `akua pack` + `akua push`
+    /// for air-gap triage.
+    #[command(group(ArgGroup::new("inspect_target").args(["package", "tarball"])))]
     Inspect {
         #[command(flatten)]
         args: UniversalArgs,
 
+        /// Path to the Package.k (default mode). Mutually exclusive
+        /// with `--tarball`.
         #[arg(long, default_value = "./package.k")]
         package: PathBuf,
+
+        /// Path to a packed `.tar.gz` (from `akua pack` / `akua pull`).
+        /// When set, overrides `--package`.
+        #[arg(long)]
+        tarball: Option<PathBuf>,
     },
 
     /// Parse-only check of a `package.k` (KCL syntax + imports).
@@ -506,7 +517,11 @@ fn dispatch(command: Commands) -> ExitCode {
             check,
             stdout,
         } => run_fmt(&args, &package, check, stdout),
-        Commands::Inspect { args, package } => run_inspect(&args, &package),
+        Commands::Inspect {
+            args,
+            package,
+            tarball,
+        } => run_inspect(&args, &package, tarball.as_deref()),
         Commands::Lint { args, package } => run_lint(&args, &package),
         Commands::Check {
             args,
@@ -847,11 +862,17 @@ fn run_check(args: &UniversalArgs, workspace: &std::path::Path, package: &std::p
     }
 }
 
-fn run_inspect(args: &UniversalArgs, package: &std::path::Path) -> ExitCode {
+fn run_inspect(
+    args: &UniversalArgs,
+    package: &std::path::Path,
+    tarball: Option<&std::path::Path>,
+) -> ExitCode {
     let ctx = resolve_ctx(args);
-    let verb_args = inspect_verb::InspectArgs {
-        package_path: package,
+    let target = match tarball {
+        Some(p) => inspect_verb::InspectTarget::Tarball(p),
+        None => inspect_verb::InspectTarget::Package(package),
     };
+    let verb_args = inspect_verb::InspectArgs { target };
     let mut stdout = io::stdout().lock();
     match inspect_verb::run(&ctx, &verb_args, &mut stdout) {
         Ok(code) => code,
@@ -1108,11 +1129,33 @@ mod tests {
     fn parses_inspect_with_package_override() {
         let cli = Cli::parse_from(["akua", "inspect", "--package", "foo.k"]);
         match cli.command {
-            Commands::Inspect { package, .. } => {
+            Commands::Inspect { package, tarball, .. } => {
                 assert_eq!(package, PathBuf::from("foo.k"));
+                assert!(tarball.is_none());
             }
             _ => panic!("expected inspect"),
         }
+    }
+
+    #[test]
+    fn parses_inspect_with_tarball_flag() {
+        let cli = Cli::parse_from(["akua", "inspect", "--tarball", "./p.tgz"]);
+        match cli.command {
+            Commands::Inspect { tarball, .. } => {
+                assert_eq!(tarball, Some(PathBuf::from("./p.tgz")));
+            }
+            _ => panic!("expected inspect"),
+        }
+    }
+
+    #[test]
+    fn inspect_rejects_package_and_tarball_together() {
+        let err = Cli::try_parse_from([
+            "akua", "inspect", "--package", "foo.k", "--tarball", "p.tgz",
+        ])
+        .err()
+        .expect("should fail");
+        assert!(err.to_string().contains("cannot be used"));
     }
 
     #[test]

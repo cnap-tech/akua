@@ -1,27 +1,63 @@
-//! `akua inspect` — report a Package.k's input surface without running it.
+//! `akua inspect` — report a Package's input surface OR a packed
+//! tarball's metadata, without executing either.
 //!
-//! Parse-only — uses kcl_lang's `list_options` to enumerate every
-//! `option()` call-site. Agents can use the JSON shape to discover
-//! what inputs a Package expects before invoking it.
+//! Two modes:
+//!
+//! - **Package mode** (`--package`): parse the Package.k, enumerate
+//!   every `option()` call-site. Agents use the JSON shape to
+//!   discover what inputs the Package expects before invoking it.
+//! - **Tarball mode** (`--tarball`): read a packed `.tar.gz` in-memory
+//!   without unpacking, report name/version/edition, layer digest,
+//!   file count, and vendored deps. Pair with `akua pack` +
+//!   `akua push` — operators triage an air-gap-transferred tarball
+//!   before pushing it.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
-use akua_core::{list_options_kcl, OptionInfo, PackageKError};
+use akua_core::{list_options_kcl, package_tar, OptionInfo, PackageKError};
 use serde::Serialize;
 
 use crate::contract::{emit_output, Context};
 
 #[derive(Debug, Clone)]
+pub enum InspectTarget<'a> {
+    Package(&'a Path),
+    Tarball(&'a Path),
+}
+
+#[derive(Debug, Clone)]
 pub struct InspectArgs<'a> {
-    pub package_path: &'a Path,
+    pub target: InspectTarget<'a>,
+}
+
+/// Discriminated JSON shape. `kind: "package"|"tarball"` carries the
+/// variant; consumers parse one body and branch.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum InspectOutput {
+    Package(PackageInspectBody),
+    Tarball(TarballInspectBody),
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct InspectOutput {
+pub struct PackageInspectBody {
     pub path: PathBuf,
     pub options: Vec<OptionInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TarballInspectBody {
+    pub path: PathBuf,
+    pub layer_digest: String,
+    pub compressed_size_bytes: u64,
+    pub uncompressed_size_bytes: u64,
+    pub file_count: usize,
+    pub package_name: Option<String>,
+    pub package_version: Option<String>,
+    pub package_edition: Option<String>,
+    pub vendored_deps: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -35,6 +71,9 @@ pub enum InspectError {
 
     #[error(transparent)]
     Kcl(#[from] PackageKError),
+
+    #[error(transparent)]
+    Tarball(#[from] package_tar::PackageTarError),
 
     #[error("write to stdout failed: {0}")]
     StdoutWrite(#[source] std::io::Error),
@@ -54,6 +93,9 @@ impl InspectError {
                     .with_default_docs()
             }
             InspectError::Kcl(e) => {
+                StructuredError::new(codes::E_INSPECT_FAIL, e.to_string()).with_default_docs()
+            }
+            InspectError::Tarball(e) => {
                 StructuredError::new(codes::E_INSPECT_FAIL, e.to_string()).with_default_docs()
             }
             InspectError::StdoutWrite(e) => {
@@ -78,20 +120,9 @@ pub fn run<W: Write>(
     args: &InspectArgs<'_>,
     stdout: &mut W,
 ) -> Result<ExitCode, InspectError> {
-    if !args.package_path.exists() {
-        return Err(InspectError::Io {
-            path: args.package_path.to_path_buf(),
-            source: std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("{} not found", args.package_path.display()),
-            ),
-        });
-    }
-
-    let options = list_options_kcl(args.package_path)?;
-    let output = InspectOutput {
-        path: args.package_path.to_path_buf(),
-        options,
+    let output = match &args.target {
+        InspectTarget::Package(path) => inspect_package(path)?,
+        InspectTarget::Tarball(path) => inspect_tarball(path)?,
     };
 
     emit_output(stdout, ctx, &output, |w| write_text(w, &output))
@@ -99,14 +130,57 @@ pub fn run<W: Write>(
     Ok(ExitCode::Success)
 }
 
-fn write_text<W: Write>(writer: &mut W, output: &InspectOutput) -> std::io::Result<()> {
-    writeln!(writer, "{}", output.path.display())?;
-    if output.options.is_empty() {
-        writeln!(writer, "  (no options)")?;
+fn inspect_package(path: &Path) -> Result<InspectOutput, InspectError> {
+    if !path.exists() {
+        return Err(InspectError::Io {
+            path: path.to_path_buf(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("{} not found", path.display()),
+            ),
+        });
+    }
+    let options = list_options_kcl(path)?;
+    Ok(InspectOutput::Package(PackageInspectBody {
+        path: path.to_path_buf(),
+        options,
+    }))
+}
+
+fn inspect_tarball(path: &Path) -> Result<InspectOutput, InspectError> {
+    let bytes = std::fs::read(path).map_err(|source| InspectError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let insp = package_tar::inspect(&bytes)?;
+    Ok(InspectOutput::Tarball(TarballInspectBody {
+        path: path.to_path_buf(),
+        layer_digest: insp.layer_digest,
+        compressed_size_bytes: insp.compressed_size_bytes,
+        uncompressed_size_bytes: insp.uncompressed_size_bytes,
+        file_count: insp.file_count,
+        package_name: insp.package_name,
+        package_version: insp.package_version,
+        package_edition: insp.package_edition,
+        vendored_deps: insp.vendored_deps,
+    }))
+}
+
+fn write_text<W: Write>(w: &mut W, output: &InspectOutput) -> std::io::Result<()> {
+    match output {
+        InspectOutput::Package(body) => write_package_text(w, body),
+        InspectOutput::Tarball(body) => write_tarball_text(w, body),
+    }
+}
+
+fn write_package_text<W: Write>(w: &mut W, body: &PackageInspectBody) -> std::io::Result<()> {
+    writeln!(w, "{}", body.path.display())?;
+    if body.options.is_empty() {
+        writeln!(w, "  (no options)")?;
         return Ok(());
     }
-    writeln!(writer, "  options:")?;
-    for o in &output.options {
+    writeln!(w, "  options:")?;
+    for o in &body.options {
         let required = if o.required { " [required]" } else { "" };
         let ty = if o.r#type.is_empty() {
             String::new()
@@ -118,10 +192,33 @@ fn write_text<W: Write>(writer: &mut W, output: &InspectOutput) -> std::io::Resu
             .as_deref()
             .map(|d| format!(" = {d}"))
             .unwrap_or_default();
-        writeln!(writer, "    - {}{}{}{}", o.name, ty, default, required)?;
+        writeln!(w, "    - {}{}{}{}", o.name, ty, default, required)?;
         if let Some(help) = &o.help {
-            writeln!(writer, "        {help}")?;
+            writeln!(w, "        {help}")?;
         }
+    }
+    Ok(())
+}
+
+fn write_tarball_text<W: Write>(w: &mut W, body: &TarballInspectBody) -> std::io::Result<()> {
+    writeln!(w, "{}", body.path.display())?;
+    if let (Some(name), Some(ver)) = (&body.package_name, &body.package_version) {
+        writeln!(w, "  package   {name} {ver}")?;
+    } else {
+        writeln!(w, "  package   (no akua.toml in tarball)")?;
+    }
+    if let Some(edition) = &body.package_edition {
+        writeln!(w, "  edition   {edition}")?;
+    }
+    writeln!(w, "  layer     {}", body.layer_digest)?;
+    writeln!(
+        w,
+        "  size      {} compressed / {} uncompressed",
+        body.compressed_size_bytes, body.uncompressed_size_bytes
+    )?;
+    writeln!(w, "  files     {}", body.file_count)?;
+    if !body.vendored_deps.is_empty() {
+        writeln!(w, "  vendored: {}", body.vendored_deps.join(", "))?;
     }
     Ok(())
 }
@@ -157,13 +254,24 @@ resources = []
         (tmp, p)
     }
 
+    fn minimal_workspace(tmp: &Path) {
+        std::fs::write(
+            tmp.join("akua.toml"),
+            b"[package]\nname = \"inspect-test\"\nversion = \"0.4.2\"\nedition = \"akua.dev/v1alpha1\"\n",
+        )
+        .unwrap();
+        std::fs::write(tmp.join("package.k"), b"resources = []\n").unwrap();
+    }
+
     #[test]
-    fn lists_the_canonical_input_option() {
+    fn lists_the_canonical_input_option_in_package_mode() {
         let (_tmp, path) = write_pkg(TYPED_INPUT);
         let mut stdout = Vec::new();
         let code = run(
             &Context::human(),
-            &InspectArgs { package_path: &path },
+            &InspectArgs {
+                target: InspectTarget::Package(&path),
+            },
             &mut stdout,
         )
         .expect("run");
@@ -173,27 +281,22 @@ resources = []
     }
 
     #[test]
-    fn json_output_shape_is_stable() {
+    fn package_mode_json_carries_kind_discriminator() {
         let (_tmp, path) = write_pkg(TYPED_INPUT);
         let mut stdout = Vec::new();
         run(
             &Context::json(),
-            &InspectArgs { package_path: &path },
+            &InspectArgs {
+                target: InspectTarget::Package(&path),
+            },
             &mut stdout,
         )
         .expect("run");
         let parsed: serde_json::Value =
             serde_json::from_str(String::from_utf8(stdout).unwrap().trim()).unwrap();
+        assert_eq!(parsed["kind"], "package");
         assert!(parsed["path"].as_str().unwrap().ends_with("package.k"));
-        let opts = parsed["options"].as_array().unwrap();
-        assert_eq!(opts.len(), 1);
-        assert_eq!(opts[0]["name"], "input");
-        // `type` is empty: list_options doesn't infer the type from
-        // the enclosing `input: Input = option(...)` binding; it only
-        // reads a type arg passed directly to `option()`. The field
-        // stays on the output shape so the contract is forward-
-        // compatible with richer type recovery later.
-        assert_eq!(opts[0].get("type").and_then(|t| t.as_str()).unwrap_or(""), "");
+        assert_eq!(parsed["options"].as_array().unwrap().len(), 1);
     }
 
     #[test]
@@ -202,7 +305,9 @@ resources = []
         let mut stdout = Vec::new();
         run(
             &Context::json(),
-            &InspectArgs { package_path: &path },
+            &InspectArgs {
+                target: InspectTarget::Package(&path),
+            },
             &mut stdout,
         )
         .expect("run");
@@ -217,10 +322,86 @@ resources = []
         let missing = tmp.path().join("nope.k");
         let err = run(
             &Context::human(),
-            &InspectArgs { package_path: &missing },
+            &InspectArgs {
+                target: InspectTarget::Package(&missing),
+            },
             &mut Vec::new(),
         )
         .unwrap_err();
         assert_eq!(err.to_structured().code, codes::E_PACKAGE_MISSING);
+    }
+
+    #[test]
+    fn tarball_mode_reports_package_fields_and_layer_digest() {
+        use akua_core::package_tar;
+        let tmp = TempDir::new().unwrap();
+        minimal_workspace(tmp.path());
+        let bytes = package_tar::pack_workspace(tmp.path()).unwrap();
+        let tar_path = tmp.path().join("p.tgz");
+        std::fs::write(&tar_path, &bytes).unwrap();
+
+        let mut stdout = Vec::new();
+        run(
+            &Context::json(),
+            &InspectArgs {
+                target: InspectTarget::Tarball(&tar_path),
+            },
+            &mut stdout,
+        )
+        .expect("run");
+        let parsed: serde_json::Value =
+            serde_json::from_str(String::from_utf8(stdout).unwrap().trim()).unwrap();
+        assert_eq!(parsed["kind"], "tarball");
+        assert_eq!(parsed["package_name"], "inspect-test");
+        assert_eq!(parsed["package_version"], "0.4.2");
+        assert_eq!(parsed["package_edition"], "akua.dev/v1alpha1");
+        assert!(parsed["layer_digest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:"));
+        assert_eq!(
+            parsed["compressed_size_bytes"].as_u64().unwrap(),
+            bytes.len() as u64
+        );
+    }
+
+    #[test]
+    fn tarball_mode_surfaces_text_output_readable_to_humans() {
+        use akua_core::package_tar;
+        let tmp = TempDir::new().unwrap();
+        minimal_workspace(tmp.path());
+        let bytes = package_tar::pack_workspace(tmp.path()).unwrap();
+        let tar_path = tmp.path().join("p.tgz");
+        std::fs::write(&tar_path, &bytes).unwrap();
+
+        let mut stdout = Vec::new();
+        run(
+            &Context::human(),
+            &InspectArgs {
+                target: InspectTarget::Tarball(&tar_path),
+            },
+            &mut stdout,
+        )
+        .unwrap();
+        let text = String::from_utf8(stdout).unwrap();
+        assert!(text.contains("inspect-test 0.4.2"), "{text}");
+        assert!(text.contains("sha256:"), "{text}");
+        assert!(text.contains("files"), "{text}");
+    }
+
+    #[test]
+    fn tarball_mode_missing_file_surfaces_typed_io_error() {
+        let tmp = TempDir::new().unwrap();
+        let missing = tmp.path().join("gone.tgz");
+        let err = run(
+            &Context::human(),
+            &InspectArgs {
+                target: InspectTarget::Tarball(&missing),
+            },
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, InspectError::Io { .. }));
+        assert_eq!(err.exit_code(), ExitCode::UserError);
     }
 }
