@@ -197,8 +197,7 @@ are no host-side preopens to grant.
 
 Sandbox becomes the default execution path for akua itself. User-invoked `akua render` wraps a wasip1-compiled `akua-render-worker` inside wasmtime. Delivers CLAUDE.md's "sandboxed by default" invariant at the process level — **the precondition for cutting v0.1.0**. No release before this lands.
 
-- [ ] Upstream KCL fixes: `uuid` `features = ["js"]` on wasm32; `kcl-language-server` gated with `#[cfg(not(target_arch = "wasm32"))]` around `lsp_types::Url::{to_file_path, from_file_path}` — file two PRs
-- [ ] **Fork `kcl-lang/kcl` as `cnap-tech/kcl` if PRs stall** (expected); branch `akua-wasip1` maintained against upstream
+- [x] **Spike complete 2026-04-24** ([docs/spikes/kcl-wasm-feasibility.md](spikes/kcl-wasm-feasibility.md)) — `kcl-lang` 0.12.3 compiles cleanly on `wasm32-wasip1` with no upstream fixes needed. ~~Fork as `cnap-tech/kcl`~~ — not necessary for wasip1.
 - [ ] `akua-render-worker` binary targeting `wasm32-wasip1`
 - [ ] AOT-compile `.cwasm` at akua's build time; embed in akua binary
 - [ ] Wasmtime host harness: `InstanceAllocationStrategy::pooling(...)` + `Config::consume_fuel(true)` + `Config::epoch_interruption(true)` + `StoreLimitsBuilder::memory_size(256 << 20)` + preopens only
@@ -216,7 +215,9 @@ Compiles the render path to a browser-compatible WASM bundle so `@akua/sdk` ship
 
 - [ ] `crates/akua-wasm` — new crate, `wasm32-unknown-unknown` target. Re-exports the render path behind a stable JS-facing API surface.
 - [ ] Decide Node + browser strategy: `wasm-bindgen` (broad browser support, N-API bridge for Node) vs two builds (wasm-bindgen for browser + N-API napi-rs for Node). First pass: `wasm-bindgen` only, Node picks it up via standard `WebAssembly.instantiate`.
-- [ ] KCL evaluator on `wasm32-unknown-unknown` — upstream [kcl-lang/kcl](https://github.com/kcl-lang/kcl) is wasip1-focused; the same PRs Phase 4 needs (`uuid` `features = ["js"]` on wasm32, `kcl-language-server` `#[cfg(not(target_arch = "wasm32"))]` around `Url::{to_file_path, from_file_path}`) likely apply here too. Fork as `cnap-tech/kcl` on the `akua-wasm32` branch if upstream stalls.
+- [~] **KCL on `wasm32-unknown-unknown` — spike complete** ([docs/spikes/kcl-wasm-feasibility.md](spikes/kcl-wasm-feasibility.md)). Two fixable blockers found, both in the spike findings:
+  - [ ] `uuid` random-source: add `uuid = { version = "1", features = ["js", "v4"] }` under `[target.'cfg(target_arch = "wasm32")'.dependencies]` in `akua-wasm`. Three lines. Zero maintenance.
+  - [ ] `kcl-language-server` uses `lsp_types::Url::{to_file_path, from_file_path}` (8 call sites). Upstream PR against `kcl-lang/kcl` — either (1) make LSP an optional dep of `kcl-api`, or (2) cfg-guard the 8 call sites. Fallback: `cnap-tech/kcl` fork on `akua-wasm32` branch.
 - [ ] Helm + Kustomize engines: reuse the existing `wasm32-wasip1` `.wasm` from Phase 1/3, instantiated via wasmtime-in-the-browser (`wasmer-js` or wasmtime's JS bindings) OR re-compile engines against `wasm32-unknown-unknown` with a shim. Pick whichever is shorter to v0.1.0.
 - [ ] Size budget: target <15 MB for the full bundle (KCL + stdlib + both engines). gzip + brotli ship via JSR.
 - [ ] `akua-wasm` exports typed-method surface matching the SDK's `Akua` class; SDK method → WASM call → typed result, no process spawn.
