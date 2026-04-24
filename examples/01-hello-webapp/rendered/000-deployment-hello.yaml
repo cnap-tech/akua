@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/instance: hello
+    app.kubernetes.io/managed-by: akua
+    app.kubernetes.io/name: nginx
+  name: hello
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: hello
+      app.kubernetes.io/name: nginx
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: hello
+        app.kubernetes.io/managed-by: akua
+        app.kubernetes.io/name: nginx
+    spec:
+      containers:
+      - image: nginx:1.27
+        name: nginx
+        ports:
+        - containerPort: 80
+          name: http
+          protocol: TCP
