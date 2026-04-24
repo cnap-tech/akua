@@ -55,8 +55,12 @@ pub struct SignOutput {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SignError {
-    #[error("reading tarball `{}`: {source}", path.display())]
-    ReadTarball {
+    /// Failed to read an input file. `what` distinguishes the two
+    /// callers ("tarball" / "signing key") for the human-readable
+    /// message; both share the E_IO + UserError classification.
+    #[error("reading {what} `{}`: {source}", path.display())]
+    ReadInput {
+        what: &'static str,
         path: PathBuf,
         #[source]
         source: std::io::Error,
@@ -64,13 +68,6 @@ pub enum SignError {
 
     #[error("tarball `{}` is empty — nothing to sign", path.display())]
     EmptyTarball { path: PathBuf },
-
-    #[error("loading signing key `{}`: {source}", path.display())]
-    ReadKey {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
 
     #[error(transparent)]
     Manifest(#[from] ManifestLoadError),
@@ -99,6 +96,13 @@ impl SignError {
             SignError::Crypto(e) => {
                 StructuredError::new(codes::E_COSIGN_VERIFY, e.to_string()).with_default_docs()
             }
+            // Missing signing key is a manifest/config problem, not
+            // an I/O problem — surface it as such so `jq '.code ==
+            // "E_MANIFEST_PARSE"'` catches the authoring bug.
+            SignError::NoKey => {
+                StructuredError::new(codes::E_MANIFEST_PARSE, self.to_string())
+                    .with_default_docs()
+            }
             _ => StructuredError::new(codes::E_IO, self.to_string()).with_default_docs(),
         }
     }
@@ -116,7 +120,8 @@ pub fn run<W: Write>(
     args: &SignArgs<'_>,
     stdout: &mut W,
 ) -> Result<ExitCode, SignError> {
-    let bytes = std::fs::read(args.tarball).map_err(|source| SignError::ReadTarball {
+    let bytes = std::fs::read(args.tarball).map_err(|source| SignError::ReadInput {
+        what: "tarball",
         path: args.tarball.to_path_buf(),
         source,
     })?;
@@ -141,13 +146,10 @@ pub fn run<W: Write>(
         oci_ref: args.oci_ref.to_string(),
         tag: args.tag.to_string(),
         manifest_digest: digests.manifest_digest.clone(),
-        simple_signing_payload: String::from_utf8(payload).map_err(|_| {
-            // build_simple_signing_payload always returns UTF-8
-            // (it's serde_json output). This branch is defensive.
-            SignError::Crypto(cosign::CosignError::BadPrivateKey(
-                "payload was not UTF-8".to_string(),
-            ))
-        })?,
+        // build_simple_signing_payload is serde_json::to_vec output,
+        // which is UTF-8 by construction. Unreachable.
+        simple_signing_payload: String::from_utf8(payload)
+            .expect("simple-signing payload must be UTF-8 (serde_json invariant)"),
         signature_b64,
         akua_version: env!("CARGO_PKG_VERSION").to_string(),
     };
@@ -180,7 +182,8 @@ fn default_sidecar_path(args: &SignArgs<'_>) -> PathBuf {
 
 fn load_key(args: &SignArgs<'_>) -> Result<String, SignError> {
     if let Some(p) = args.key {
-        return std::fs::read_to_string(p).map_err(|source| SignError::ReadKey {
+        return std::fs::read_to_string(p).map_err(|source| SignError::ReadInput {
+            what: "signing key",
             path: p.to_path_buf(),
             source,
         });
@@ -189,7 +192,8 @@ fn load_key(args: &SignArgs<'_>) -> Result<String, SignError> {
     let signing = manifest.signing.as_ref().ok_or(SignError::NoKey)?;
     let rel = signing.cosign_private_key.as_deref().ok_or(SignError::NoKey)?;
     let key_path = args.workspace.join(rel);
-    std::fs::read_to_string(&key_path).map_err(|source| SignError::ReadKey {
+    std::fs::read_to_string(&key_path).map_err(|source| SignError::ReadInput {
+        what: "signing key",
         path: key_path,
         source,
     })
@@ -326,7 +330,7 @@ mod tests {
             &mut Vec::new(),
         )
         .unwrap_err();
-        assert!(matches!(err, SignError::ReadTarball { .. }));
+        assert!(matches!(err, SignError::ReadInput { what: "tarball", .. }));
     }
 
     #[test]
