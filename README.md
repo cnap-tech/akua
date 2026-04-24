@@ -23,7 +23,7 @@ akua render --inputs inputs.yaml      # render to raw YAML
 Designed agent-first: auto-detects Claude Code, Cursor, Codex, Gemini CLI, Goose, Amp, OpenCode, Cline, and 20+ more, emitting structured JSON on every verb. Ships a [skills library](skills/) conforming to the [Agent Skills Specification](https://agentskills.io).
 
 > [!WARNING]
-> **Pre-alpha.** The tree is mid-pivot. Only the `whoami`, `version`, `verify`, and `render` verbs exist today; the full verb set landed in [`docs/cli.md`](docs/cli.md) is the target, not the current state. Don't build production workloads on this yet.
+> **Pre-alpha.** The shipped verb set is `add`, `auth`, `cache`, `check`, `dev`, `diff`, `fmt`, `init`, `inspect`, `lint`, `lock`, `pack`, `publish`, `pull`, `push`, `remove`, `render`, `repl`, `sign`, `test`, `tree`, `update`, `vendor`, `verify`, `version`, `whoami` — every entry in [`docs/cli.md`](docs/cli.md) except the v0.2+ verbs (`deploy`, `policy`, `query`, `trace`, `audit`, `infra`, `export`, `bench`, `attest`, `eval`). Don't build production workloads on this yet.
 
 ## Install
 

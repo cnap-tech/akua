@@ -16,14 +16,15 @@ Published to [JSR](https://jsr.io/@akua/sdk). ESM-only. Node 20+ or any modern b
 
 ---
 
-## Two entry points
+## Single entry point
 
 ```ts
-import { Akua } from '@akua/sdk';           // Node — full surface
-import { Akua } from '@akua/sdk/browser';   // browser — read-only subset
+import { Akua } from '@akua/sdk';
 ```
 
-The Node SDK wraps the full CLI contract programmatically. The browser SDK wraps the subset that's safe to run client-side: inspection, rendering, diffing, verification. No writes, no secrets, no deploy.
+One import path for every runtime. The shipped artifact ships both a Node-loadable wasm bundle (via wasm-pack `--target nodejs`) and, once browser support lands, a browser-loadable bundle — the right one is picked automatically through `package.json` conditional exports (`"node"` / `"browser"` / `"default"`). Callers don't choose; the runtime does.
+
+Verbs that require filesystem state the WASM bundle doesn't carry (`add`, `publish`, `lock`, …) shell out to the `akua` binary. Verbs that run pure in-process — today `renderSource`; the rest as Phase 4B fills out — never touch a subprocess. See the [security-model.md](security-model.md) sandbox-layers table for the exact split.
 
 ---
 
@@ -32,7 +33,7 @@ The Node SDK wraps the full CLI contract programmatically. The browser SDK wraps
 1. **One class per primitive.** `Akua` is the root; everything hangs off it.
 2. **Async everywhere.** Every operation returns a Promise. No sync I/O.
 3. **Typed end-to-end.** Full TypeScript types for every input and output.
-4. **Thin wrapper, not a framework.** The SDK shells out to the `akua` binary or uses the same Rust core via WASM; it doesn't reimplement.
+4. **Thin wrapper, not a framework.** The SDK runs the same Rust core via WASM for pure-KCL verbs and shells out to the `akua` binary for verbs that need filesystem state the bundle doesn't hold. It doesn't reimplement either side.
 5. **Results mirror `--json` output.** If you know the CLI, you know the SDK's return shapes.
 6. **Idempotent writes.** Every write method accepts `idempotencyKey`; if omitted, one is generated.
 7. **Streaming where the CLI streams.** `dev()` and long-running operations return AsyncIterables.
@@ -132,14 +133,14 @@ interface AkuaOptions {
   cacheDir?: string;           // override cache location
   timeout?: string;            // default timeout for operations (e.g. '5m')
   logLevel?: 'debug'|'info'|'warn'|'error';
-  engine?: 'auto' | 'embedded' | 'shell';  // engine selection default
+  engine?: 'auto' | 'embedded';  // engine selection default
   signal?: AbortSignal;        // cancel long-running ops
 }
 ```
 
 ### Universal option — `engine`
 
-Methods that invoke an engine (render, test, lint, bench, policy.check, etc.) accept an `engine?: 'auto' | 'embedded' | 'shell'` override. Default behavior: embedded engine bundled with akua. Shell-out is an escape hatch when a specific engine version on `$PATH` is required. See [embedded-engines.md](embedded-engines.md).
+Methods that invoke an engine (render, test, lint, bench, policy.check, etc.) accept an `engine?: 'auto' | 'embedded'` override — today `auto` and `embedded` behave identically because akua only ships embedded engines. The field exists for forward-compatibility; future engines that admit a separate fast-path implementation (e.g. a native-code CEL interpreter alongside the WASM build) will read the option. No shell-out path is exposed by the SDK — see [CLAUDE.md](../CLAUDE.md)'s "No shell-out, ever" invariant and [embedded-engines.md](embedded-engines.md).
 
 ### Universal option — `idempotencyKey`
 
@@ -173,7 +174,7 @@ interface PackageExportOptions {
   format: 'json-schema' | 'openapi' | 'yaml' | 'oci-bundle';
   outFile?: string;
   pretty?: boolean;
-  engine?: 'auto' | 'embedded' | 'shell';
+  engine?: 'auto' | 'embedded';
 }
 
 interface PackageExportResult {
@@ -189,7 +190,7 @@ interface PackageTestOptions {
   coverage?: boolean;
   golden?: 'verify' | 'regenerate';
   watch?: boolean;
-  engine?: 'auto' | 'embedded' | 'shell';
+  engine?: 'auto' | 'embedded';
 }
 
 interface InitOptions {
@@ -417,7 +418,7 @@ interface PolicyTestOptions {
   filter?: RegExp | string;
   coverage?: boolean;
   watch?: boolean;
-  engine?: 'auto' | 'embedded' | 'shell';
+  engine?: 'auto' | 'embedded';
 }
 
 interface PolicyExplainOptions {
@@ -803,53 +804,19 @@ try {
 
 ---
 
-## Browser SDK — `@akua/sdk/browser`
+## Browser
 
-Same class, subset of methods. Designed for the playground at `akua.dev` and for embedded audit UIs.
+Same `Akua` class, same single `@akua/sdk` import. When the browser build + engine bundling (see [docs/roadmap.md § Phase 4B](roadmap.md#phase-4b--akua-wasm-for-jsr-delivery-blocks-v010)) land, the `"browser"` conditional export resolves to a bundler-target WASM build that loads the Rust core once, lazily, and runs render / diff / verify / inspect entirely in-page. No CLI shell-out — `execFile` isn't available in the browser, and SDK methods that would need it throw `E_WRITE_UNSUPPORTED_IN_BROWSER`.
 
-```ts
-import { Akua } from '@akua/sdk/browser';
+Expected availability in-browser once shipped:
 
-const akua = new Akua();
+- `akua.inspect`, `akua.diff`, `akua.renderSource`, `akua.render` (public OCI/HTTP sources only — CORS permitting), `akua.verify`, `akua.help`
 
-// Read-only operations work
-const pkg = await akua.inspect('oci://pkg.akua.dev/payments-api:3.2');
-const diff = await akua.diff('v1', 'v2');
-const rendered = await akua.render({
-  ref: 'oci://pkg.akua.dev/payments-api:3.2',
-  inputs: { hostname: 'demo.example.com' }
-});
+Expected to throw in-browser (no filesystem, no credential store, no cluster access):
 
-// Write operations throw
-try {
-  await akua.publish({...});
-} catch (err) {
-  // err.code === 'E_WRITE_UNSUPPORTED_IN_BROWSER'
-}
-```
+- `akua.publish`, `akua.attest`, `akua.deploy`, `akua.rollout`, `akua.secret.*`, `akua.audit.*`, `akua.query.*`, `akua.login`
 
-The browser SDK loads the Rust core as a WASM module (once, lazily) and uses it to render, diff, and verify. No CLI shell-out. No backend calls except to fetch OCI artifacts from public registries (CORS-permitting).
-
-### Available in browser
-
-- `akua.inspect`
-- `akua.diff`
-- `akua.render` (with some restrictions on sources — public OCI/HTTP only)
-- `akua.verify`
-- `akua.help`
-
-### Not available in browser
-
-- `akua.publish`, `akua.attest`
-- `akua.deploy`, `akua.rollout`
-- `akua.secret.*`, `akua.audit.*`, `akua.query.*`
-- `akua.login` (but OAuth via popup works if the host site sets it up)
-
----
-
-## Server-side contexts (CI, webhook handlers)
-
-For CI jobs or webhook handlers that need a subset of the SDK without spawning subprocesses, future versions will ship `@akua/sdk/lib` — a pure-WASM library variant with the same API shape but no CLI dependency. Tracked for v0.3.
+For v0.1.0 the Node-loadable bundle ships first; browser is next on the Phase 4B punch list.
 
 ---
 
@@ -892,7 +859,7 @@ The SDK's types mirror the underlying format specs. For the authoritative data s
 - **Lockfile** (`akua.toml` + `akua.lock`) — [lockfile-format.md](lockfile-format.md)
 - **CLI contract** (invariants every method honors) — [cli-contract.md](cli-contract.md)
 - **CLI reference** (the verbs the SDK methods mirror) — [cli.md](cli.md)
-- **Embedded engines** (`engine?: 'auto' | 'embedded' | 'shell'`) — [embedded-engines.md](embedded-engines.md)
+- **Embedded engines** (`engine?: 'auto' | 'embedded'`) — [embedded-engines.md](embedded-engines.md)
 - **Agent usage + auto-detection** — [agent-usage.md](agent-usage.md)
 
 TypeScript types in `@akua/sdk` are generated from the same akua-specified schemas the CLI consumes (Package, Policy, akua.toml — the shapes akua owns), so a field shape in the SDK always matches the file-format spec. When the spec evolves, the generated types follow on the next `@akua/sdk` release.

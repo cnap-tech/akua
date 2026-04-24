@@ -64,7 +64,7 @@ Never runtime string lookups like `kyverno.check({bundle: "oci://..."})`. Runtim
 
 ### 2.4 Embedded engines by default
 
-KCL, Helm, OPA, Regal, Kustomize, kro offline instantiator, CEL, Kyverno-to-Rego converter — all bundled into the akua binary via wasmtime (Rust engines linked directly). `$PATH` is never required. Shell-out is available as escape hatch via `--engine=shell`.
+KCL, Helm, OPA, Regal, Kustomize, kro offline instantiator, CEL, Kyverno-to-Rego converter — all bundled into the akua binary via wasmtime (Rust engines linked directly; Go engines compiled to wasip1). `$PATH` is never required and there's no shell-out escape hatch — CLAUDE.md's "No shell-out, ever" invariant holds across the render pipeline.
 
 Two consequences: (a) `akua` works in any sandbox without pre-provisioning, (b) version drift between engines is impossible — we ship a tested set together.
 
@@ -126,9 +126,9 @@ The ambition is "all engines run as embedded, deterministic, browser-portable WA
 | kro RGD instantiator | ✅ | ✅ | ✅ (offline-mode fork) | |
 | CEL | ✅ | ✅ | ✅ | |
 | Kyverno | ✅ | ✅ (via Rego converter) | ✅ | consumed as Rego via converter |
-| Helmfile | ❌ | ❌ | ❌ | shells to `helmfile`; default is escape-hatch only |
+| Helmfile | ❌ | ❌ | ❌ | does not ship — shell-required, not embeddable; compose `helm.template(...)` calls in a Package instead |
 
-Practical guidance: Helmfile breaks every invariant (non-deterministic, shell-required, not embedded). It's supported as an escape hatch for legacy users via `--engine=shell`; it is not the default path.
+Practical guidance: Helmfile breaks every invariant (non-deterministic, shell-required, not embedded) and therefore does not ship. Migrate Helmfile workflows to akua Packages that compose `helm.template(...)` calls instead.
 
 ---
 

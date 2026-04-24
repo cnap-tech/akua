@@ -270,7 +270,7 @@ akua render [path] [flags]
 | `--stdout` | print rendered manifests as multi-doc YAML to stdout instead of writing files |
 | `--dry-run` | render but don't write files |
 
-> **Engine callables.** `pkg.render(Render)` ships today — pure Rust, no external dependencies — for Package-of-Packages composition; see [`examples/08-pkg-compose`](../examples/08-pkg-compose). `helm.template(Template)` and `kustomize.build(Build)` are defined but return `E_ENGINE_NOT_AVAILABLE` while their embedded WASM backends are in progress (Phases 1 + 3 of [`docs/roadmap.md`](roadmap.md)). akua doesn't shell out to `helm` or `kustomize` binaries — every engine must run inside the wasmtime sandbox; see [`docs/security-model.md`](security-model.md).
+> **Engine callables.** `pkg.render(Render)` (pure-Rust Package-of-Packages composition — see [`examples/08-pkg-compose`](../examples/08-pkg-compose)), `helm.template(Template)`, and `kustomize.build(Build)` all ship with embedded WASM backends. akua never shells out to `helm` or `kustomize` binaries — every engine runs inside the wasmtime sandbox alongside the render worker; see [`docs/security-model.md`](security-model.md) and [`docs/embedded-engines.md`](embedded-engines.md).
 >
 > **One render output.** akua writes raw YAML manifests, one file per resource. Distribution shapes like Helm charts or OCI bundles are future `akua publish --as <format>` concerns — they wrap rendered manifests at distribution time, not as a Package-declared output.
 

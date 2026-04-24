@@ -43,7 +43,7 @@ See [`docs/cli-contract.md`](./cli-contract.md) for the universal contract every
 
 ## Embedded engines
 
-All engines bundled into the binary via wasmtime (native Rust engines linked directly). `$PATH` is never required. Shell-out available as an escape hatch via `--engine=shell`.
+All engines bundled into the binary via wasmtime. `$PATH` is never required and there is no shell-out escape hatch — CLAUDE.md's "No shell-out, ever" invariant holds across the render pipeline.
 
 See [`docs/embedded-engines.md`](./embedded-engines.md) for the embedding contract, version pinning, and size budget.
 

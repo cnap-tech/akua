@@ -199,14 +199,14 @@ Sandbox becomes the default execution path for akua itself. User-invoked `akua r
 
 - [x] **Spike complete 2026-04-24** ([docs/spikes/kcl-wasm-feasibility.md](spikes/kcl-wasm-feasibility.md)) — compile + runtime both green on `wasm32-wasip1`. Two runtime panics resolved same day: `kcl-driver::get_pkg_list` via [cnap-tech/kcl@akua-wasm32](https://github.com/cnap-tech/kcl/tree/akua-wasm32) fork + upstream PR [kcl-lang/kcl#2086](https://github.com/kcl-lang/kcl/pull/2086), `stdlib::stdlib_root` via cfg-guard in akua-core.
 - [x] `akua-render-worker` binary targeting `wasm32-wasip1` — Ping + Render requests both handled. akua-core + engine-kcl compiled into the worker via the `[patch]` pin.
-- [x] Wasmtime host harness in `akua-cli`: per-render Store with `StoreLimits::memory_size(256 MiB)`, `consume_fuel`, `epoch_interruption`, background epoch ticker. `akua render` verb dispatch through the worker — next slice.
-- [ ] AOT-compile `.cwasm` at akua's build time; embed in akua binary
-- [ ] Wasmtime host harness: `InstanceAllocationStrategy::pooling(...)` + `Config::consume_fuel(true)` + `Config::epoch_interruption(true)` + `StoreLimitsBuilder::memory_size(256 << 20)` + preopens only
-- [ ] `akua render` dispatches through worker by default. No opt-out.
-- [ ] Benchmark regression suite: sub-100ms render budget still met
-- [ ] CVE-2026-34988 mitigation: pin `wasmtime >= 43.0.1`, keep `memory_guard_size` default, set `memory_reservation >= 4 GiB`
+- [x] Wasmtime host harness in `akua-cli`: per-render Store with `StoreLimits::memory_size(256 MiB)` + `epoch_interruption` + background epoch ticker. Single shared Engine for worker + engine plugins (helm, kustomize) per wasmtime's "one Engine, many Stores" pattern. Plugin bridge (`env::kcl_plugin_invoke_json_wasm`) ferries callouts across the Store boundary; plugin panics survive the wasip1 trap boundary via out-of-band capture on `HostState`.
+- [x] AOT-compile `.cwasm` at akua's build time; embed in akua binary (`include_bytes!` wrapping `$OUT_DIR/akua-render-worker.cwasm`, Config-hash-matched to runtime).
+- [x] `akua render`, `akua dev`, `akua repl` all dispatch through the worker — no native fallback. Plugin callouts (`helm.template`, `kustomize.build`) bridged to host handlers.
+- [x] CVE-2026-34988 mitigation: pinned `wasmtime = "43"` across workspace (43.0.1 min).
+- [ ] Benchmark regression suite: sub-100ms render budget still met (documented target, untested in the current sweep)
+- [ ] `InstanceAllocationStrategy::pooling(...)` + `Config::consume_fuel(true)` — deferred. Today's Store limits (memory + epoch) cover the invariant; fuel + pooling are optimization knobs, not correctness knobs.
 
-**Exit gate:** every `akua render` runs inside wasmtime. Native code path no longer exists for render execution.
+**Exit gate:** every `akua render` runs inside wasmtime. Native code path no longer exists for render execution. **✅ Shipped 2026-04-24.**
 
 ---
 
@@ -214,19 +214,23 @@ Sandbox becomes the default execution path for akua itself. User-invoked `akua r
 
 Compiles the render path to a browser-compatible WASM bundle so `@akua/sdk` ships as pure JSR (no CLI install, no shell-out, no `child_process`). Parallel track to Phase 4's wasip1 worker — different target, different consumer.
 
-- [ ] `crates/akua-wasm` — new crate, `wasm32-unknown-unknown` target. Re-exports the render path behind a stable JS-facing API surface.
-- [ ] Decide Node + browser strategy: `wasm-bindgen` (broad browser support, N-API bridge for Node) vs two builds (wasm-bindgen for browser + N-API napi-rs for Node). First pass: `wasm-bindgen` only, Node picks it up via standard `WebAssembly.instantiate`.
-- [~] **KCL on `wasm32-unknown-unknown` — spike complete** ([docs/spikes/kcl-wasm-feasibility.md](spikes/kcl-wasm-feasibility.md)). Two fixable blockers found, both in the spike findings:
-  - [ ] `uuid` random-source: add `uuid = { version = "1", features = ["js", "v4"] }` under `[target.'cfg(target_arch = "wasm32")'.dependencies]` in `akua-wasm`. Three lines. Zero maintenance.
-  - [ ] `kcl-language-server` uses `lsp_types::Url::{to_file_path, from_file_path}` (8 call sites). Upstream PR against `kcl-lang/kcl` — either (1) make LSP an optional dep of `kcl-api`, or (2) cfg-guard the 8 call sites. Fallback: `cnap-tech/kcl` fork on `akua-wasm32` branch.
-- [ ] Helm + Kustomize engines: reuse the existing `wasm32-wasip1` `.wasm` from Phase 1/3, instantiated via wasmtime-in-the-browser (`wasmer-js` or wasmtime's JS bindings) OR re-compile engines against `wasm32-unknown-unknown` with a shim. Pick whichever is shorter to v0.1.0.
-- [ ] Size budget: target <15 MB for the full bundle (KCL + stdlib + both engines). gzip + brotli ship via JSR.
-- [ ] `akua-wasm` exports typed-method surface matching the SDK's `Akua` class; SDK method → WASM call → typed result, no process spawn.
-- [ ] `@akua/sdk` instantiates the WASM bundle **internally** on first call — lazy-init + cache across calls. **No `@akua/sdk/wasm` subpath.** See the "Single-entrypoint design" note under the SDK punch list for why.
+- [x] `crates/akua-wasm` — new crate, `wasm32-unknown-unknown` target. `render(package_filename, source, inputs_json)` + `version()` exported via `wasm-bindgen`.
+- [x] Node/browser strategy chosen: `wasm-bindgen` only, `--target nodejs` for the shipped Node build + `--target bundler` for the eventual browser SDK. No N-API bridge.
+- [x] **KCL on `wasm32-unknown-unknown`** — all blockers closed:
+  - [x] `uuid` random-source via `uuid = { features = ["js", "v4"] }` under `[target.'cfg(target_arch = "wasm32")']`.
+  - [x] `instant` + `chrono` wall-clock externs gated to `js_sys::Date.now()` via `instant/wasm-bindgen` + `chrono/wasmbind` features.
+  - [x] `kcl-language-server` `Url::from_file_path` / `to_file_path` call sites (6 in production code) hoisted to a `url_from_file_path` / `url_to_file_path` shim on the fork — native on host, `Url::parse("file://…")` on wasm32. Lives on [cnap-tech/kcl@akua-wasm32](https://github.com/cnap-tech/kcl/tree/akua-wasm32); upstream PR open.
+  - [x] `kcl_plugin_invoke_json_wasm` extern narrowed to `target_os = "wasi"` with a self-contained `__kcl_PanicInfo__` stub on non-WASI wasm32 — unblocks the JSR bundle from needing a host-provided `env.*` import.
+- [x] `@akua/sdk` instantiates the WASM bundle **internally** on first call — lazy `await import('./wasm/nodejs/akua_wasm.js')` in `packages/sdk/src/mod.ts`. Shell-out verbs pay no load cost. **No `@akua/sdk/wasm` subpath.**
+- [x] Bundle staged under `packages/sdk/wasm/nodejs/` by `task build:akua-wasm:nodejs`; JSR publishes it alongside the TS source via `jsr.json` `publish.include`.
+- [x] First WASM-backed method on `Akua` — `renderSource(packageFilename, source, inputs?)` — 3 bun tests green; 2 e2e tests against the live binary still green.
+- [ ] Helm + Kustomize engines available from the SDK: reuse the existing `wasm32-wasip1` `.wasm` via a wasmtime-in-the-browser shim OR re-compile the Go engines to `wasm32-unknown-unknown`. Decision + prototype still owed. Packages that import `helm.template` / `kustomize.build` currently surface a `__kcl_PanicInfo__` pointing users at the CLI.
+- [ ] Browser build via `wasm-pack --target bundler` staged at `packages/sdk/wasm/browser/`; `package.json` conditional exports pick it for `"browser"`.
+- [ ] Size budget: re-measure once engines are bundled. KCL-only today: 7.3 MB gzipped-native, well under the 15 MB bundle target.
 - [ ] Benchmarks: cold + warm render latency via the WASM SDK vs the CLI binary — target parity-within-2× on warm calls.
 - [ ] Browser smoke test: a static HTML page imports `@akua/sdk` from JSR + renders an example Package.
 
-**Exit gate for Phase 4B:** `pnpm add jsr:@akua/sdk` (or equivalent `bun add`, `deno add`) → import → render → typed result, on Node + Deno + Bun + Chrome + Firefox. No `akua` binary in sight.
+**Exit gate for Phase 4B:** `pnpm add jsr:@akua/sdk` (or equivalent `bun add`, `deno add`) → import → render → typed result, on Node + Deno + Bun + Chrome + Firefox. No `akua` binary in sight. **Node side is proven; browser target + engine bundling remain.**
 
 ---
 
@@ -361,16 +365,17 @@ Concrete boxes to check before cutting the alpha tag. Everything under "core ver
 
 v0.1.0 doesn't cut until CLAUDE.md's promise holds end-to-end. No caveats in release notes say otherwise.
 
-- [ ] Phase 4 shipped — every `akua render` runs inside wasmtime. No native render path exists.
-- [ ] Phase 4B shipped — `@akua/sdk` runs the same render path inside the host JS runtime's sandbox.
-- [ ] Adversarial integration test: fuel-exhaustion loop in Package.k surfaces a typed `E_RENDER_FUEL` (or similar), never a panic, never a hang past the budget.
-- [ ] Adversarial test: memory-bomb allocation fails cleanly against the per-render `StoreLimitsBuilder::memory_size` cap.
-- [ ] Adversarial test: epoch-deadline exhaustion (a Package.k that sleeps / spins past the wall-clock deadline) surfaces typed error within ~1s of deadline.
-- [ ] Adversarial test: path-traversal via `pkg.render({ path: "../../etc/passwd" })` rejected with `E_PATH_ESCAPE`.
-- [ ] Adversarial test: symlink escape (vendor dir contains a symlink to `/etc`) rejected.
-- [ ] Adversarial test: KCL `import foo.bar` against a dep path not listed under `charts.*` rejected under `--strict`.
-- [ ] Adversarial test: no `$PATH` binary reachable from a render. Running the suite with `PATH=/nonexistent` still passes.
-- [ ] Security model doc — delete the "Operational guidance today (pre-Phase 4)" section. Once the invariant holds, that section should not exist.
+- [x] Phase 4 shipped — every `akua render` / `akua dev` / `akua repl` runs inside wasmtime. No native render path exists.
+- [~] Phase 4B shipped — Node-side lands (`@akua/sdk` loads `akua-wasm` lazily, first WASM-backed method green). Browser target + engine bundling outstanding.
+- [~] Fuel-exhaustion — fuel not wired for v0.1.0 (see Phase 4 notes above); epoch is the active CPU cap. Covered by `epoch_cap_traps_runaway_evaluation` in `tests/sandbox_adversarial.rs`.
+- [x] Adversarial test: memory-bomb allocation fails cleanly against the per-render `StoreLimitsBuilder::memory_size` cap. (`memory_cap_enforced_below_minimum_instance_size` + `memory_cap_traps_runtime_growth_past_limit`.)
+- [x] Adversarial test: epoch-deadline exhaustion surfaces typed error within ~1s of deadline. (`epoch_cap_traps_runaway_evaluation`.)
+- [x] Adversarial test: absolute plugin path rejected with `PluginPanic` carrying the `E_PATH_ESCAPE` marker. (`absolute_plugin_path_rejected_at_guard`.)
+- [x] Adversarial test: parent-relative escape (`../../etc`) rejected. (`parent_relative_plugin_path_rejected_at_guard`.)
+- [x] Adversarial test: symlink-escape via `canonicalize` — a symlink that textually looks under-dir but resolves outside still fails. (`symlink_escape_rejected_through_canonicalize`.)
+- [x] Adversarial test: absolute `import` rejected by KCL's external-pkg resolver. (`absolute_import_path_rejected_by_kcl_resolver`.)
+- [ ] Adversarial test: no `$PATH` binary reachable from a render. Running the suite with `PATH=/nonexistent` still passes. (Structural — wasmtime never exposes subprocesses — but an explicit belt-and-braces test is still owed.)
+- [x] Security model doc — "Operational guidance today (pre-Phase 4)" section deleted. The invariant holds.
 - [ ] CI runs the adversarial suite on every PR. A failure blocks merge.
 
 ### Build + test
@@ -393,7 +398,7 @@ Many markdown files predate recent shipping and make claims that no longer match
 - [ ] **[docs/cli-contract.md](cli-contract.md)** — audit against what the universal args actually accept today. Every "MUST" must be true of every verb.
 - [ ] **[docs/package-format.md](package-format.md)** — matches the `PackageK` loader's current parse (no drift since last doc refresh).
 - [ ] **[docs/lockfile-format.md](lockfile-format.md)** — matches `AkuaLock::save` output byte-for-byte.
-- [ ] **[docs/security-model.md](security-model.md)** — section "Operational guidance today (pre-Phase 4)" must call out the containerize-per-render recommendation prominently. Verify the feature-status table matches Cargo.toml.
+- [x] **[docs/security-model.md](security-model.md)** — "Operational guidance today (pre-Phase 4)" section deleted; feature-status table flipped to reflect Phase 4 shipped.
 - [ ] **[docs/embedded-engines.md](embedded-engines.md)** — list only engines that actually ship (helm + kustomize today). Mark OPA / Regal / CEL / Kyverno / kro as future.
 - [ ] **[docs/policy-format.md](policy-format.md)** — if Rego isn't wired up yet, mark the whole doc as target-state with a prominent "NOT YET SHIPPED" banner.
 - [ ] **[docs/agent-usage.md](agent-usage.md)** — lists the verbs agents are expected to invoke and the JSON shapes they should parse. Remove any verb that's not yet shipped.

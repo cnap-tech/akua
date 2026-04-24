@@ -103,7 +103,7 @@ This is the current-state gap vs the target. See [docs/roadmap.md](roadmap.md) p
 | Typed `charts.*` imports + lockfile digests | Shipped — path + OCI, replace override | ✅ Phase 2a, 2b A+B |
 | `akua render --strict` rejects raw chart paths | Shipped — `E_STRICT_UNTYPED_CHART` | ✅ Phase 2b C |
 | `akua verify` path-dep digest drift detection | Shipped — `PathDigestDrift` / `PathMissing` | ✅ Phase 2b C |
-| Render worker wrapped in wasmtime | Native binary — no sandbox | Phase 4 |
+| Render worker wrapped in wasmtime | Shipped — every render runs inside a `Store` with memory/epoch caps + capability-model preopens | ✅ Phase 4 |
 | `akua serve` per-tenant isolation | Verb doesn't exist | Phase 5 |
 | cosign keyed verification on OCI deps | Shipped — `[signing] cosign_public_key`, ECDSA P-256 | ✅ Phase 6 A |
 | `akua publish` with cosign sign-by-default | Shipped — P-256 PKCS#8 PEM private keys | ✅ Phase 7 A |
@@ -118,22 +118,6 @@ This is the current-state gap vs the target. See [docs/roadmap.md](roadmap.md) p
 | Git dep checkout via `gix` | Shipped — pure Rust, no shell-out | ✅ Phase 2b C |
 | Private-repo OCI auth (docker config / akua auth.toml) | Shipped — Basic + bearer PAT | ✅ Phase 2b C |
 | Docker credential helpers | Not implemented — would require shell-out | Won't ship |
-
----
-
-## Operational guidance today (pre-Phase 4)
-
-Until `akua render` dispatches through the wasmtime worker, operators running akua on untrusted input should:
-
-1. Run akua in a container / gVisor / Firecracker microVM per render.
-2. Mount the Package directory read-only.
-3. Mount a dedicated output directory writable.
-4. Enforce CPU/memory/time limits at the container level.
-5. No network namespace (or explicit deny-all network policy).
-
-This is what most hosted build services already do for arbitrary-input jobs (GitHub Actions, Vercel builds, Cloudflare Workers build). Standard pattern.
-
-After Phase 4, the above is no longer necessary — wasmtime enforces it at the process level, no container required.
 
 ---
 
