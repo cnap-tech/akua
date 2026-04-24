@@ -23,6 +23,7 @@ use serde::Serialize;
 
 use crate::contract::{emit_output, Context};
 
+akua_core::contract_type! {
 /// Verify verdict JSON shape. Stable across releases.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct VerifyOutput {
@@ -35,14 +36,18 @@ pub struct VerifyOutput {
     /// Structured violations. Empty when `status == "ok"`.
     pub violations: Vec<Violation>,
 }
+}
 
+akua_core::contract_type! {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Summary {
     pub declared_deps: usize,
     pub locked_packages: usize,
     pub strict_signing: bool,
 }
+}
 
+akua_core::contract_type! {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Violation {
@@ -84,6 +89,7 @@ pub enum Violation {
         expected: String,
         claimed: String,
     },
+}
 }
 
 impl VerifyOutput {

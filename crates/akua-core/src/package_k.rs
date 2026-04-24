@@ -303,6 +303,7 @@ pub fn lint_kcl(path: &Path) -> Result<Vec<LintIssue>, PackageKError> {
     }
 }
 
+crate::contract_type! {
 /// A single `option()` call-site in a parsed Package, surfaced for
 /// inspection without executing the program. Mirrors kcl_lang's
 /// `OptionHelp` shape with idiomatic Rust optionals.
@@ -314,19 +315,20 @@ pub struct OptionInfo {
     /// The declared type of the binding receiving the option — e.g.
     /// `"Input"` for `input: Input = option("input") or Input {}`.
     /// Empty when the option is used without a type annotation.
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub r#type: String,
 
     pub required: bool,
 
     /// Default value (literal form) when the option call includes one.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<String>,
 
     /// `help="…"` text attached to the option call, surfaced in docs
     /// tooling; absent when the authoring site didn't provide any.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub help: Option<String>,
+}
 }
 
 /// List every `option()` call-site declared in the KCL program at

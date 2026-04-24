@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 
 use crate::hex::hex_encode;
 
+crate::contract_type! {
 /// Structural diff between two directory trees. All paths are
 /// relative to the respective root; sorted alphabetically for
 /// deterministic output.
@@ -32,16 +33,18 @@ pub struct DirDiff {
     pub changed: Vec<FileChange>,
 
     /// Files present in both with identical sha256 content.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unchanged: Vec<PathBuf>,
 
     /// Entries that aren't regular files (symlinks, fifos, sockets…).
     /// Surfaced so the caller knows the diff isn't exhaustive, without
     /// the diff itself trying to semantically compare those kinds.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skipped: Vec<PathBuf>,
 }
+}
 
+crate::contract_type! {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FileChange {
     pub path: PathBuf,
@@ -51,6 +54,7 @@ pub struct FileChange {
 
     /// `sha256:<hex>` of the `after` file's contents.
     pub after: String,
+}
 }
 
 impl DirDiff {

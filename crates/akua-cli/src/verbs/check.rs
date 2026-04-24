@@ -40,12 +40,15 @@ pub struct CheckResult {
 
     pub ok: bool,
 
-    /// One-line error from the failing check; `null` when `ok`.
+    /// One-line error from the failing check; absent when `ok`.
+    /// `#[serde(default)]` is load-bearing for the JSON Schema:
+    /// it tells schemars the field is optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 
     /// Per-file issues from linting the Package.k. Other check kinds
-    /// leave this empty. Always serialized (possibly empty) so
-    /// consumers can iterate without a presence guard.
+    /// leave this empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub issues: Vec<LintIssue>,
 }
 }

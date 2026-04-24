@@ -17,11 +17,15 @@ use std::path::Path;
 
 use akua_cli::verbs::check::CheckOutput;
 use akua_cli::verbs::fmt::FmtOutput;
+use akua_cli::verbs::inspect::InspectOutput;
 use akua_cli::verbs::lint::LintOutput;
+use akua_cli::verbs::tree::TreeOutput;
+use akua_cli::verbs::verify::VerifyOutput;
 use akua_cli::verbs::version::VersionOutput;
 use akua_cli::verbs::whoami::WhoamiOutput;
 use akua_core::cli_contract::error::Level;
 use akua_core::cli_contract::{AgentContext, AgentSource, ExitCode, StructuredError};
+use akua_core::dir_diff::DirDiff;
 use akua_core::package_k::LintIssue;
 use akua_core::package_render::RenderSummary;
 use schemars::generate::SchemaSettings;
@@ -45,6 +49,10 @@ fn export_json_schema_bundle() {
     generator.subschema_for::<LintOutput>();
     generator.subschema_for::<LintIssue>();
     generator.subschema_for::<FmtOutput>();
+    generator.subschema_for::<InspectOutput>();
+    generator.subschema_for::<TreeOutput>();
+    generator.subschema_for::<VerifyOutput>();
+    generator.subschema_for::<DirDiff>();
 
     let defs = generator.take_definitions(true);
     let bundle = serde_json::json!({

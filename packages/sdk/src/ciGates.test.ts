@@ -13,7 +13,7 @@ import { BINARY, E2E_ENABLED, MINIMAL_PACKAGE_K, scratchPackageWith } from './te
 const MINIMAL_TOML = `[package]
 name = "smoke"
 version = "0.0.1"
-edition = "2025"
+edition = "akua.dev/v1alpha1"
 `;
 
 describe.if(E2E_ENABLED)('Akua CI-gate verbs', () => {

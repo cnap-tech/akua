@@ -2,11 +2,17 @@ import { execFile } from 'node:child_process';
 
 import type { CheckOutput } from './types/CheckOutput.ts';
 import type { CheckResult } from './types/CheckResult.ts';
+import type { DirDiff } from './types/DirDiff.ts';
+import type { FileChange } from './types/FileChange.ts';
 import type { FmtFile } from './types/FmtFile.ts';
 import type { FmtOutput } from './types/FmtOutput.ts';
+import type { InspectOutput } from './types/InspectOutput.ts';
 import type { LintIssue } from './types/LintIssue.ts';
 import type { LintOutput } from './types/LintOutput.ts';
+import type { OptionInfo } from './types/OptionInfo.ts';
 import type { RenderSummary } from './types/RenderSummary.ts';
+import type { TreeOutput } from './types/TreeOutput.ts';
+import type { VerifyOutput } from './types/VerifyOutput.ts';
 import type { VersionOutput } from './types/VersionOutput.ts';
 import type { WhoamiOutput } from './types/WhoamiOutput.ts';
 
@@ -34,11 +40,17 @@ export type { SchemaName } from './validate.ts';
 export type {
 	CheckOutput,
 	CheckResult,
+	DirDiff,
+	FileChange,
 	FmtFile,
 	FmtOutput,
+	InspectOutput,
 	LintIssue,
 	LintOutput,
+	OptionInfo,
 	RenderSummary,
+	TreeOutput,
+	VerifyOutput,
 	VersionOutput,
 	WhoamiOutput,
 };
@@ -55,6 +67,27 @@ const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
 export interface AkuaOptions {
 	/** Path to the `akua` binary. Defaults to `"akua"` (resolved via PATH). */
 	binary?: string;
+}
+
+export interface InspectOptions {
+	/** Path to the `package.k` file. Default: `./package.k`. Mutually exclusive with `tarball`. */
+	package?: string;
+	/** Path to a `.tar.gz` Package artifact. Mutually exclusive with `package`. */
+	tarball?: string;
+}
+
+export interface TreeOptions {
+	/** Workspace root (dir containing `akua.toml`). Default: `.`. */
+	workspace?: string;
+}
+
+export interface VerifyOptions {
+	/** Workspace root. Default: `.`. */
+	workspace?: string;
+	/** Path to a `.tar.gz` Package artifact for offline verify. */
+	tarball?: string;
+	/** Override the cosign public key path from `akua.toml [signing]`. */
+	publicKey?: string;
 }
 
 export interface CheckOptions {
@@ -180,6 +213,48 @@ export class Akua {
 		if (opts.check) extra.push('--check');
 		if (opts.stdout) extra.push('--stdout');
 		return this.callDiagnostic<FmtOutput>('fmt', extra, 'FmtOutput');
+	}
+
+	/**
+	 * Introspect a Package or a packed tarball — surface the option
+	 * set, tarball layer digest + size, etc. Mirrors
+	 * `akua inspect --json`.
+	 */
+	async inspect(opts: InspectOptions = {}): Promise<InspectOutput> {
+		const extra: string[] = [];
+		if (opts.package) extra.push('--package', opts.package);
+		if (opts.tarball) extra.push('--tarball', opts.tarball);
+		return this.callDiagnostic<InspectOutput>('inspect', extra, 'InspectOutput');
+	}
+
+	/** Print the workspace's declared deps + lockfile entries. */
+	async tree(opts: TreeOptions = {}): Promise<TreeOutput> {
+		const extra: string[] = [];
+		if (opts.workspace) extra.push('--workspace', opts.workspace);
+		return this.callDiagnostic<TreeOutput>('tree', extra, 'TreeOutput');
+	}
+
+	/**
+	 * Verify `akua.toml` ↔ `akua.lock` integrity + cosign signatures +
+	 * SLSA attestations. Exit `1` signals at least one violation in
+	 * `out.violations`; the SDK returns the typed output either way.
+	 */
+	async verify(opts: VerifyOptions = {}): Promise<VerifyOutput> {
+		const extra: string[] = [];
+		if (opts.workspace) extra.push('--workspace', opts.workspace);
+		if (opts.tarball) extra.push('--tarball', opts.tarball);
+		if (opts.publicKey) extra.push('--public-key', opts.publicKey);
+		return this.callDiagnostic<VerifyOutput>('verify', extra, 'VerifyOutput');
+	}
+
+	/**
+	 * Structural diff between two directory trees of rendered
+	 * manifests. Positional args map to the CLI's `before` + `after`.
+	 * Exit `1` signals a non-clean diff; the typed `DirDiff` is
+	 * returned either way.
+	 */
+	async diff(before: string, after: string): Promise<DirDiff> {
+		return this.callDiagnostic<DirDiff>('diff', [before, after], 'DirDiff');
 	}
 
 	async render(opts: RenderOptions = {}): Promise<RenderSummary> {

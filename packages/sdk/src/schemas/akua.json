@@ -86,14 +86,14 @@
     "CheckResult": {
       "properties": {
         "error": {
-          "description": "One-line error from the failing check; `null` when `ok`.",
+          "description": "One-line error from the failing check; absent when `ok`.\n`#[serde(default)]` is load-bearing for the JSON Schema:\nit tells schemars the field is optional.",
           "type": [
             "string",
             "null"
           ]
         },
         "issues": {
-          "description": "Per-file issues from linting the Package.k. Other check kinds\nleave this empty. Always serialized (possibly empty) so\nconsumers can iterate without a presence guard.",
+          "description": "Per-file issues from linting the Package.k. Other check kinds\nleave this empty.",
           "items": {
             "$ref": "#/$defs/LintIssue"
           },
@@ -109,8 +109,92 @@
       },
       "required": [
         "name",
-        "ok",
-        "issues"
+        "ok"
+      ],
+      "type": "object"
+    },
+    "DepRow": {
+      "properties": {
+        "locked": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LockedInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Lockfile row, present only when `akua.lock` exists and contains\na matching entry."
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "description": "`\"oci\"` / `\"git\"` / `\"path\"` / `\"unknown\"`.",
+          "type": "string"
+        },
+        "source_ref": {
+          "description": "The actual ref recorded in `akua.toml`.",
+          "type": "string"
+        },
+        "version": {
+          "description": "`#[serde(default)]` is load-bearing for the JSON Schema:\nit tells schemars the field is optional, which the\ngenerated schema enforces. Without it, `skip_serializing_if`\nalone produces output that schemars rejects as missing a\nrequired field.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "source",
+        "source_ref"
+      ],
+      "type": "object"
+    },
+    "DirDiff": {
+      "description": "Structural diff between two directory trees. All paths are\nrelative to the respective root; sorted alphabetically for\ndeterministic output.",
+      "properties": {
+        "added": {
+          "description": "Files present in the `after` root but not the `before` root.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "changed": {
+          "description": "Files present in both but with differing sha256 content.",
+          "items": {
+            "$ref": "#/$defs/FileChange"
+          },
+          "type": "array"
+        },
+        "removed": {
+          "description": "Files present in the `before` root but not the `after` root.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "skipped": {
+          "description": "Entries that aren't regular files (symlinks, fifos, sockets…).\nSurfaced so the caller knows the diff isn't exhaustive, without\nthe diff itself trying to semantically compare those kinds.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unchanged": {
+          "description": "Files present in both with identical sha256 content.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "added",
+        "removed",
+        "changed"
       ],
       "type": "object"
     },
@@ -154,6 +238,27 @@
         }
       ]
     },
+    "FileChange": {
+      "properties": {
+        "after": {
+          "description": "`sha256:<hex>` of the `after` file's contents.",
+          "type": "string"
+        },
+        "before": {
+          "description": "`sha256:<hex>` of the `before` file's contents.",
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "before",
+        "after"
+      ],
+      "type": "object"
+    },
     "FmtFile": {
       "properties": {
         "changed": {
@@ -183,6 +288,37 @@
         "files"
       ],
       "type": "object"
+    },
+    "InspectOutput": {
+      "description": "Discriminated JSON shape. `kind: \"package\"|\"tarball\"` carries the\nvariant; consumers parse one body and branch.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PackageInspectBody",
+          "properties": {
+            "kind": {
+              "const": "package",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/TarballInspectBody",
+          "properties": {
+            "kind": {
+              "const": "tarball",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Level": {
       "description": "Log severity. Almost always `Error`; `Warn` for recoverable issues.",
@@ -250,6 +386,102 @@
       "required": [
         "status",
         "issues"
+      ],
+      "type": "object"
+    },
+    "LockedInfo": {
+      "properties": {
+        "digest": {
+          "type": "string"
+        },
+        "replaced_by": {
+          "description": "Local fork override active for this dep. When set, the dep's\ncanonical source is whatever the manifest declared, but build-\ntime resolution reads files from `replaced_by`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "signature": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "digest"
+      ],
+      "type": "object"
+    },
+    "OptionInfo": {
+      "description": "A single `option()` call-site in a parsed Package, surfaced for\ninspection without executing the program. Mirrors kcl_lang's\n`OptionHelp` shape with idiomatic Rust optionals.",
+      "properties": {
+        "default": {
+          "description": "Default value (literal form) when the option call includes one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "help": {
+          "description": "`help=\"…\"` text attached to the option call, surfaced in docs\ntooling; absent when the authoring site didn't provide any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The option key (first argument to `option(\"…\")`).",
+          "type": "string"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "type": {
+          "description": "The declared type of the binding receiving the option — e.g.\n`\"Input\"` for `input: Input = option(\"input\") or Input {}`.\nEmpty when the option is used without a type annotation.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "required"
+      ],
+      "type": "object"
+    },
+    "PackageInfo": {
+      "properties": {
+        "edition": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "edition"
+      ],
+      "type": "object"
+    },
+    "PackageInspectBody": {
+      "properties": {
+        "options": {
+          "items": {
+            "$ref": "#/$defs/OptionInfo"
+          },
+          "type": "array"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "options"
       ],
       "type": "object"
     },
@@ -356,6 +588,133 @@
       ],
       "type": "object"
     },
+    "Summary": {
+      "properties": {
+        "declared_deps": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "locked_packages": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "strict_signing": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "declared_deps",
+        "locked_packages",
+        "strict_signing"
+      ],
+      "type": "object"
+    },
+    "TarballInspectBody": {
+      "properties": {
+        "compressed_size_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "file_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "layer_digest": {
+          "type": "string"
+        },
+        "package_edition": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "package_name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "package_version": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "uncompressed_size_bytes": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "vendored_deps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "layer_digest",
+        "compressed_size_bytes",
+        "uncompressed_size_bytes",
+        "file_count",
+        "vendored_deps"
+      ],
+      "type": "object"
+    },
+    "TreeOutput": {
+      "properties": {
+        "dependencies": {
+          "items": {
+            "$ref": "#/$defs/DepRow"
+          },
+          "type": "array"
+        },
+        "package": {
+          "$ref": "#/$defs/PackageInfo"
+        }
+      },
+      "required": [
+        "package",
+        "dependencies"
+      ],
+      "type": "object"
+    },
+    "VerifyOutput": {
+      "description": "Verify verdict JSON shape. Stable across releases.",
+      "properties": {
+        "status": {
+          "description": "`\"ok\"` when everything checks out; `\"fail\"` otherwise. Derived\nfrom `violations.is_empty()`.",
+          "type": "string"
+        },
+        "summary": {
+          "$ref": "#/$defs/Summary"
+        },
+        "violations": {
+          "description": "Structured violations. Empty when `status == \"ok\"`.",
+          "items": {
+            "$ref": "#/$defs/Violation"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "status",
+        "summary",
+        "violations"
+      ],
+      "type": "object"
+    },
     "VersionOutput": {
       "description": "Version response shape.",
       "properties": {
@@ -368,6 +727,186 @@
         "version"
       ],
       "type": "object"
+    },
+    "Violation": {
+      "oneOf": [
+        {
+          "description": "Dep declared in `akua.toml` but missing from `akua.lock`.",
+          "properties": {
+            "kind": {
+              "const": "unlocked_dep",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Package locked in `akua.lock` but not declared in `akua.toml`.",
+          "properties": {
+            "kind": {
+              "const": "orphan_locked",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Package is locked without a signature while `strict_signing = true`.",
+          "properties": {
+            "kind": {
+              "const": "missing_signature",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Path-dep on-disk content diverges from the digest `akua.lock`\npinned. Someone mutated the vendored chart without re-running\n`akua add` — either intentional (run add to refresh) or\naccidental (revert the edit).",
+          "properties": {
+            "actual": {
+              "type": "string"
+            },
+            "expected": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "path_digest_drift",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "expected",
+            "actual"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Path-dep's declared target no longer exists on disk. Likely a\ndeleted `./vendor/<chart>` directory.",
+          "properties": {
+            "kind": {
+              "const": "path_missing",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "path"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "An OCI dep has no `.att` attestation sidecar at the registry,\nbut the workspace has a cosign public key configured (policy\nsays \"every dep must be attested\"). Publisher-actionable.",
+          "properties": {
+            "kind": {
+              "const": "attestation_missing",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "oci_ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "oci_ref"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "DSSE envelope failed cryptographic verification (bad\nsignature, wrong signer, cross-type substitution).\nAttacker-side signal.",
+          "properties": {
+            "detail": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "attestation_invalid",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "oci_ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "oci_ref",
+            "detail"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Attestation verified cryptographically but the subject\ndigest it claims to describe doesn't match the lockfile-pinned\ndigest for this dep. Attestation-for-a-different-artifact.",
+          "properties": {
+            "claimed": {
+              "type": "string"
+            },
+            "expected": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "attestation_subject_mismatch",
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name",
+            "expected",
+            "claimed"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "WhoamiOutput": {
       "description": "Whoami response shape. Part of the stability contract — new fields\nmay be added (backward-compatible); existing field semantics never\nchange.",

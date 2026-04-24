@@ -32,6 +32,7 @@ pub struct InspectArgs<'a> {
     pub target: InspectTarget<'a>,
 }
 
+akua_core::contract_type! {
 /// Discriminated JSON shape. `kind: "package"|"tarball"` carries the
 /// variant; consumers parse one body and branch.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -40,13 +41,17 @@ pub enum InspectOutput {
     Package(PackageInspectBody),
     Tarball(TarballInspectBody),
 }
+}
 
+akua_core::contract_type! {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct PackageInspectBody {
     pub path: PathBuf,
     pub options: Vec<OptionInfo>,
 }
+}
 
+akua_core::contract_type! {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TarballInspectBody {
     pub path: PathBuf,
@@ -54,10 +59,14 @@ pub struct TarballInspectBody {
     pub compressed_size_bytes: u64,
     pub uncompressed_size_bytes: u64,
     pub file_count: usize,
+    #[serde(default)]
     pub package_name: Option<String>,
+    #[serde(default)]
     pub package_version: Option<String>,
+    #[serde(default)]
     pub package_edition: Option<String>,
     pub vendored_deps: Vec<String>,
+}
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -19,19 +19,24 @@ pub struct TreeArgs<'a> {
     pub workspace: &'a Path,
 }
 
+akua_core::contract_type! {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TreeOutput {
     pub package: PackageInfo,
     pub dependencies: Vec<DepRow>,
 }
+}
 
+akua_core::contract_type! {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct PackageInfo {
     pub name: String,
     pub version: String,
     pub edition: String,
 }
+}
 
+akua_core::contract_type! {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct DepRow {
     pub name: String,
@@ -42,27 +47,35 @@ pub struct DepRow {
     /// The actual ref recorded in `akua.toml`.
     pub source_ref: String,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// `#[serde(default)]` is load-bearing for the JSON Schema:
+    /// it tells schemars the field is optional, which the
+    /// generated schema enforces. Without it, `skip_serializing_if`
+    /// alone produces output that schemars rejects as missing a
+    /// required field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
 
     /// Lockfile row, present only when `akua.lock` exists and contains
     /// a matching entry.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub locked: Option<LockedInfo>,
 }
+}
 
+akua_core::contract_type! {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct LockedInfo {
     pub digest: String,
 
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<String>,
 
     /// Local fork override active for this dep. When set, the dep's
     /// canonical source is whatever the manifest declared, but build-
     /// time resolution reads files from `replaced_by`.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replaced_by: Option<String>,
+}
 }
 
 #[derive(Debug, thiserror::Error)]

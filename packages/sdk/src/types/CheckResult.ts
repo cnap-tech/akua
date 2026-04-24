@@ -8,12 +8,13 @@ export type CheckResult = {
  */
 name: string, ok: boolean, 
 /**
- * One-line error from the failing check; `null` when `ok`.
+ * One-line error from the failing check; absent when `ok`.
+ * `#[serde(default)]` is load-bearing for the JSON Schema:
+ * it tells schemars the field is optional.
  */
-error: string | null, 
+error?: string | null, 
 /**
  * Per-file issues from linting the Package.k. Other check kinds
- * leave this empty. Always serialized (possibly empty) so
- * consumers can iterate without a presence guard.
+ * leave this empty.
  */
-issues: Array<LintIssue>, };
+issues?: Array<LintIssue>, };
