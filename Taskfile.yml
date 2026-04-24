@@ -150,14 +150,22 @@ tasks:
       - ls -lh {{.AKUA_WASM_PKG}}
 
   build:akua-wasm:nodejs:
-    desc: Build a Node-loadable copy of akua-wasm (smoke-test only; SDK uses bundler build)
+    desc: Build a Node-loadable copy of akua-wasm + stage it into @akua/sdk
     sources:
       - crates/akua-wasm/**/*.rs
       - crates/akua-wasm/Cargo.toml
     generates:
-      - crates/akua-wasm/pkg-nodejs/akua_wasm.js
+      - packages/sdk/wasm/nodejs/akua_wasm.js
+      - packages/sdk/wasm/nodejs/akua_wasm_bg.wasm
     cmds:
       - wasm-pack build crates/akua-wasm --target nodejs --release --out-dir pkg-nodejs
+      # Stage into the SDK package so JSR publishes the .wasm
+      # alongside the TS source + types. Separate from the bundler
+      # build — different instantiation shapes.
+      - mkdir -p packages/sdk/wasm/nodejs
+      - cp crates/akua-wasm/pkg-nodejs/akua_wasm.js packages/sdk/wasm/nodejs/
+      - cp crates/akua-wasm/pkg-nodejs/akua_wasm_bg.wasm packages/sdk/wasm/nodejs/
+      - cp crates/akua-wasm/pkg-nodejs/akua_wasm.d.ts packages/sdk/wasm/nodejs/
 
   sdk:gen:
     desc: Regenerate packages/sdk/src/types/*.ts and src/schemas/akua.json from Rust serde types

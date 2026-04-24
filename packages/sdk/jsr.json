@@ -1,11 +1,18 @@
 {
 	"name": "@akua/sdk",
 	"version": "0.0.0",
-	"description": "TypeScript SDK for akua — shells out to the akua CLI, returns types generated from the Rust serde types that define the --json surface.",
+	"description": "TypeScript SDK for akua — render Packages in-process via WASM; shell out to the akua CLI for the verbs not yet WASM-backed.",
 	"license": "Apache-2.0",
 	"exports": "./src/mod.ts",
 	"publish": {
-		"include": ["src/**/*.ts", "src/schemas/akua.json", "README.md"],
+		"include": [
+			"src/**/*.ts",
+			"src/schemas/akua.json",
+			"wasm/nodejs/akua_wasm.js",
+			"wasm/nodejs/akua_wasm_bg.wasm",
+			"wasm/nodejs/akua_wasm.d.ts",
+			"README.md"
+		],
 		"exclude": ["src/**/*.test.ts"]
 	}
 }

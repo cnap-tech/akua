@@ -6,6 +6,21 @@ import type { WhoamiOutput } from './types/WhoamiOutput.ts';
 import { classifyCliError } from './errors.ts';
 import { type SchemaName, validateAs } from './validate.ts';
 
+// The WASM bundle is CommonJS (wasm-pack `--target nodejs`). Lazy
+// `await import` keeps it off the module graph until the first
+// in-process render — the shell-out verbs don't need it.
+type WasmBinding = {
+	render: (packageFilename: string, source: string, inputsJson: string | null) => string;
+	version: () => string;
+};
+let wasmPromise: Promise<WasmBinding> | undefined;
+function loadWasm(): Promise<WasmBinding> {
+	if (!wasmPromise) {
+		wasmPromise = import('../wasm/nodejs/akua_wasm.js') as Promise<WasmBinding>;
+	}
+	return wasmPromise;
+}
+
 export * from './errors.ts';
 export { AkuaContractError, standardSchemaFor, validateAs } from './validate.ts';
 export type { SchemaName } from './validate.ts';
@@ -44,6 +59,30 @@ export class Akua {
 
 	whoami(): Promise<WhoamiOutput> {
 		return this.call('whoami', 'WhoamiOutput');
+	}
+
+	/**
+	 * Evaluate a Package.k source buffer against optional inputs and
+	 * return the rendered top-level YAML. Runs entirely in-process via
+	 * the bundled `akua-wasm` module — no `akua` binary required. KCL
+	 * plugin callouts (`helm.template`, `kustomize.build`,
+	 * `pkg.render`) are not yet available in the WASM bundle; Packages
+	 * that use them surface a `__kcl_PanicInfo__` error via the
+	 * backing KCL runtime. Use the CLI binary path (this class's
+	 * other verbs) when plugin callouts are required.
+	 *
+	 * `packageFilename` is used for diagnostic rendering only — no
+	 * filesystem is touched. `inputs` is optional; pass any
+	 * JSON-serializable value to inject as KCL's `option("input")`.
+	 */
+	async renderSource(
+		packageFilename: string,
+		source: string,
+		inputs?: unknown,
+	): Promise<string> {
+		const wasm = await loadWasm();
+		const inputsJson = inputs === undefined ? null : JSON.stringify(inputs);
+		return wasm.render(packageFilename, source, inputsJson);
 	}
 
 	private async call<T>(verb: string, schema: SchemaName): Promise<T> {
