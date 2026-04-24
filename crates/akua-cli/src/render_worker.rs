@@ -94,6 +94,11 @@ pub enum WorkerRequest {
     },
 }
 
+/// Success marker the worker sets on the protocol's `status` field.
+/// Protocol contract with `akua-render-worker`; any other string is
+/// treated as failure.
+pub const WORKER_STATUS_OK: &str = "ok";
+
 #[derive(Debug, Clone, serde::Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkerResponse {
@@ -110,6 +115,27 @@ pub enum WorkerResponse {
         message: String,
         worker_version: String,
     },
+}
+
+impl WorkerResponse {
+    /// Unwrap a successful `Render` response into its YAML payload.
+    /// `Render { status != "ok" }` yields the diagnostic message as
+    /// an `Err`; a `Ping` response is a wire-protocol bug (caller
+    /// sent a `Render` request) and likewise surfaces as `Err`.
+    pub fn into_render_yaml(self) -> Result<String, String> {
+        match self {
+            WorkerResponse::Render { status, yaml, message, .. } => {
+                if status == WORKER_STATUS_OK {
+                    Ok(yaml)
+                } else {
+                    Err(message)
+                }
+            }
+            WorkerResponse::Ping { .. } => {
+                Err("render worker returned unexpected ping response".into())
+            }
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -163,6 +189,21 @@ pub struct RenderHost {
 }
 
 impl RenderHost {
+    /// Process-wide cached host. `RenderHost::new` does a multi-MB
+    /// `Module::deserialize` memcpy of the embedded cwasm — in
+    /// `akua dev`'s watch loop that adds up. Init once on first
+    /// success, reuse forever. Init failures are not cached (they
+    /// typically reflect a broken build and the caller may want
+    /// to retry after rebuilding).
+    pub fn shared() -> Result<&'static Self, WorkerError> {
+        static HOST: std::sync::OnceLock<RenderHost> = std::sync::OnceLock::new();
+        if let Some(host) = HOST.get() {
+            return Ok(host);
+        }
+        let host = RenderHost::new()?;
+        Ok(HOST.get_or_init(|| host))
+    }
+
     pub fn new() -> Result<Self, WorkerError> {
         if WORKER_CWASM.is_empty() {
             return Err(WorkerError::SandboxUnavailable);

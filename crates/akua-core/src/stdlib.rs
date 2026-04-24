@@ -58,6 +58,18 @@ const KCL_MOD: &str = "[package]\nname = \"akua\"\nedition = \"0.0.1\"\nversion 
 ///
 /// Richer typed `Chart` / `Values` schemas (and the `helm.Template.chart: str | Chart`
 /// union that consumes them) ship in Phase 2b.
+/// `Some(tempdir)` when `resolved` has entries; `None` otherwise.
+/// Saves every caller the "if .is_empty() { None } else { Some(...) }"
+/// guard around [`materialize_charts`].
+pub fn materialize_charts_if_any(
+    resolved: &crate::chart_resolver::ResolvedCharts,
+) -> std::io::Result<Option<tempfile::TempDir>> {
+    if resolved.entries.is_empty() {
+        return Ok(None);
+    }
+    materialize_charts(resolved).map(Some)
+}
+
 pub fn materialize_charts(
     resolved: &crate::chart_resolver::ResolvedCharts,
 ) -> std::io::Result<tempfile::TempDir> {

@@ -232,7 +232,7 @@ pub fn run<W: Write>(
     let resolved_inputs = resolve_inputs_path(args);
     let inputs = load_inputs(resolved_inputs.as_deref())?;
     let charts = resolve_package_charts(args.package_path, args.offline)?;
-    let rendered = package.render_opts(&inputs, &charts, args.strict)?;
+    let rendered = render_in_worker(&package, &inputs, &charts, args.strict)?;
 
     if args.stdout_mode {
         write_multi_doc_yaml(stdout, &rendered.resources).map_err(RenderError::StdoutWrite)?;
@@ -323,6 +323,70 @@ fn load_cosign_public_key(
         source,
     })?;
     Ok(Some(body))
+}
+
+/// Drive the sandboxed render path. A plugin panic surfaces as
+/// `WorkerError::PluginPanic(msg)` and is lifted into
+/// `PackageKError::KclEval(msg)` so the existing strict-marker
+/// substring match in `to_structured` picks up
+/// `E_STRICT_UNTYPED_CHART` — this stringly-typed contract is why
+/// every worker failure is collapsed through
+/// [`worker_to_render_err`] rather than a typed `From` impl.
+fn render_in_worker(
+    package: &PackageK,
+    inputs: &serde_yaml::Value,
+    charts: &ResolvedCharts,
+    strict: bool,
+) -> Result<akua_core::RenderedPackage, RenderError> {
+    use crate::render_worker::{RenderHost, ResourceLimits, WorkerRequest};
+
+    let _scope = akua_core::kcl_plugin::RenderScope::enter_for_render(
+        &package.path,
+        charts,
+        strict,
+    );
+
+    let charts_tmp = akua_core::stdlib::materialize_charts_if_any(charts).map_err(|e| {
+        RenderError::PackageK(PackageKError::KclEval(format!(
+            "materializing charts pkg: {e}"
+        )))
+    })?;
+
+    let host = RenderHost::shared().map_err(worker_to_render_err)?;
+
+    let inputs_json: serde_json::Value = serde_json::to_value(inputs).map_err(|e| {
+        RenderError::PackageK(PackageKError::KclEval(format!("inputs→json: {e}")))
+    })?;
+
+    let request = WorkerRequest::Render {
+        package_filename: package
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "package.k".to_string()),
+        source: package.source.clone(),
+        inputs: Some(inputs_json),
+        charts_pkg_path: charts_tmp.as_ref().map(|_| "/charts".to_string()),
+    };
+
+    let response = match charts_tmp.as_ref() {
+        Some(dir) => host.invoke_with_charts(&request, ResourceLimits::default(), dir.path()),
+        None => host.invoke(&request, ResourceLimits::default()),
+    }
+    .map_err(worker_to_render_err)?;
+
+    let yaml = response
+        .into_render_yaml()
+        .map_err(|msg| RenderError::PackageK(PackageKError::KclEval(msg)))?;
+
+    let parsed = akua_core::parse_rendered_yaml(&yaml)?;
+    let resources = akua_core::pkg_render::expand_sentinels(parsed.resources)
+        .map_err(|e| RenderError::PackageK(PackageKError::KclEval(e.to_string())))?;
+    Ok(akua_core::RenderedPackage { resources })
+}
+
+fn worker_to_render_err(e: crate::render_worker::WorkerError) -> RenderError {
+    RenderError::PackageK(PackageKError::KclEval(e.to_string()))
 }
 
 fn load_inputs(path: Option<&Path>) -> Result<serde_yaml::Value, RenderError> {
