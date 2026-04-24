@@ -243,7 +243,7 @@ rest ship when demand justifies the surface.
 - [ ] Rego test runner (`*_test.rego`) — paired with the policy engine phase
 - [x] Golden-file snapshot support for render-output tests — `akua test --golden` dir-diffs every `package.k`×`inputs*.yaml` combo against `snapshots/<pkg>/<stem>/`; `--update-snapshots` regenerates. (2026-04-22)
 - [x] `akua dev` — file-watch hot-reload. `notify` + `notify-debouncer-mini`; `Rendered`/`RenderError` events stream to stdout (JSONL in agent mode). Watches per kept subdir non-recursively so `target/`/`node_modules/` monorepos don't exhaust `fs.inotify.max_user_watches`. Broken-pipe-aware. (2026-04-22) — apply-to-cluster deferred (needs kind driver).
-- [ ] `akua repl` — interactive KCL / Rego shell
+- [~] `akua repl` — KCL half shipped (2026-04-24): accumulates submitted lines into a growing `.k` source, re-evaluates via `eval_source`, prints top-level YAML. Meta commands `.load / .reset / .show / .help / .exit`. Plain-line I/O (users wanting history wrap via `rlwrap`). Rego half deferred until the policy engine phase is designed.
 
 ---
 

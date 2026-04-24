@@ -24,6 +24,17 @@
 //! falls back to a one-line "repl doesn't emit JSON" banner + text
 //! mode. Agents invoking `akua repl` programmatically should use
 //! `akua render` or `akua inspect` instead.
+//!
+//! ## KCL quirks
+//!
+//! - KCL's upstream `rustc_span` asserts filenames don't end with `>`,
+//!   so the repl tags every eval as `repl.k` rather than the natural
+//!   `<repl:N>`. See [`akua_core::eval_source`].
+//! - Single-letter identifiers like `y` / `n` collide with YAML's
+//!   bool scalars and get emitted quoted (`'y': 2`). Tests use
+//!   longer names (`alpha`, `beta`) to keep substring assertions
+//!   simple; this has no impact on user-typed sessions since the
+//!   quoted form is still valid YAML.
 
 use std::io::{BufRead, Write};
 
@@ -106,7 +117,6 @@ pub fn run<R: BufRead, W: Write>(
 /// eval loop without an stdin loop.
 struct Session {
     buffer: String,
-    line_counter: usize,
 }
 
 enum SessionOutcome {
@@ -119,7 +129,6 @@ impl Session {
     fn new() -> Self {
         Self {
             buffer: String::new(),
-            line_counter: 0,
         }
     }
 
@@ -135,7 +144,6 @@ impl Session {
         if let Some(meta) = trimmed.strip_prefix('.') {
             return self.meta(meta);
         }
-        self.line_counter += 1;
         // Keep each submit on its own line so KCL parses statements
         // as distinct top-level items.
         let trial = format!("{}{input}\n", self.buffer);
@@ -159,7 +167,6 @@ impl Session {
             "exit" | "quit" => SessionOutcome::Quit,
             "reset" => {
                 self.buffer.clear();
-                self.line_counter = 0;
                 SessionOutcome::Render("(buffer cleared)".to_string())
             }
             "show" => {
