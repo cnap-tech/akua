@@ -43,19 +43,27 @@ thiserror = { workspace = true }
 # pull it.
 ctrlc = { version = "3", optional = true }
 
-# Phase 4: per-render sandbox. Version pinned to 43.x matching
-# engine-host-wasm so a single Engine/Module/Store shape can cross
-# crate boundaries without compat-hash drift.
+# Phase 4: per-render sandbox. Single wasmtime Engine shared with
+# engine-host-wasm (helm, kustomize) — one Config, one Engine, many
+# Stores — matching the wasmtime docs' canonical pattern. Nested
+# Engines trip process-global trap-handler TLS; avoid.
 wasmtime = "43"
 wasmtime-wasi = "43"
+engine-host-wasm = { path = "../engine-host-wasm" }
 
 [build-dependencies]
 # build.rs AOT-compiles the render-worker .wasm into a .cwasm. Must
 # use the same wasmtime version + Config shape as the runtime host
-# or Module::deserialize fails the compat-hash check.
+# or Module::deserialize fails the compat-hash check. Uses
+# engine-host-wasm::shared_config so Config matches runtime exactly.
 wasmtime = "43"
+engine-host-wasm = { path = "../engine-host-wasm" }
 
 [dev-dependencies]
 tempfile = "3"
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std", "pem"] }
 rand = "0.8"
+# For tests/sandbox_nested_wasmtime.rs — call helm directly to
+# verify the direct path works, then through the bridge to verify
+# the nested path. Only pulled in for test builds.
+helm-engine-wasm = { path = "../helm-engine-wasm" }

@@ -59,21 +59,55 @@ fn wasm_err<E: std::fmt::Display>(e: E) -> EngineHostError {
     EngineHostError::Wasm(e.to_string())
 }
 
-// --- Build-time: precompile wasm → cwasm -----------------------------------
+// --- Shared Engine ---------------------------------------------------------
 
-/// The `Config` used to precompile `.cwasm`. Build-time and runtime MUST
-/// use the same shape or `Module::deserialize` rejects the artifact.
-pub fn engine_config() -> Config {
+/// The single `Config` every akua-side wasmtime Engine uses. One
+/// process-global Engine built from this Config hosts the render
+/// worker + every engine plugin (helm, kustomize, future kro/CEL).
+/// Stores are still per-invocation with their own memory / epoch
+/// budgets — per the wasmtime docs' "one Engine, many Stores"
+/// pattern (see `docs/spikes/wasmtime-multi-engine.md`). Nested
+/// Engines trip process-global trap-handler TLS; avoid.
+///
+/// Build-time + runtime MUST call the same function or
+/// `Module::deserialize` rejects precompiled artefacts on a
+/// Config-hash mismatch.
+pub fn shared_config() -> Config {
     let mut config = Config::new();
     config.wasm_exceptions(true);
+    // Wall-clock deadline enforcement. The render worker sets an
+    // epoch deadline per-Store; engine plugins (helm, kustomize)
+    // don't set one, so they run without a tick-level cap — the
+    // host Rust caller enforces whole-call timeouts above them.
+    config.epoch_interruption(true);
     config
 }
+
+/// Back-compat alias — kept so existing engine crates' `build.rs`
+/// callers continue to compile. New callers should use
+/// [`shared_config`] directly.
+#[deprecated(note = "use shared_config — same Config, clearer name")]
+pub fn engine_config() -> Config {
+    shared_config()
+}
+
+/// The single Engine shared across every akua-side wasmtime
+/// invocation. Lazy-initialized on first call; thereafter reused
+/// for the life of the process. `Engine::clone` is cheap and
+/// intended for sharing.
+pub fn shared_engine() -> &'static Engine {
+    use std::sync::OnceLock;
+    static ENGINE: OnceLock<Engine> = OnceLock::new();
+    ENGINE.get_or_init(|| Engine::new(&shared_config()).expect("shared engine init"))
+}
+
+// --- Build-time: precompile wasm → cwasm -----------------------------------
 
 /// Called from each engine crate's `build.rs`. Precompiles a `.wasm`
 /// to a platform-specific `.cwasm`; deserialize at runtime is a fixup
 /// instead of a full Cranelift compile.
 pub fn precompile(wasm: &[u8]) -> Result<Vec<u8>, String> {
-    let engine = Engine::new(&engine_config()).map_err(|e| e.to_string())?;
+    let engine = Engine::new(&shared_config()).map_err(|e| e.to_string())?;
     engine.precompile_module(wasm).map_err(|e| e.to_string())
 }
 
@@ -123,14 +157,23 @@ impl Session {
             )));
         }
 
-        let engine = Engine::new(&engine_config()).map_err(wasm_err)?;
+        // Single process-wide Engine — helm, kustomize, the render
+        // worker and every future engine share it. See `shared_engine`
+        // doc for the why.
+        let engine = shared_engine();
         // SAFETY: `cwasm` was produced by `precompile()` against the
-        // same `engine_config()` shape. Embedded at compile time, so
+        // same `shared_config()` shape. Embedded at compile time, so
         // tampering requires tampering with the akua binary itself.
         let module = unsafe { Module::deserialize(&engine, cwasm) }.map_err(wasm_err)?;
 
         let wasi = WasiCtxBuilder::new().arg(spec.name).build_p1();
         let mut store = Store::new(&engine, wasi);
+        // Shared Engine has `epoch_interruption` enabled (for the
+        // render worker's wall-clock cap). Engine plugins (helm,
+        // kustomize) don't want a deadline — the host-Rust caller
+        // above us owns their whole-call timeouts. Set the highest
+        // deadline so the epoch-ticker never trips their Store.
+        store.set_epoch_deadline(u64::MAX);
         let mut linker: Linker<WasiP1Ctx> = Linker::new(&engine);
         p1::add_to_linker_sync(&mut linker, |s: &mut WasiP1Ctx| s).map_err(wasm_err)?;
 

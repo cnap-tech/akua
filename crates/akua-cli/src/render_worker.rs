@@ -30,7 +30,7 @@
 //! functions. Crossing that bridge is Phase 4 step 2 (#410 follow-up),
 //! not this scaffold commit.
 
-use wasmtime::{AsContext, Config, Engine, Linker, Module, Store};
+use wasmtime::{AsContext, Engine, Linker, Module, Store};
 use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::p2::pipe::{MemoryInputPipe, MemoryOutputPipe};
 use wasmtime_wasi::WasiCtxBuilder;
@@ -43,14 +43,18 @@ const WORKER_CWASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/akua-rende
 /// Per-render resource caps. Defaults documented in
 /// [docs/security-model.md](../../../../docs/security-model.md) under
 /// the sandbox-layers table — keep the two in sync when tuning.
+///
+/// Note: the shared wasmtime Engine today does not enable
+/// `Config::consume_fuel` (would force every plugin-Engine caller
+/// —helm, kustomize, future kro — to set_fuel before every call;
+/// not worth the coupling for v0.1.0). Wall-clock deadline via
+/// `epoch_interruption` is the active CPU cap. Fuel support can
+/// flip back on later without breaking the ABI — it's Engine-level,
+/// and only the worker Store would call `set_fuel`.
 #[derive(Debug, Clone, Copy)]
 pub struct ResourceLimits {
     /// Hard cap on linear memory. Default 256 MiB.
     pub memory_bytes: usize,
-    /// Wasm instructions executed before the worker traps. Default
-    /// 10 billion — ~10s of cranelift-JITted integer work, well
-    /// beyond any legitimate render.
-    pub fuel: u64,
     /// Wall-clock epoch ticks before the worker traps. Matched to the
     /// engine's background-thread tick (see [`spawn_epoch_ticker`]).
     /// Default 30 — a 30 × 100ms = 3s wall-clock deadline.
@@ -61,7 +65,6 @@ impl Default for ResourceLimits {
     fn default() -> Self {
         Self {
             memory_bytes: 256 * 1024 * 1024,
-            fuel: 10_000_000_000,
             epoch_deadline: 30,
         }
     }
@@ -138,11 +141,13 @@ pub enum WorkerError {
     WorkerStderr(String),
 }
 
-/// Shared wasmtime Engine. Constructed once per process, reused across
-/// every render invocation. Compiling the Engine (Cranelift warm-up,
-/// pool setup) is the slow part — do it once.
+/// Handle to the shared wasmtime Engine's precompiled worker module.
+/// Construction is cheap after first call — the Engine itself is a
+/// process-wide singleton owned by `engine-host-wasm::shared_engine`;
+/// `RenderHost` just holds the deserialized Module so every
+/// invocation skips the Cranelift pass.
 pub struct RenderHost {
-    engine: Engine,
+    engine: &'static Engine,
     module: Module,
 }
 
@@ -154,24 +159,24 @@ impl RenderHost {
         // Install the host-side plugin handlers so bridge callouts
         // from sandboxed KCL (`helm.template`, `kustomize.build`,
         // `pkg.render`, etc.) resolve to the engine-host-wasm-backed
-        // implementations. Engines run in their OWN wasmtime
-        // Engine/Store (see crates/engine-host-wasm), separate from
-        // the worker's — so the sandbox boundary is preserved:
-        // untrusted KCL stays inside the worker, engine execution
-        // stays inside its own sandbox, and the Rust glue on the
-        // host owns the dispatch.
+        // implementations. Engines run in SEPARATE Stores of the
+        // SAME Engine — per wasmtime docs ("one Engine, many
+        // Stores"). Nested Engines trip process-global trap-handler
+        // TLS and are not tested in wasmtime's suite; the unified
+        // Engine is.
         //
-        // Idempotent — safe to call once per RenderHost construction
-        // (typically once per process).
+        // Idempotent — safe to call once per RenderHost construction.
         akua_core::kcl_plugin::install_builtin_plugins();
 
-        let engine = Engine::new(&worker_config()).map_err(|e| WorkerError::Wasmtime(format!("init: {e}")))?;
+        let engine = engine_host_wasm::shared_engine();
         // SAFETY: WORKER_CWASM was produced by the same wasmtime
-        // version + config in build.rs; deserialize is the fast path
-        // (memcpy + fixup), no Cranelift pass. If build.rs and runtime
-        // ever drift the compat-hash check rejects the artifact.
+        // version + `engine_host_wasm::shared_config()` shape in
+        // build.rs; deserialize is the fast path (memcpy + fixup),
+        // no Cranelift pass. Config-hash drift between build + run
+        // is the only failure mode and is caught by
+        // `Module::deserialize`.
         let module = unsafe {
-            Module::deserialize(&engine, WORKER_CWASM)
+            Module::deserialize(engine, WORKER_CWASM)
                 .map_err(|e| WorkerError::Wasmtime(format!("init: Module::deserialize: {e}")))?
         };
         spawn_epoch_ticker(engine.clone());
@@ -211,14 +216,11 @@ impl RenderHost {
                 .build(),
         };
 
-        let mut store = Store::new(&self.engine, host);
+        let mut store = Store::new(self.engine, host);
         store.limiter(|h: &mut HostState| &mut h.limits);
-        store
-            .set_fuel(limits.fuel)
-            .map_err(|e| WorkerError::Wasmtime(format!("init: set_fuel: {e}")))?;
         store.set_epoch_deadline(limits.epoch_deadline);
 
-        let mut linker: Linker<HostState> = Linker::new(&self.engine);
+        let mut linker: Linker<HostState> = Linker::new(self.engine);
         wasmtime_wasi::p1::add_to_linker_sync(&mut linker, |h: &mut HostState| &mut h.wasi)
             .map_err(|e| WorkerError::Wasmtime(format!("init: add_to_linker: {e}")))?;
         install_kcl_plugin_bridge(&mut linker);
@@ -277,15 +279,6 @@ impl RenderHost {
 struct HostState {
     wasi: WasiP1Ctx,
     limits: wasmtime::StoreLimits,
-}
-
-/// Runtime wasmtime Config. MUST match `build.rs::worker_config` — the
-/// AOT `.cwasm` embeds a compat-hash that gets checked on deserialize.
-fn worker_config() -> Config {
-    let mut c = Config::new();
-    c.consume_fuel(true);
-    c.epoch_interruption(true);
-    c
 }
 
 /// KCL declares `extern "C-unwind" fn kcl_plugin_invoke_json_wasm(...)`
@@ -347,6 +340,15 @@ fn plugin_bridge_call(
     let args = read_c_str_or_empty(caller.as_context(), memory, args_ptr, "[]");
     let kwargs = read_c_str_or_empty(caller.as_context(), memory, kwargs_ptr, "{}");
 
+    // Trace enabled via `AKUA_BRIDGE_TRACE=1` for debugging plugin-
+    // callout issues. Captures the whole round-trip in one emission —
+    // method, handler response, and the guest pointer allocated for
+    // the response bytes.
+    let trace = std::env::var("AKUA_BRIDGE_TRACE").ok().as_deref() == Some("1");
+    if trace {
+        eprintln!("[bridge] method={method} args={args} kwargs={kwargs}");
+    }
+
     let response =
         match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             akua_core::kcl_plugin::invoke_bridge(&method, &args, &kwargs)
@@ -367,6 +369,9 @@ fn plugin_bridge_call(
     // a null-terminated buffer.
     let total = response.len() + 1;
     let dest = alloc.call(&mut *caller, total as u32).ok()?;
+    if trace {
+        eprintln!("[bridge] response_len={} alloc_ptr={dest}", response.len());
+    }
     if dest <= 0 {
         return None;
     }
@@ -413,6 +418,17 @@ fn read_c_str_or_empty(
 /// of wall-clock time. 100ms per tick keeps ticker overhead negligible
 /// while giving sub-second granularity on deadline enforcement.
 fn spawn_epoch_ticker(engine: Engine) {
+    // Idempotent: the shared Engine is a process singleton, we may
+    // be called >1× as RenderHost is constructed for the first and
+    // any subsequent time. Second call just spawns another ticker —
+    // cheap, but let's guard with a OnceLock anyway.
+    use std::sync::OnceLock;
+    static TICKER: OnceLock<()> = OnceLock::new();
+    if TICKER.set(()).is_err() {
+        return;
+    }
+    let _ = engine;
+    let engine = engine_host_wasm::shared_engine().clone();
     std::thread::Builder::new()
         .name("akua-epoch-ticker".to_string())
         .spawn(move || loop {

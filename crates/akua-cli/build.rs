@@ -17,14 +17,12 @@
 
 use std::path::PathBuf;
 
-// Matches runtime Config at `src/render_worker.rs` — MUST stay in sync
-// or `Module::deserialize` rejects the artifact via the compat-hash
-// check.
+// Delegates to the workspace-wide `shared_config` so build-time and
+// runtime use byte-identical Cranelift settings. Single source of
+// truth; MUST stay in lockstep or `Module::deserialize` rejects the
+// artefact on the compat-hash check.
 fn worker_config() -> wasmtime::Config {
-    let mut c = wasmtime::Config::new();
-    c.consume_fuel(true);
-    c.epoch_interruption(true);
-    c
+    engine_host_wasm::shared_config()
 }
 
 fn main() {
