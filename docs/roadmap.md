@@ -27,16 +27,17 @@ The roadmap is ordered by implementation phase, but releases cut across phases. 
 
 **Still to ship for v0.1.0:**
 
-- **`@akua/sdk` — TypeScript SDK**, full verb coverage. Foundation (ts-rs + schemars pipeline, `Akua` class, error hierarchy, ajv runtime validation, Standard Schema adapter, JSR publish pipeline) lives in [PR #19](https://github.com/cnap-tech/akua/pull/19) — 2 verbs (`version`, `whoami`) prove the pattern. Remaining ~23 verb wrappers are trivial follow-ups that need to land and a `sdk-v0.1.0` tag cuts the first JSR release alongside the CLI.
+- **`@akua/sdk` — TypeScript SDK with in-process WASM transport, shipped via JSR.** The SDK does NOT shell out to an `akua` binary. Consumers install `@akua/sdk` from JSR and the render engine executes in-process — Node.js, Deno, Bun, and modern browsers all work without a separate CLI install. Contract layer (ts-rs + schemars → typed TS + ajv-validated JSON Schema bundle + Standard Schema v1 adapter) lands in [PR #19](https://github.com/cnap-tech/akua/pull/19); the shell-out transport prototyped there is explicitly superseded.
 
 **Honest caveats shipped alongside v0.1.0:**
 
-- **Render is not yet process-sandboxed.** CLAUDE.md's "sandboxed by default" invariant is aspirational at the process level — today the render path is native Rust + in-process WASM engines. Phase 4 delivers the per-render wasmtime isolation. Until then, operators running akua on untrusted Package input should containerize per-render (guidance in [docs/security-model.md](security-model.md#operational-guidance-today-pre-phase-4)).
+- **Render is not yet process-sandboxed (CLI).** CLAUDE.md's "sandboxed by default" invariant is aspirational at the process level for the CLI — today the CLI's render path is native Rust + in-process WASM engines, not per-render wasmtime. The SDK's in-process WASM transport happens to run inside the JS runtime's own sandbox (V8, JavaScriptCore), which is a meaningfully stronger boundary than the CLI's today, but CLI-side Phase 4 still delivers the full invariant.
 - **Rego test runner + policy engine not implemented.** `akua test` covers KCL only.
 - **Cosign keyless (fulcio + rekor) not implemented.** Keyed flow only.
-- **SDK transport is shell-out** (v0.1.0). The embedded-via-WASM/N-API path is blocked on WASM-safe KCL (Phase 4 adjacent). Contract layer (types, schema, validation) is transport-agnostic — switching transports later doesn't break SDK consumers.
 
-**Exit gate for v0.1.0:** all items above shipped (including SDK verb coverage + JSR tag), benchmarks green, security-model.md matches reality, release notes call out the caveats explicitly.
+**Dependency pulled into v0.1.0:** delivering the SDK as a WASM bundle via JSR requires an `akua-wasm` crate that compiles the render path (KCL loader + `akua.*` stdlib + Helm/Kustomize engine host) to a browser-compatible target. This overlaps with Phase 4's wasip1 worker but is a distinct target (wasm32-unknown-unknown + wasm-bindgen/N-API, not wasip1). Plan work on this track under [Phase 4B](#phase-4b--akua-wasm-for-jsr-delivery-blocks-v010).
+
+**Exit gate for v0.1.0:** everything above shipped (CLI + SDK via WASM on JSR, all verbs covered, drift guards clean, benchmarks green), security-model.md matches reality, release notes call out the remaining caveats.
 
 ### v0.2.0 — beta ("sandboxed by default" actually delivered)
 
@@ -199,6 +200,24 @@ Sandbox becomes the default execution path for akua itself. User-invoked `akua r
 - [ ] CVE-2026-34988 mitigation: pin `wasmtime >= 43.0.1`, keep `memory_guard_size` default, set `memory_reservation >= 4 GiB`
 
 **Exit gate:** every `akua render` runs inside wasmtime. Native code path no longer exists for render execution.
+
+---
+
+## Phase 4B — `akua-wasm` for JSR delivery — **blocks v0.1.0**
+
+Compiles the render path to a browser-compatible WASM bundle so `@akua/sdk` ships as pure JSR (no CLI install, no shell-out, no `child_process`). Parallel track to Phase 4's wasip1 worker — different target, different consumer.
+
+- [ ] `crates/akua-wasm` — new crate, `wasm32-unknown-unknown` target. Re-exports the render path behind a stable JS-facing API surface.
+- [ ] Decide Node + browser strategy: `wasm-bindgen` (broad browser support, N-API bridge for Node) vs two builds (wasm-bindgen for browser + N-API napi-rs for Node). First pass: `wasm-bindgen` only, Node picks it up via standard `WebAssembly.instantiate`.
+- [ ] KCL evaluator on `wasm32-unknown-unknown` — upstream [kcl-lang/kcl](https://github.com/kcl-lang/kcl) is wasip1-focused; the same PRs Phase 4 needs (`uuid` `features = ["js"]` on wasm32, `kcl-language-server` `#[cfg(not(target_arch = "wasm32"))]` around `Url::{to_file_path, from_file_path}`) likely apply here too. Fork as `cnap-tech/kcl` on the `akua-wasm32` branch if upstream stalls.
+- [ ] Helm + Kustomize engines: reuse the existing `wasm32-wasip1` `.wasm` from Phase 1/3, instantiated via wasmtime-in-the-browser (`wasmer-js` or wasmtime's JS bindings) OR re-compile engines against `wasm32-unknown-unknown` with a shim. Pick whichever is shorter to v0.1.0.
+- [ ] Size budget: target <15 MB for the full bundle (KCL + stdlib + both engines). gzip + brotli ship via JSR.
+- [ ] `akua-wasm` exports typed-method surface matching the SDK's `Akua` class; SDK method → WASM call → typed result, no process spawn.
+- [ ] `@akua/sdk` imports `@akua/sdk/wasm` (ESM module from JSR) and instantiates on first call. Lazy-init + cache across calls.
+- [ ] Benchmarks: cold + warm render latency via the WASM SDK vs the CLI binary — target parity-within-2× on warm calls.
+- [ ] Browser smoke test: a static HTML page imports `@akua/sdk` from JSR + renders an example Package.
+
+**Exit gate for Phase 4B:** `pnpm add jsr:@akua/sdk` (or equivalent `bun add`, `deno add`) → import → render → typed result, on Node + Deno + Bun + Chrome + Firefox. No `akua` binary in sight.
 
 ---
 
@@ -365,17 +384,21 @@ Many markdown files predate recent shipping and make claims that no longer match
 - [ ] Publishing story: `akua publish` + `[signing]` config + what a consumer sees on `akua pull` + `akua verify`.
 - [ ] Operational verbs crib sheet: `akua cache`, `akua auth`, `akua lock [--check]`, `akua update`.
 
-### @akua/sdk — TypeScript SDK (blocks v0.1.0)
+### @akua/sdk — TypeScript SDK via WASM on JSR (blocks v0.1.0)
 
-Foundation landed in [PR #19](https://github.com/cnap-tech/akua/pull/19) — ts-rs + schemars pipeline, `Akua` class with `version()` + `whoami()`, error hierarchy keyed on `ExitCode` + `StructuredError`, ajv runtime validation against the bundled JSON Schema, Standard Schema v1 adapter, JSR publish pipeline (tag-triggered, OIDC auth), 24 bun tests + 2 opt-in e2e.
+Depends on [Phase 4B](#phase-4b--akua-wasm-for-jsr-delivery-blocks-v010). The SDK does not shell out. Consumers `bun add jsr:@akua/sdk` (or deno/pnpm/npm equivalents) and call render / publish / verify in-process.
 
-- [ ] Merge PR #19
-- [ ] Wrap the remaining ~23 verbs against the same pattern — each is a few lines: serde types → `contract_type!` derives → `.ts` + schema generated → SDK method invokes `child_process.execFile` → ajv validate → typed return. Blocking set for v0.1.0: `init`, `render`, `check`, `lint`, `fmt`, `test`, `dev`, `repl`, `add`, `remove`, `tree`, `lock`, `update`, `verify`, `diff`, `inspect`, `pack`, `push`, `sign`, `pull`, `publish`, `cache`, `auth`.
-- [ ] Per-verb tests mirror the `whoami` shape — one payload assertion, one error-path assertion. The generated types + ajv schema do most of the work.
-- [ ] `@akua/sdk` README — install, one-screen example, link to the JSR page + the CLI's `akua.dev/errors/<code>` docs URL for every `AkuaError` subclass.
-- [ ] [docs/sdk.md](sdk.md) — refresh so the CLAUDE.md reference resolves. Describe the transport caveat (shell-out today, embedded later; contract is transport-agnostic).
-- [ ] Tag `sdk-v0.1.0` to exercise the publish workflow — dry-run first via `workflow_dispatch`, then real tag on release day.
-- [ ] Drift guard (`task sdk:check`) wired into the v0.1.0 CI matrix so generated types and committed types stay in sync.
+Foundation from [PR #19](https://github.com/cnap-tech/akua/pull/19) — ts-rs + schemars pipeline, error hierarchy keyed on `ExitCode` + `StructuredError`, ajv runtime validation, Standard Schema v1 adapter, JSR publish pipeline, 24 bun tests — all carries over. The shell-out transport in that PR is scaffolding; the real transport is the `akua-wasm` bundle.
+
+- [ ] Merge PR #19 (contract layer + error hierarchy + JSR pipeline — all transport-agnostic)
+- [ ] Replace the shell-out `Akua` class with the WASM-backed one: imports `@akua/sdk/wasm` (the `akua-wasm` bundle), lazy-init on first call, method dispatch goes through `WebAssembly.instantiate`'d exports instead of `child_process.execFile`.
+- [ ] Wrap every verb against the same typed pattern. Blocking set for v0.1.0: `init`, `render`, `check`, `lint`, `fmt`, `test`, `dev`, `repl`, `add`, `remove`, `tree`, `lock`, `update`, `verify`, `diff`, `inspect`, `pack`, `push`, `sign`, `pull`, `publish`, `cache`, `auth`.
+- [ ] Per-verb tests mirror `whoami`'s shape — one payload assertion, one error-path assertion, validated against the generated JSON Schema.
+- [ ] `@akua/sdk` README — `bun add jsr:@akua/sdk`, one-screen render example, browser import example, link to every `AkuaError` subclass's `akua.dev/errors/<code>` docs URL.
+- [ ] [docs/sdk.md](sdk.md) — WASM-in-process transport, bundle size, lazy-init semantics, Node + Deno + Bun + browser matrix.
+- [ ] Tag `sdk-v0.1.0` to exercise the publish workflow — dry-run via `workflow_dispatch` first.
+- [ ] Drift guard (`task sdk:check`) wired into the v0.1.0 CI matrix so generated types + the WASM bundle + committed artifacts stay in sync.
+- [ ] Runtime matrix in CI: smoke-test the JSR artifact on Node (current LTS), Deno (latest), Bun (pinned `.mise.toml` version), plus a headless-browser check.
 
 ---
 
