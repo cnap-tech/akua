@@ -32,6 +32,12 @@ tasks:
 
   test:
     desc: Run all Rust tests
+    deps:
+      # Rendering tests instantiate the embedded wasmtime sandbox, which
+      # needs the worker module + helm/kustomize engine wasms on disk
+      # before akua-cli's build.rs precompiles them into the binary.
+      - build:render-worker
+      - build:engines
     cmds:
       - cargo test --workspace
 
@@ -91,6 +97,9 @@ tasks:
       - test -f assets/helm-engine.wasm
     cmds:
       - ./fork/apply.sh                          # clones helm@v4.1.4, applies client-go strip patch
+      # go.sum is gitignored; re-sync in case apply.sh fast-pathed on an
+      # already-patched fork tree and skipped its own `go mod tidy`.
+      - cd go-src && go mod tidy
       # -buildmode=c-shared is load-bearing: `go:wasmexport` functions only
       # reach the host linker's symbol table under that buildmode on wasip1.
       - cd go-src && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -ldflags='-s -w' -o ../assets/helm-engine.wasm .
@@ -110,6 +119,10 @@ tasks:
     status:
       - test -f assets/kustomize-engine.wasm
     cmds:
+      # go.sum is gitignored (regenerated per build); populate it before
+      # `go build` — otherwise fresh checkouts fail with "missing go.sum
+      # entry for ...". `go mod tidy` is a no-op when already in sync.
+      - cd go-src && go mod tidy
       - cd go-src && GOOS=wasip1 GOARCH=wasm go build -buildmode=c-shared -ldflags='-s -w' -o ../assets/kustomize-engine.wasm .
       - ls -lh assets/kustomize-engine.wasm
 
