@@ -30,7 +30,7 @@
 //! functions. Crossing that bridge is Phase 4 step 2 (#410 follow-up),
 //! not this scaffold commit.
 
-use wasmtime::{Config, Engine, Linker, Module, Store};
+use wasmtime::{AsContext, Config, Engine, Linker, Module, Store};
 use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::p2::pipe::{MemoryInputPipe, MemoryOutputPipe};
 use wasmtime_wasi::WasiCtxBuilder;
@@ -207,7 +207,7 @@ impl RenderHost {
         let mut linker: Linker<HostState> = Linker::new(&self.engine);
         wasmtime_wasi::p1::add_to_linker_sync(&mut linker, |h: &mut HostState| &mut h.wasi)
             .map_err(|e| WorkerError::Wasmtime(format!("init: add_to_linker: {e}")))?;
-        install_kcl_plugin_stub(&mut linker);
+        install_kcl_plugin_bridge(&mut linker);
 
         let instance = linker
             .instantiate(&mut store, &self.module)
@@ -276,23 +276,122 @@ fn worker_config() -> Config {
 
 /// KCL declares `extern "C-unwind" fn kcl_plugin_invoke_json_wasm(...)`
 /// on wasm32 — the host must provide it or `linker.instantiate` fails
-/// with an unresolved-import error. For Phase 4 Step 2 we only need
-/// pure-KCL rendering (no chart imports, no engine callouts), so the
-/// stub just returns 0 — a null pointer the KCL runtime treats as
-/// "no plugin result." If a Package actually invokes a plugin the
-/// eval fails cleanly with a KCL-level diagnostic, not a host trap.
+/// with an unresolved-import error. This is Phase 4's plugin bridge:
+/// host function reads three C-strings (method, args JSON, kwargs
+/// JSON) from guest memory, dispatches through akua_core's plugin
+/// registry, allocates guest memory for the response via the worker's
+/// exported `akua_bridge_alloc`, copies the response in, returns the
+/// guest pointer to KCL.
 ///
-/// Later slices replace this stub with a real bridge that forwards
-/// plugin calls to the engine-host-wasm crate, keeping each engine in
-/// its own Store so the worker's sandbox boundary stays intact.
-fn install_kcl_plugin_stub(linker: &mut Linker<HostState>) {
+/// The worker-side engine bridges (helm/kustomize) live as
+/// host-registered plugin handlers in akua-cli; the render worker
+/// itself stays engine-free. Invariants:
+///
+/// - Guest never sees host addresses — every pointer is a guest
+///   linear-memory offset.
+/// - Panics in the plugin handler are converted to the
+///   `__kcl_PanicInfo__` JSON envelope KCL already treats as a
+///   runtime panic, never unwound across the wasmtime boundary.
+/// - Unresolved plugin names come back as the same envelope; KCL
+///   surfaces them as standard eval diagnostics.
+fn install_kcl_plugin_bridge(linker: &mut Linker<HostState>) {
     linker
         .func_wrap(
             "env",
             "kcl_plugin_invoke_json_wasm",
-            |_method: i32, _args: i32, _kwargs: i32| -> i32 { 0 },
+            |mut caller: wasmtime::Caller<'_, HostState>,
+             method_ptr: i32,
+             args_ptr: i32,
+             kwargs_ptr: i32|
+             -> i32 {
+                plugin_bridge_call(&mut caller, method_ptr, args_ptr, kwargs_ptr)
+                    .unwrap_or(0)
+            },
         )
-        .expect("install kcl_plugin_invoke_json_wasm stub");
+        .expect("install kcl_plugin_invoke_json_wasm");
+}
+
+/// Inner bridge body — fail-soft on any guest-memory access issue
+/// (returns `None` → host function returns 0, KCL treats as
+/// `__kcl_PanicInfo__`-style null). `None` return paths are reserved
+/// for programmer-side bugs (memory handle missing, allocator export
+/// missing) — plugin-handler errors take the panic-envelope path.
+fn plugin_bridge_call(
+    caller: &mut wasmtime::Caller<'_, HostState>,
+    method_ptr: i32,
+    args_ptr: i32,
+    kwargs_ptr: i32,
+) -> Option<i32> {
+    let memory = caller.get_export("memory")?.into_memory()?;
+    let alloc = caller
+        .get_export("akua_bridge_alloc")?
+        .into_func()?
+        .typed::<u32, i32>(&mut *caller)
+        .ok()?;
+
+    let method = read_c_str_required(caller.as_context(), memory, method_ptr)?;
+    let args = read_c_str_or_empty(caller.as_context(), memory, args_ptr, "[]");
+    let kwargs = read_c_str_or_empty(caller.as_context(), memory, kwargs_ptr, "{}");
+
+    let response =
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            akua_core::kcl_plugin::invoke_bridge(&method, &args, &kwargs)
+        })) {
+            Ok(s) => s,
+            Err(payload) => {
+                let msg = payload
+                    .downcast_ref::<&str>()
+                    .map(|s| (*s).to_string())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "plugin bridge: handler panicked".to_string());
+                format!("{{\"__kcl_PanicInfo__\":{}}}", serde_json::to_string(&msg).ok()?)
+            }
+        };
+
+    // C-string: response bytes + one NUL terminator. KCL's
+    // c_str_required/c_str_or_default on the guest side expects
+    // a null-terminated buffer.
+    let total = response.len() + 1;
+    let dest = alloc.call(&mut *caller, total as u32).ok()?;
+    if dest <= 0 {
+        return None;
+    }
+    let data = memory.data_mut(&mut *caller);
+    let start = dest as usize;
+    data.get_mut(start..start + response.len())?
+        .copy_from_slice(response.as_bytes());
+    *data.get_mut(start + response.len())? = 0;
+    Some(dest)
+}
+
+fn read_c_str_required(
+    store: impl wasmtime::AsContext,
+    memory: wasmtime::Memory,
+    ptr: i32,
+) -> Option<String> {
+    if ptr <= 0 {
+        return None;
+    }
+    let data = memory.data(&store);
+    let start = ptr as usize;
+    let slice = data.get(start..)?;
+    let end = slice.iter().position(|b| *b == 0)?;
+    Some(String::from_utf8_lossy(&slice[..end]).into_owned())
+}
+
+fn read_c_str_or_empty(
+    store: impl wasmtime::AsContext,
+    memory: wasmtime::Memory,
+    ptr: i32,
+    default: &str,
+) -> String {
+    if ptr <= 0 {
+        return default.to_string();
+    }
+    match read_c_str_required(store, memory, ptr) {
+        Some(s) if !s.is_empty() => s,
+        _ => default.to_string(),
+    }
 }
 
 /// Background thread that ticks the engine's epoch at a fixed rate.
@@ -387,6 +486,52 @@ mod tests {
                 assert_eq!(status, "ok", "diagnostic: {message}");
                 assert!(yaml.contains("x: 42"), "yaml missing x: {yaml}");
                 assert!(yaml.contains("hello"), "yaml missing greeting: {yaml}");
+            }
+            _ => panic!("expected Render"),
+        }
+    }
+
+    #[test]
+    fn plugin_bridge_invokes_host_registered_handler_from_guest() {
+        let Some(host) = host_or_skip() else { return };
+
+        // Register a trivial handler host-side: "bridge_echo.say"
+        // returns its first positional arg unmodified. The KCL source
+        // below calls it via the `kcl_plugin.<name>` discovery shape,
+        // which is exactly what engine stdlibs (helm / kustomize) use.
+        akua_core::kcl_plugin::register("bridge_echo.say", |args, _kwargs| {
+            Ok(args
+                .get(0)
+                .cloned()
+                .unwrap_or(serde_json::Value::Null))
+        });
+
+        // KCL plugin invocation requires `import kcl_plugin.<pkg>`
+        // before the dotted call.
+        let source = "import kcl_plugin.bridge_echo\n\
+                      greeting = bridge_echo.say(\"hello\")\n";
+        let resp = host
+            .invoke(
+                &WorkerRequest::Render {
+                    package_filename: "package.k".into(),
+                    source: source.into(),
+                    inputs: None,
+                },
+                ResourceLimits::default(),
+            )
+            .expect("invoke");
+        match resp {
+            WorkerResponse::Render {
+                status,
+                yaml,
+                message,
+                ..
+            } => {
+                assert_eq!(status, "ok", "diagnostic: {message}");
+                assert!(
+                    yaml.contains("greeting: hello"),
+                    "expected handler result in YAML: {yaml}"
+                );
             }
             _ => panic!("expected Render"),
         }

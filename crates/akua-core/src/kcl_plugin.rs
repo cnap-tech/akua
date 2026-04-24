@@ -444,6 +444,25 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
         .unwrap_or_else(|| "plugin handler panicked".to_string())
 }
 
+/// Wasmtime-host entry for the Phase 4 plugin bridge. Host function
+/// receives the three already-decoded strings (method, args JSON,
+/// kwargs JSON) — what the wasm32 `kcl_plugin_invoke_json_wasm`
+/// extern would send via C-string pointers — and returns the
+/// response JSON string KCL can copy back into guest memory.
+///
+/// Match shape to [`dispatch`]'s FFI contract: success payload is the
+/// handler's JSON value; a handler error is returned as KCL's
+/// `__kcl_PanicInfo__` envelope which the evaluator treats as a
+/// runtime panic. Panics inside the handler itself are NOT caught
+/// here — the host function should wrap this call in
+/// `catch_unwind` before crossing the wasmtime boundary.
+pub fn invoke_bridge(method: &str, args_json: &str, kwargs_json: &str) -> String {
+    match invoke(method, args_json, kwargs_json) {
+        Ok(value) => value.to_string(),
+        Err(msg) => panic_envelope(&msg),
+    }
+}
+
 fn invoke(method: &str, args_json: &str, kwargs_json: &str) -> Result<Value, String> {
     // KCL sends `"kcl_plugin.helm.template"` as the method name.
     // Users register `"helm.template"` — strip the prefix to match.

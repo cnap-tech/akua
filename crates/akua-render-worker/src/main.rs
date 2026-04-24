@@ -44,6 +44,25 @@ use std::io::{Read, Write};
 
 use serde::{Deserialize, Serialize};
 
+// Host-plugin bridge allocators — exported so the wasmtime host can
+// place the plugin response into guest linear memory, return its
+// pointer to KCL's `kcl_plugin_invoke_json_wasm` extern. C-string
+// shape matches what KCL's runtime expects: null-terminated on read,
+// host-owned after alloc.
+//
+// Leak-allocation is intentional: KCL's upstream convention is that
+// the plugin response pointer is leaked (never freed by the caller).
+// Linear memory pressure is bounded by the per-render Store cap
+// (256 MiB default) — any legitimate render's plugin traffic fits
+// comfortably inside that budget.
+#[cfg(target_arch = "wasm32")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn akua_bridge_alloc(size: u32) -> *mut u8 {
+    let layout = std::alloc::Layout::from_size_align(size as usize, 1)
+        .expect("akua_bridge_alloc: invalid layout");
+    unsafe { std::alloc::alloc(layout) }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Request {
