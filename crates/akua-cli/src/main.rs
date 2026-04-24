@@ -14,8 +14,8 @@ use akua_cli::verbs::{
     diff as diff_verb, fmt as fmt_verb, init as init_verb, inspect as inspect_verb,
     lint as lint_verb, lock as lock_verb, pack as pack_verb, publish as publish_verb,
     pull as pull_verb, push as push_verb, remove as remove_verb, render as render_verb,
-    test as test_verb, tree as tree_verb, verify as verify_verb, version as version_verb,
-    whoami as whoami_verb,
+    test as test_verb, tree as tree_verb, update as update_verb, verify as verify_verb,
+    version as version_verb, whoami as whoami_verb,
 };
 #[cfg(feature = "dev-watch")]
 use akua_cli::verbs::dev as dev_verb;
@@ -237,6 +237,23 @@ enum Commands {
         /// Workspace root containing akua.toml.
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
+    },
+
+    /// Intentionally bump `akua.lock` against whatever upstream now
+    /// serves. Distinct from `akua lock`: where `lock` rejects OCI
+    /// digest drift (security), `update` accepts it and records the
+    /// new digest. `--dep <name>` scopes the refresh to one entry.
+    /// Cargo analogue: `cargo update`.
+    Update {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
+
+        /// Only refresh this dep's lock entry.
+        #[arg(long)]
+        dep: Option<String>,
     },
 
     /// Regenerate `akua.lock` from `akua.toml`. Resolves every dep
@@ -617,6 +634,11 @@ fn dispatch(command: Commands) -> ExitCode {
             workspace,
             check,
         } => run_lock(&args, &workspace, check),
+        Commands::Update {
+            args,
+            workspace,
+            dep,
+        } => run_update(&args, &workspace, dep.as_deref()),
     }
 }
 
@@ -644,6 +666,20 @@ fn run_lock(args: &UniversalArgs, workspace: &std::path::Path, check: bool) -> E
     let verb_args = lock_verb::LockArgs { workspace, check };
     let mut stdout = io::stdout().lock();
     match lock_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
+    }
+}
+
+fn run_update(
+    args: &UniversalArgs,
+    workspace: &std::path::Path,
+    dep: Option<&str>,
+) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = update_verb::UpdateArgs { workspace, dep };
+    let mut stdout = io::stdout().lock();
+    match update_verb::run(&ctx, &verb_args, &mut stdout) {
         Ok(code) => code,
         Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }
@@ -1231,6 +1267,29 @@ mod tests {
             .err()
             .expect("should fail");
         assert!(err.to_string().contains("cannot be used"));
+    }
+
+    #[test]
+    fn parses_update_with_dep_filter() {
+        let cli = Cli::parse_from(["akua", "update", "--dep", "nginx"]);
+        match cli.command {
+            Commands::Update { dep, workspace, .. } => {
+                assert_eq!(dep.as_deref(), Some("nginx"));
+                assert_eq!(workspace, PathBuf::from("."));
+            }
+            _ => panic!("expected update"),
+        }
+    }
+
+    #[test]
+    fn parses_update_bare_refreshes_everything() {
+        let cli = Cli::parse_from(["akua", "update"]);
+        match cli.command {
+            Commands::Update { dep, .. } => {
+                assert!(dep.is_none());
+            }
+            _ => panic!("expected update"),
+        }
     }
 
     #[test]

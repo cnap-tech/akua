@@ -24,6 +24,7 @@ pub mod remove;
 pub mod render;
 pub mod test;
 pub mod tree;
+pub mod update;
 pub mod vendor;
 pub mod verify;
 pub mod version;
