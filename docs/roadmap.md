@@ -10,9 +10,9 @@
 
 The roadmap is ordered by implementation phase, but releases cut across phases. This section lists the minimum boxes each release ships with. Phases below give the detail.
 
-### v0.1.0 — alpha (candidate ready now)
+### v0.1.0 — alpha (candidate ready soon)
 
-**Target:** solo authors + internal CI pipelines. Users who trust their own Package inputs and want the author/render/publish/verify loop end-to-end.
+**Target:** solo authors + internal CI pipelines + agent consumers. Users who trust their own Package inputs and want the author/render/publish/verify loop end-to-end, plus a typed SDK for programmatic use.
 
 **Shipped and load-bearing for v0.1.0:**
 
@@ -25,13 +25,18 @@ The roadmap is ordered by implementation phase, but releases cut across phases. 
 - Full air-gap crypto loop: `akua pack` → `akua sign` → transfer → `akua verify --tarball` → `akua push --sig`
 - Operational verbs: `akua cache`, `akua auth`, `akua lock [--check]`, `akua update [--dep]`
 
+**Still to ship for v0.1.0:**
+
+- **`@akua/sdk` — TypeScript SDK**, full verb coverage. Foundation (ts-rs + schemars pipeline, `Akua` class, error hierarchy, ajv runtime validation, Standard Schema adapter, JSR publish pipeline) lives in [PR #19](https://github.com/cnap-tech/akua/pull/19) — 2 verbs (`version`, `whoami`) prove the pattern. Remaining ~23 verb wrappers are trivial follow-ups that need to land and a `sdk-v0.1.0` tag cuts the first JSR release alongside the CLI.
+
 **Honest caveats shipped alongside v0.1.0:**
 
 - **Render is not yet process-sandboxed.** CLAUDE.md's "sandboxed by default" invariant is aspirational at the process level — today the render path is native Rust + in-process WASM engines. Phase 4 delivers the per-render wasmtime isolation. Until then, operators running akua on untrusted Package input should containerize per-render (guidance in [docs/security-model.md](security-model.md#operational-guidance-today-pre-phase-4)).
 - **Rego test runner + policy engine not implemented.** `akua test` covers KCL only.
 - **Cosign keyless (fulcio + rekor) not implemented.** Keyed flow only.
+- **SDK transport is shell-out** (v0.1.0). The embedded-via-WASM/N-API path is blocked on WASM-safe KCL (Phase 4 adjacent). Contract layer (types, schema, validation) is transport-agnostic — switching transports later doesn't break SDK consumers.
 
-**Exit gate for v0.1.0:** all items above shipped, benchmarks green, security-model.md matches reality, release notes call out the caveats explicitly.
+**Exit gate for v0.1.0:** all items above shipped (including SDK verb coverage + JSR tag), benchmarks green, security-model.md matches reality, release notes call out the caveats explicitly.
 
 ### v0.2.0 — beta ("sandboxed by default" actually delivered)
 
@@ -359,6 +364,18 @@ Many markdown files predate recent shipping and make claims that no longer match
 - [ ] Air-gap flow end-to-end: `akua pack` → `akua sign` → transfer → `akua verify --tarball` → `akua push --sig`, runnable snippet with a freshly-generated key.
 - [ ] Publishing story: `akua publish` + `[signing]` config + what a consumer sees on `akua pull` + `akua verify`.
 - [ ] Operational verbs crib sheet: `akua cache`, `akua auth`, `akua lock [--check]`, `akua update`.
+
+### @akua/sdk — TypeScript SDK (blocks v0.1.0)
+
+Foundation landed in [PR #19](https://github.com/cnap-tech/akua/pull/19) — ts-rs + schemars pipeline, `Akua` class with `version()` + `whoami()`, error hierarchy keyed on `ExitCode` + `StructuredError`, ajv runtime validation against the bundled JSON Schema, Standard Schema v1 adapter, JSR publish pipeline (tag-triggered, OIDC auth), 24 bun tests + 2 opt-in e2e.
+
+- [ ] Merge PR #19
+- [ ] Wrap the remaining ~23 verbs against the same pattern — each is a few lines: serde types → `contract_type!` derives → `.ts` + schema generated → SDK method invokes `child_process.execFile` → ajv validate → typed return. Blocking set for v0.1.0: `init`, `render`, `check`, `lint`, `fmt`, `test`, `dev`, `repl`, `add`, `remove`, `tree`, `lock`, `update`, `verify`, `diff`, `inspect`, `pack`, `push`, `sign`, `pull`, `publish`, `cache`, `auth`.
+- [ ] Per-verb tests mirror the `whoami` shape — one payload assertion, one error-path assertion. The generated types + ajv schema do most of the work.
+- [ ] `@akua/sdk` README — install, one-screen example, link to the JSR page + the CLI's `akua.dev/errors/<code>` docs URL for every `AkuaError` subclass.
+- [ ] [docs/sdk.md](sdk.md) — refresh so the CLAUDE.md reference resolves. Describe the transport caveat (shell-out today, embedded later; contract is transport-agnostic).
+- [ ] Tag `sdk-v0.1.0` to exercise the publish workflow — dry-run first via `workflow_dispatch`, then real tag on release day.
+- [ ] Drift guard (`task sdk:check`) wired into the v0.1.0 CI matrix so generated types and committed types stay in sync.
 
 ---
 
