@@ -21,19 +21,23 @@
 //! return the `RenderSummary`. Task #412 adds the adversarial test
 //! suite that validates the sandbox holds.
 //!
-//! ## Protocol (scaffold version)
+//! ## Protocol (scaffold)
 //!
 //! Request on stdin (one JSON object):
 //!
 //! ```json
-//! { "kind": "ping", "note": "optional string" }
+//! { "kind": "ping", "note": "optional" }
 //! ```
 //!
 //! Response on stdout (one JSON object):
 //!
 //! ```json
-//! { "status": "ok", "echoed": "optional string", "worker_version": "0.1.0" }
+//! { "status": "ok", "echoed": "optional", "worker_version": "0.1.0" }
 //! ```
+//!
+//! A `Render` variant + akua-core integration land once the narrow
+//! kcl-driver wasm32 fix (get_pkg_list's `current_dir()` call) is
+//! patched. See docs/spikes/kcl-wasm-feasibility.md for findings.
 //!
 //! Parse failure → exit 2 (UserError in the CLI contract). Other
 //! I/O failure → exit 3 (SystemError). The host owns stderr for
@@ -48,7 +52,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum Request {
     /// Smoke request — the only shape the scaffold understands.
-    /// Task #410 adds `Render { … }`.
+    /// Render lands once the kcl-driver wasm32 fix is patched.
     Ping {
         #[serde(default)]
         note: Option<String>,

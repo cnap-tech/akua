@@ -15,13 +15,11 @@ name = "akua-render-worker"
 path = "src/main.rs"
 
 [dependencies]
-# Intentionally empty in the scaffold — we'll grow the dep set in
-# the Phase 4 integration step (#410). Until then, the worker is a
-# smoke-test binary: read a JSON request from stdin, echo a JSON
-# response on stdout. Lets wasmtime host plumbing land before the
-# KCL evaluator + engine hosts move into the worker.
+# Scaffold phase: just serde. The akua-core + engine-kcl integration
+# is held up on a narrow kcl-driver fix (current_dir() panic on
+# wasm32). See docs/spikes/kcl-wasm-feasibility.md + Phase 4 step 2
+# note. Once kcl-driver's `get_pkg_list` is cfg-guarded / patched,
+# the worker flips back to depending on akua-core and grows a Render
+# request variant.
 serde = { workspace = true }
 serde_json = { workspace = true }
-
-# Native-only: the worker runs on the host for local dev + CI
-# parity checks. wasm32 pulls the same deps; they all support wasip1.

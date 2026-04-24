@@ -66,9 +66,12 @@ impl Default for ResourceLimits {
     }
 }
 
-/// One invocation of the worker. Today the scaffold only understands
-/// `Ping` — the smoke request the worker binary echoes. Render + other
-/// request shapes land in #410 step 2.
+/// One invocation of the worker. Kept in sync with the request
+/// protocol in `crates/akua-render-worker/src/main.rs` — serialize
+/// shape must match the worker's `Deserialize` shape exactly.
+///
+/// Today only `Ping` is implemented. `Render` lands with the
+/// kcl-driver wasm32 follow-up — see the roadmap's Phase 4 section.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum WorkerRequest {
@@ -165,7 +168,9 @@ impl RenderHost {
         wasi.stdout(stdout_pipe.clone());
         wasi.stderr(stderr_pipe.clone());
         // argv[0] is conventional. No args, no env, no preopens
-        // (Ping doesn't need filesystem access).
+        // (Ping doesn't need filesystem access). Render + the
+        // kcl-driver wasm32 follow-up will add a per-invocation
+        // scratch preopen once the upstream panic is patched.
         wasi.arg("akua-render-worker");
 
         let wasi_ctx = wasi.build_p1();
@@ -186,6 +191,7 @@ impl RenderHost {
         let mut linker: Linker<HostState> = Linker::new(&self.engine);
         wasmtime_wasi::p1::add_to_linker_sync(&mut linker, |h: &mut HostState| &mut h.wasi)
             .map_err(|e| WorkerError::Init(format!("add_to_linker: {e}")))?;
+        install_kcl_plugin_stub(&mut linker);
 
         let instance = linker
             .instantiate(&mut store, &self.module)
@@ -212,7 +218,17 @@ impl RenderHost {
                         String::from_utf8_lossy(&err_bytes)
                     )));
                 }
-                None => return Err(WorkerError::Trap(e.to_string())),
+                None => {
+                    // Append captured stderr so a panic inside the
+                    // guest surfaces its message, not just a bare
+                    // wasm backtrace.
+                    let stderr = String::from_utf8_lossy(&err_bytes);
+                    return Err(WorkerError::Trap(if stderr.is_empty() {
+                        e.to_string()
+                    } else {
+                        format!("{e}\nworker stderr: {stderr}")
+                    }));
+                }
             },
         }
 
@@ -240,6 +256,27 @@ fn worker_config() -> Config {
     c.consume_fuel(true);
     c.epoch_interruption(true);
     c
+}
+
+/// KCL declares `extern "C-unwind" fn kcl_plugin_invoke_json_wasm(...)`
+/// on wasm32 — the host must provide it or `linker.instantiate` fails
+/// with an unresolved-import error. For Phase 4 Step 2 we only need
+/// pure-KCL rendering (no chart imports, no engine callouts), so the
+/// stub just returns 0 — a null pointer the KCL runtime treats as
+/// "no plugin result." If a Package actually invokes a plugin the
+/// eval fails cleanly with a KCL-level diagnostic, not a host trap.
+///
+/// Later slices replace this stub with a real bridge that forwards
+/// plugin calls to the engine-host-wasm crate, keeping each engine in
+/// its own Store so the worker's sandbox boundary stays intact.
+fn install_kcl_plugin_stub(linker: &mut Linker<HostState>) {
+    linker
+        .func_wrap(
+            "env",
+            "kcl_plugin_invoke_json_wasm",
+            |_method: i32, _args: i32, _kwargs: i32| -> i32 { 0 },
+        )
+        .expect("install kcl_plugin_invoke_json_wasm stub");
 }
 
 /// Background thread that ticks the engine's epoch at a fixed rate.

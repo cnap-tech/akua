@@ -17,7 +17,7 @@ Built against `kcl-lang` commit `bde7439b` (git dep in Cargo.toml).
 
 ## Findings
 
-### wasm32-wasip1 — green
+### wasm32-wasip1 — yellow (compile-time green, runtime one-line blocker)
 
 ```text
 cargo build --target wasm32-wasip1
@@ -26,9 +26,26 @@ cargo build --target wasm32-wasip1
   Finished `dev` profile in 25.45s
 ```
 
-Produces a 145 MB wasip1 binary (unoptimized debug). No upstream fixes needed, no Cargo tricks. This is a 2026-04-24 data point — the roadmap's "file two PRs, maintain a fork as cnap-tech/kcl if upstream stalls" caveat was stale and can be deleted for the wasip1 target.
+Produces a 145 MB wasip1 binary (unoptimized debug). No upstream fixes needed to COMPILE.
 
-**Go signal for Phase 4.**
+**Runtime blocker discovered 2026-04-24 during Phase 4 step 2 integration.** When the worker (bundled akua-core + engine-kcl) actually evaluates a Package, KCL panics with `thread 'main' panicked at library/std/src/sys/pal/wasip1/os.rs:119:5: no filesystem on wasm`. The call chain:
+
+- `akua_core::eval_source` → `kcl_lang::API::exec_program`
+- → `kcl-driver::get_pkg_list` at `crates/driver/src/lib.rs:328` (git ref `c164bf7`):
+  ```rust
+  let cwd = std::env::current_dir()?;
+  ```
+- wasip1 `std::env::current_dir()` is an unconditional panic (wasip1 has no cwd concept).
+
+**Fix is narrow.** `get_pkg_list` uses `cwd` only when `pkgpath.is_empty()`. Three paths, ranked by preference:
+
+1. **Upstream PR** against `kcl-lang/kcl` — cfg-guard the `current_dir()` call on wasm32 + fall back to `PathBuf::from(".")`. Single-file diff. Should merge quickly.
+2. **Fork as `cnap-tech/kcl`** on branch `akua-wasm32` with the same patch. Tracked as a Cargo `[patch]` override pointing at the fork commit.
+3. **Local Cargo patch** via `[patch."https://github.com/kcl-lang/kcl"]` on a vendored `kcl-driver` source.
+
+Estimated effort: ~1 hour for the patch itself. Upstream acceptance: weeks. Fork-and-pin: same-day.
+
+**Go signal for Phase 4 — conditional on the patch.** Host plumbing in akua-cli (wasmtime + build.rs + per-render Store + WASI pipes + plugin-stub import) is shipped and tested via a Ping round-trip; Render integration in the worker is blocked on this single upstream fix.
 
 ### wasm32-unknown-unknown — yellow, two fixable issues
 

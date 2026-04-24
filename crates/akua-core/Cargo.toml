@@ -48,6 +48,12 @@ serde_yaml = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
 
+# kcl-lang, sha2, tempfile: the spike at
+# docs/spikes/kcl-wasm-feasibility.md proves compile-time wasip1 is
+# clean. Runtime still hits a narrow `current_dir()` panic in
+# `kcl-driver::get_pkg_list` (kcl git ref c164bf7, lib.rs:328). Once
+# the upstream / fork fix lands, these four deps move out from under
+# the not-wasm32 gate and the worker picks them up.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 kcl-lang = { git = "https://github.com/kcl-lang/lib", optional = true }
 sha2 = { version = "0.10", optional = true }
