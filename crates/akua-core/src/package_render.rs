@@ -25,6 +25,7 @@ use crate::package_k::RenderedPackage;
 /// JSON verdict — agents branch on it.
 pub const FORMAT_RAW_MANIFESTS: &str = "raw-manifests";
 
+crate::contract_type! {
 /// Verdict for a single render: where manifests went, how many, and a
 /// hash that makes "did the rendered output change?" a byte comparison.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -47,6 +48,7 @@ pub struct RenderSummary {
     /// omitted to keep the JSON shape tight.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<PathBuf>,
+}
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 
+import type { RenderSummary } from './types/RenderSummary.ts';
 import type { VersionOutput } from './types/VersionOutput.ts';
 import type { WhoamiOutput } from './types/WhoamiOutput.ts';
 
@@ -24,7 +25,7 @@ function loadWasm(): Promise<WasmBinding> {
 export * from './errors.ts';
 export { AkuaContractError, standardSchemaFor, validateAs } from './validate.ts';
 export type { SchemaName } from './validate.ts';
-export type { VersionOutput, WhoamiOutput };
+export type { RenderSummary, VersionOutput, WhoamiOutput };
 export type { ExitCode } from './types/ExitCode.ts';
 export type { StructuredError, Level } from './types/StructuredError.ts';
 export type { AgentContext } from './types/AgentContext.ts';
@@ -38,6 +39,20 @@ const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
 export interface AkuaOptions {
 	/** Path to the `akua` binary. Defaults to `"akua"` (resolved via PATH). */
 	binary?: string;
+}
+
+export interface RenderOptions {
+	/** Path to the `package.k` file. Default: `./package.k`. */
+	package?: string;
+	/** Inputs file (JSON or YAML). */
+	inputs?: string;
+	/** Root directory where rendered YAML files land. Default: `./deploy`. */
+	out?: string;
+	dryRun?: boolean;
+	/** Reject raw-string plugin paths — every chart must come from a typed `charts.*` import. */
+	strict?: boolean;
+	/** Forbid network access during resolve; OCI deps must cache-hit. */
+	offline?: boolean;
 }
 
 /**
@@ -83,6 +98,29 @@ export class Akua {
 		const wasm = await loadWasm();
 		const inputsJson = inputs === undefined ? null : JSON.stringify(inputs);
 		return wasm.render(packageFilename, source, inputsJson);
+	}
+
+	/**
+	 * Render a Package on disk through the `akua` CLI, returning the
+	 * typed summary (output path, manifest count, sha256 digest, file
+	 * list). Shell-out transport — the CLI holds the filesystem state,
+	 * dep resolution, and the embedded helm/kustomize engines.
+	 * `renderSource` is the in-process counterpart for pure-KCL
+	 * Packages that don't need any of that.
+	 *
+	 * Every field of `opts` maps to a `--` flag of `akua render`; see
+	 * [`docs/cli.md#akua-render`](../../../docs/cli.md#akua-render).
+	 */
+	async render(opts: RenderOptions = {}): Promise<RenderSummary> {
+		const args = ['render', '--json'];
+		if (opts.package) args.push('--package', opts.package);
+		if (opts.inputs) args.push('--inputs', opts.inputs);
+		if (opts.out) args.push('--out', opts.out);
+		if (opts.dryRun) args.push('--dry-run');
+		if (opts.strict) args.push('--strict');
+		if (opts.offline) args.push('--offline');
+		const { stdout } = await this.exec(args);
+		return validateAs<RenderSummary>('RenderSummary', JSON.parse(stdout));
 	}
 
 	private async call<T>(verb: string, schema: SchemaName): Promise<T> {

@@ -9,17 +9,12 @@
 
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
 
 import { Akua } from './mod.ts';
+import { BINARY, E2E_ENABLED, assertBinaryBuilt } from './test-utils.ts';
 
-const BINARY = resolve(dirname(fileURLToPath(import.meta.url)), '../../../target/debug/akua');
-const ENABLED = process.env.AKUA_E2E === '1';
-
-test('Akua.version() returns the binary version', { skip: !ENABLED }, async () => {
-	assert.ok(existsSync(BINARY), `missing: ${BINARY} — run \`task sdk:e2e\``);
+test('Akua.version() returns the binary version', { skip: !E2E_ENABLED }, async () => {
+	assertBinaryBuilt();
 	const akua = new Akua({ binary: BINARY });
 	const v = await akua.version();
 	assert.match(v.version, /^\d+\.\d+\.\d+/, `got: ${JSON.stringify(v)}`);
@@ -27,7 +22,7 @@ test('Akua.version() returns the binary version', { skip: !ENABLED }, async () =
 
 test(
 	'Akua.whoami() returns a typed WhoamiOutput with agent_context',
-	{ skip: !ENABLED },
+	{ skip: !E2E_ENABLED },
 	async () => {
 		const akua = new Akua({ binary: BINARY });
 		const w = await akua.whoami();

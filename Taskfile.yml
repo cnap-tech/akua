@@ -178,10 +178,10 @@ tasks:
       # primitives, akua-cli owns per-verb response shapes.
       - |
         TS_RS_EXPORT_DIR="$(pwd)/{{.SDK_TYPES_DIR}}" \
-          cargo test -p akua-core --features ts-export --lib cli_contract
+          cargo test -p akua-core --features ts-export --lib export_bindings
       - |
         TS_RS_EXPORT_DIR="$(pwd)/{{.SDK_TYPES_DIR}}" \
-          cargo test -p akua-cli --features schema-export,ts-export --lib verbs::
+          cargo test -p akua-cli --features schema-export,ts-export --lib export_bindings
       # schemars bundle — single `akua.json` with every type in
       # `$defs`. Triggered by the dedicated emission test.
       - cargo test -p akua-cli --features schema-export,ts-export --test export_sdk_bundle
@@ -206,11 +206,11 @@ tasks:
       - bun test
 
   sdk:e2e:
-    desc: End-to-end — build akua, then run @akua/sdk against the real binary
+    desc: End-to-end — build akua, then run every SDK test with AKUA_E2E=1 (unlocks the gated e2e cases)
     deps: [sdk:install]
     cmds:
       - cargo build -p akua-cli
-      - cd packages/sdk && AKUA_E2E=1 bun test src/e2e.test.ts
+      - cd packages/sdk && AKUA_E2E=1 bun test
 
   sdk:publish:check:
     desc: Dry-run `jsr publish` — catches manifest + slow-type issues before tag push

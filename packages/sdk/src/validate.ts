@@ -25,7 +25,7 @@ export type SchemaName = keyof typeof akuaSchema.$defs & string;
 // captured structurally, so we register them as no-op formats to silence
 // the "unknown format" warnings without losing any checking power.
 const ajv = new Ajv2020({ strict: false, allErrors: true });
-for (const f of ['uint8', 'uint16', 'uint32', 'uint64', 'int8', 'int16', 'int32', 'int64']) {
+for (const f of ['uint', 'uint8', 'uint16', 'uint32', 'uint64', 'int8', 'int16', 'int32', 'int64']) {
 	ajv.addFormat(f, true);
 }
 // Register the bundle once so per-type `$ref` lookups resolve across types.

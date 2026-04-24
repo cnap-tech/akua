@@ -113,6 +113,42 @@
       ],
       "type": "string"
     },
+    "RenderSummary": {
+      "description": "Verdict for a single render: where manifests went, how many, and a\nhash that makes \"did the rendered output change?\" a byte comparison.",
+      "properties": {
+        "files": {
+          "description": "Relative filenames, in write order. Empty vec is serialized as\nomitted to keep the JSON shape tight.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "format": {
+          "type": "string"
+        },
+        "hash": {
+          "description": "`sha256:<hex>` of the concatenated `<filename>\\n<yaml>` blocks.\nFilename participates in the hash so two identical resources\nrouted to different filenames produce different hashes.",
+          "type": "string"
+        },
+        "manifests": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "target": {
+          "description": "Directory the manifests were written into (or would be, on\n`--dry-run`). Absolute or relative depending on the `out_root`\nthe caller passed.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "target",
+        "manifests",
+        "hash",
+        "files"
+      ],
+      "type": "object"
+    },
     "StructuredError": {
       "description": "The canonical error shape. One struct; every verb reuses it.\n\n`code` is the stable, load-bearing identifier. `message` is the one-line\nsummary. The rest are optional pointers — a file path, a field name, a\nsuggestion, a docs URL.",
       "properties": {
