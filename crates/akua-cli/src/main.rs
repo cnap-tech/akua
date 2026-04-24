@@ -334,6 +334,14 @@ enum Commands {
         /// default; the tarball is just bytes.
         #[arg(long)]
         tag: String,
+
+        /// Path to a `.akuasig` sidecar (from `akua sign`). When
+        /// present, the sidecar's ref/tag/manifest_digest are
+        /// matched against the push target; on match, the `.sig`
+        /// is uploaded alongside the tarball.
+        #[cfg(feature = "cosign-verify")]
+        #[arg(long)]
+        sig: Option<PathBuf>,
     },
 
     /// Pack the workspace into a local `.tar.gz` — same shape as the
@@ -669,7 +677,16 @@ fn dispatch(command: Commands) -> ExitCode {
             tarball,
             oci_ref,
             tag,
-        } => run_push(&args, &tarball, &oci_ref, &tag),
+            #[cfg(feature = "cosign-verify")]
+            sig,
+        } => run_push(
+            &args,
+            &tarball,
+            &oci_ref,
+            &tag,
+            #[cfg(feature = "cosign-verify")]
+            sig.as_deref(),
+        ),
         Commands::Lock {
             args,
             workspace,
@@ -776,12 +793,15 @@ fn run_push(
     tarball: &std::path::Path,
     oci_ref: &str,
     tag: &str,
+    #[cfg(feature = "cosign-verify")] sig: Option<&std::path::Path>,
 ) -> ExitCode {
     let ctx = resolve_ctx(args);
     let verb_args = push_verb::PushArgs {
         tarball,
         oci_ref,
         tag,
+        #[cfg(feature = "cosign-verify")]
+        sig,
     };
     let mut stdout = io::stdout().lock();
     match push_verb::run(&ctx, &verb_args, &mut stdout) {

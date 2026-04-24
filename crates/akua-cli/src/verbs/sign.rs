@@ -330,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn no_key_path_and_no_manifest_signing_surfaces_NoKey() {
+    fn no_key_path_and_no_manifest_signing_surfaces_no_key() {
         let tmp = tempfile::tempdir().unwrap();
         let workspace = tmp.path().join("ws");
         std::fs::create_dir_all(&workspace).unwrap();
