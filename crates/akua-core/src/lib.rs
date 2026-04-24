@@ -87,9 +87,12 @@ pub mod kcl_plugin;
 pub mod lock_file;
 pub mod mod_file;
 #[cfg(feature = "engine-kcl")]
+pub mod check;
+#[cfg(feature = "engine-kcl")]
 pub mod package_k;
 #[cfg(feature = "engine-kcl")]
 pub mod package_render;
+pub mod tree;
 #[cfg(feature = "engine-kcl")]
 pub mod pkg_render;
 #[cfg(feature = "cosign-verify")]
@@ -115,10 +118,16 @@ pub use chart_resolver::{ChartResolveError, ResolvedChart, ResolvedCharts};
 #[cfg(feature = "engine-kcl")]
 pub use dir_diff::{diff as dir_diff, DirDiff, DirDiffError, FileChange};
 #[cfg(feature = "engine-kcl")]
+pub use check::{check_from_sources, CheckOutput, CheckResult};
+#[cfg(feature = "engine-kcl")]
 pub use package_k::{
     eval_source, eval_source_full, eval_source_with_inputs, format_kcl, lint_kcl,
-    list_options_kcl, parse_rendered_yaml, LintIssue, OptionInfo, PackageK, PackageKError,
-    RenderedPackage,
+    lint_kcl_source, list_options_kcl, list_options_kcl_source, parse_rendered_yaml,
+    LintIssue, OptionInfo, PackageK, PackageKError, RenderedPackage,
+};
+pub use tree::{
+    tree_from_parsed, tree_from_sources, DepRow, LockedInfo, PackageInfo, TreeOutput,
+    TreeSourceError,
 };
 #[cfg(feature = "engine-kcl")]
 pub use package_render::{

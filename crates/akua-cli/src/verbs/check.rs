@@ -1,56 +1,33 @@
 //! `akua check` — fast workspace check: parse akua.toml + akua.lock,
 //! lint the Package.k. No execution, no writes.
 //!
-//! Spec: per CLAUDE.md "fast syntax / type / dep check, no execution".
+//! Pure logic lives in `akua_core::check`; this verb is a thin CLI
+//! envelope that reads files + delegates + emits JSON. The SDK
+//! reaches the same `akua_core::check::check_from_sources` through
+//! the WASM bindings — shared single source of truth.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
-use akua_core::{lint_kcl, AkuaLock, AkuaManifest, LintIssue};
-use serde::Serialize;
+use akua_core::check_from_sources;
 
 use crate::contract::{emit_output, Context};
 
+/// Re-export so external callers that were importing
+/// `akua_cli::verbs::check::{CheckOutput, CheckResult}` (e.g. the
+/// SDK bundle export test) keep compiling.
+pub use akua_core::check::{CheckOutput, CheckResult};
+
 #[derive(Debug, Clone)]
 pub struct CheckArgs<'a> {
-    /// Workspace root. `akua.toml` (required) and `akua.lock` (optional)
-    /// are looked up here.
+    /// Workspace root. `akua.toml` (required) and `akua.lock`
+    /// (optional) are looked up here.
     pub workspace: &'a Path,
 
     /// Path to the Package.k to lint. Relative paths resolve against
     /// `workspace`.
     pub package_path: &'a Path,
-}
-
-akua_core::contract_type! {
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct CheckOutput {
-    pub status: &'static str,
-    pub checks: Vec<CheckResult>,
-}
-}
-
-akua_core::contract_type! {
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct CheckResult {
-    /// Short label for the check: `"manifest"`, `"lockfile"`,
-    /// `"package"`.
-    pub name: &'static str,
-
-    pub ok: bool,
-
-    /// One-line error from the failing check; absent when `ok`.
-    /// `#[serde(default)]` is load-bearing for the JSON Schema:
-    /// it tells schemars the field is optional.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
-
-    /// Per-file issues from linting the Package.k. Other check kinds
-    /// leave this empty.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub issues: Vec<LintIssue>,
-}
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -78,22 +55,53 @@ pub fn run<W: Write>(
     args: &CheckArgs<'_>,
     stdout: &mut W,
 ) -> Result<ExitCode, CheckError> {
-    let mut checks = Vec::with_capacity(3);
-
-    checks.push(check_manifest(args.workspace));
-
-    // Lockfile is optional — a fresh package may have zero declared
-    // deps and no lockfile yet. Absent → pass with an "ok" result.
-    if args.workspace.join("akua.lock").exists() {
-        checks.push(check_lockfile(args.workspace));
-    }
-
+    // Read whatever files exist on disk; delegate the gates to
+    // akua-core. `akua.lock` is optional (a fresh workspace may have
+    // zero deps); `akua.toml` + `package.k` are required — the CLI
+    // surfaces their absence as an explicit failing CheckResult so
+    // the verdict is `fail` not `ok`.
+    let manifest_path = args.workspace.join("akua.toml");
+    let lock_path = args.workspace.join("akua.lock");
     let pkg_path = resolve_package_path(args.workspace, args.package_path);
-    checks.push(check_package(&pkg_path));
 
-    let status = if checks.iter().all(|c| c.ok) { "ok" } else { "fail" };
+    let manifest_source = read_opt(&manifest_path);
+    let lock_source = read_opt(&lock_path);
+    let pkg_source = read_opt(&pkg_path);
+    let pkg_filename = pkg_path.to_string_lossy().into_owned();
 
-    let output = CheckOutput { status, checks };
+    let mut output = check_from_sources(
+        manifest_source.as_deref(),
+        lock_source.as_deref(),
+        pkg_source
+            .as_deref()
+            .map(|src| (pkg_filename.as_str(), src)),
+    );
+
+    // Required-file gates the CLI adds on top of the core check:
+    if manifest_source.is_none() {
+        output.checks.insert(
+            0,
+            CheckResult {
+                name: "manifest",
+                ok: false,
+                error: Some(format!("{} not found", manifest_path.display())),
+                issues: Vec::new(),
+            },
+        );
+    }
+    if pkg_source.is_none() {
+        output.checks.push(CheckResult {
+            name: "package",
+            ok: false,
+            error: Some(format!("{} not found", pkg_path.display())),
+            issues: Vec::new(),
+        });
+    }
+    output.status = if output.checks.iter().all(|c| c.ok) {
+        "ok"
+    } else {
+        "fail"
+    };
 
     emit_output(stdout, ctx, &output, |w| write_text(w, &output))
         .map_err(CheckError::StdoutWrite)?;
@@ -105,68 +113,15 @@ pub fn run<W: Write>(
     })
 }
 
+fn read_opt(path: &Path) -> Option<String> {
+    std::fs::read_to_string(path).ok()
+}
+
 fn resolve_package_path(workspace: &Path, package: &Path) -> PathBuf {
     if package.is_absolute() {
         package.to_path_buf()
     } else {
         workspace.join(package)
-    }
-}
-
-fn check_manifest(workspace: &Path) -> CheckResult {
-    match AkuaManifest::load(workspace) {
-        Ok(_) => ok("manifest"),
-        Err(e) => fail("manifest", flatten(&e.to_structured())),
-    }
-}
-
-fn check_lockfile(workspace: &Path) -> CheckResult {
-    match AkuaLock::load(workspace) {
-        Ok(_) => ok("lockfile"),
-        Err(e) => fail("lockfile", flatten(&e.to_structured())),
-    }
-}
-
-/// Render a [`StructuredError`] into a single line suitable for
-/// per-step display inside a `CheckResult.error`.
-fn flatten(s: &StructuredError) -> String {
-    match &s.path {
-        Some(p) => format!("{}: {} ({p})", s.code, s.message),
-        None => format!("{}: {}", s.code, s.message),
-    }
-}
-
-fn check_package(path: &Path) -> CheckResult {
-    if !path.exists() {
-        return fail("package", format!("{} not found", path.display()));
-    }
-    match lint_kcl(path) {
-        Ok(issues) if issues.is_empty() => ok("package"),
-        Ok(issues) => CheckResult {
-            name: "package",
-            ok: false,
-            error: Some(format!("{} lint issue(s)", issues.len())),
-            issues,
-        },
-        Err(e) => fail("package", e.to_string()),
-    }
-}
-
-fn ok(name: &'static str) -> CheckResult {
-    CheckResult {
-        name,
-        ok: true,
-        error: None,
-        issues: Vec::new(),
-    }
-}
-
-fn fail(name: &'static str, error: String) -> CheckResult {
-    CheckResult {
-        name,
-        ok: false,
-        error: Some(error),
-        issues: Vec::new(),
     }
 }
 

@@ -9,17 +9,9 @@ source: string,
 /**
  * The actual ref recorded in `akua.toml`.
  */
-source_ref: string, 
+source_ref: string, version?: string | null, 
 /**
- * `#[serde(default)]` is load-bearing for the JSON Schema:
- * it tells schemars the field is optional, which the
- * generated schema enforces. Without it, `skip_serializing_if`
- * alone produces output that schemars rejects as missing a
- * required field.
- */
-version?: string | null, 
-/**
- * Lockfile row, present only when `akua.lock` exists and contains
- * a matching entry.
+ * Lockfile row, present only when `akua.lock` exists and
+ * contains a matching entry.
  */
 locked?: LockedInfo | null, };

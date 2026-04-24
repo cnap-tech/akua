@@ -66,6 +66,7 @@
       ]
     },
     "CheckOutput": {
+      "description": "Output shape for `akua check --json`. The `status` field is\n`\"ok\"` iff every entry in `checks` has `ok == true`.",
       "properties": {
         "checks": {
           "items": {
@@ -84,23 +85,23 @@
       "type": "object"
     },
     "CheckResult": {
+      "description": "One structural gate's verdict. `name` is the gate label:\n`\"manifest\"`, `\"lockfile\"`, `\"package\"`.",
       "properties": {
         "error": {
-          "description": "One-line error from the failing check; absent when `ok`.\n`#[serde(default)]` is load-bearing for the JSON Schema:\nit tells schemars the field is optional.",
+          "description": "One-line error from the failing check. `#[serde(default)]` is\nload-bearing — schemars uses it to mark the field optional.",
           "type": [
             "string",
             "null"
           ]
         },
         "issues": {
-          "description": "Per-file issues from linting the Package.k. Other check kinds\nleave this empty.",
+          "description": "Per-file KCL lint issues — only the `\"package\"` check\npopulates this; the other gates leave it empty.",
           "items": {
             "$ref": "#/$defs/LintIssue"
           },
           "type": "array"
         },
         "name": {
-          "description": "Short label for the check: `\"manifest\"`, `\"lockfile\"`,\n`\"package\"`.",
           "type": "string"
         },
         "ok": {
@@ -124,7 +125,7 @@
               "type": "null"
             }
           ],
-          "description": "Lockfile row, present only when `akua.lock` exists and contains\na matching entry."
+          "description": "Lockfile row, present only when `akua.lock` exists and\ncontains a matching entry."
         },
         "name": {
           "type": "string"
@@ -138,7 +139,6 @@
           "type": "string"
         },
         "version": {
-          "description": "`#[serde(default)]` is load-bearing for the JSON Schema:\nit tells schemars the field is optional, which the\ngenerated schema enforces. Without it, `skip_serializing_if`\nalone produces output that schemars rejects as missing a\nrequired field.",
           "type": [
             "string",
             "null"
@@ -673,6 +673,7 @@
       "type": "object"
     },
     "TreeOutput": {
+      "description": "Output shape for `akua tree --json`.",
       "properties": {
         "dependencies": {
           "items": {

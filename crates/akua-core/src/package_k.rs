@@ -264,22 +264,42 @@ pub struct LintIssue {
 }
 }
 
-/// Parse a KCL file via kcl_lang and return any parse / load errors.
-/// Pure; no execution.
-pub fn lint_kcl(path: &Path) -> Result<Vec<LintIssue>, PackageKError> {
-    use kcl_lang::{ExternalPkg, ParseProgramArgs, API};
+/// Parse a KCL source buffer and return any parse / load errors. Pure;
+/// no execution, no filesystem read. Pair entry point for
+/// `wasm32-unknown-unknown` consumers and `@akua/sdk`'s in-process
+/// `lint` verb. `filename` is used for diagnostic rendering only —
+/// KCL doesn't touch it on disk when `sources` is populated.
+pub fn lint_kcl_source(filename: &str, source: &str) -> Result<Vec<LintIssue>, PackageKError> {
+    use kcl_lang::{ParseProgramArgs, API};
 
     let api = API::default();
     let args = ParseProgramArgs {
-        paths: vec![path.to_string_lossy().into_owned()],
-        // Let `import akua.*` resolve during parse/lint, not only render.
-        external_pkgs: vec![ExternalPkg {
-            pkg_name: "akua".to_string(),
-            pkg_path: crate::stdlib::stdlib_root().to_string_lossy().into_owned(),
-        }],
+        paths: vec![filename.to_string()],
+        sources: vec![source.to_string()],
+        external_pkgs: akua_external_pkgs(),
         ..Default::default()
     };
-    match api.parse_program(&args) {
+    run_parse_program(&api, &args)
+}
+
+/// Parse a KCL file via kcl_lang and return any parse / load errors.
+/// Thin wrapper that reads the file and defers to
+/// [`lint_kcl_source`]. Unavailable on `wasm32-unknown-unknown`;
+/// SDK consumers read files on the JS side and call the `_source`
+/// variant through the WASM bridge.
+pub fn lint_kcl(path: &Path) -> Result<Vec<LintIssue>, PackageKError> {
+    let source = std::fs::read_to_string(path).map_err(|source| PackageKError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    lint_kcl_source(&path.to_string_lossy(), &source)
+}
+
+fn run_parse_program(
+    api: &kcl_lang::API,
+    args: &kcl_lang::ParseProgramArgs,
+) -> Result<Vec<LintIssue>, PackageKError> {
+    match api.parse_program(args) {
         Ok(result) => Ok(result
             .errors
             .into_iter()
@@ -300,6 +320,33 @@ pub fn lint_kcl(path: &Path) -> Result<Vec<LintIssue>, PackageKError> {
             })
             .collect()),
         Err(e) => Err(PackageKError::KclEval(e.to_string())),
+    }
+}
+
+/// ExternalPkg registration for parse-time `import akua.*` resolution.
+/// Host targets (CLI + render worker) materialize the stdlib via
+/// `stdlib::stdlib_root()`; wasm32-unknown-unknown has no filesystem,
+/// so Packages that import the akua stdlib fail to parse there. The
+/// in-process SDK consumers get a clear diagnostic naming the missing
+/// stdlib module — same shape `lint` already produces today.
+fn akua_external_pkgs() -> Vec<kcl_lang::ExternalPkg> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        vec![kcl_lang::ExternalPkg {
+            pkg_name: "akua".to_string(),
+            pkg_path: crate::stdlib::stdlib_root().to_string_lossy().into_owned(),
+        }]
+    }
+    #[cfg(all(target_arch = "wasm32", target_os = "wasi"))]
+    {
+        vec![kcl_lang::ExternalPkg {
+            pkg_name: "akua".to_string(),
+            pkg_path: "/akua-stdlib".to_string(),
+        }]
+    }
+    #[cfg(all(target_arch = "wasm32", not(target_os = "wasi")))]
+    {
+        Vec::new()
     }
 }
 
@@ -331,19 +378,20 @@ pub struct OptionInfo {
 }
 }
 
-/// List every `option()` call-site declared in the KCL program at
-/// `path`. Parse-only — the program is not executed. Used by
-/// `akua inspect` to introspect a Package's input surface.
-pub fn list_options_kcl(path: &Path) -> Result<Vec<OptionInfo>, PackageKError> {
-    use kcl_lang::{ExternalPkg, ParseProgramArgs, API};
+/// List every `option()` call-site declared in an in-memory KCL
+/// source buffer. Parse-only, pure; see [`lint_kcl_source`] for the
+/// filesystem-free story.
+pub fn list_options_kcl_source(
+    filename: &str,
+    source: &str,
+) -> Result<Vec<OptionInfo>, PackageKError> {
+    use kcl_lang::{ParseProgramArgs, API};
 
     let api = API::default();
     let args = ParseProgramArgs {
-        paths: vec![path.to_string_lossy().into_owned()],
-        external_pkgs: vec![ExternalPkg {
-            pkg_name: "akua".to_string(),
-            pkg_path: crate::stdlib::stdlib_root().to_string_lossy().into_owned(),
-        }],
+        paths: vec![filename.to_string()],
+        sources: vec![source.to_string()],
+        external_pkgs: akua_external_pkgs(),
         ..Default::default()
     };
     match api.list_options(&args) {
@@ -360,6 +408,16 @@ pub fn list_options_kcl(path: &Path) -> Result<Vec<OptionInfo>, PackageKError> {
             .collect()),
         Err(e) => Err(PackageKError::KclEval(e.to_string())),
     }
+}
+
+/// List every `option()` call-site at `path`. Thin file-reading
+/// wrapper over [`list_options_kcl_source`].
+pub fn list_options_kcl(path: &Path) -> Result<Vec<OptionInfo>, PackageKError> {
+    let source = std::fs::read_to_string(path).map_err(|source| PackageKError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    list_options_kcl_source(&path.to_string_lossy(), &source)
 }
 
 /// Format a KCL source string via kcl_lang's formatter. Used by

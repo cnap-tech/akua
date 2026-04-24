@@ -24,7 +24,26 @@ import { Akua } from '@akua/sdk';
 
 One import path for every runtime. The shipped artifact ships both a Node-loadable wasm bundle (via wasm-pack `--target nodejs`) and, once browser support lands, a browser-loadable bundle — the right one is picked automatically through `package.json` conditional exports (`"node"` / `"browser"` / `"default"`). Callers don't choose; the runtime does.
 
-Verbs that require filesystem state the WASM bundle doesn't carry (`add`, `publish`, `lock`, …) shell out to the `akua` binary. Verbs that run pure in-process — today `renderSource`; the rest as Phase 4B fills out — never touch a subprocess. See the [security-model.md](security-model.md) sandbox-layers table for the exact split.
+Verbs split into two transport tiers. Pure-compute verbs run in-process via the bundled `akua-wasm` module — **no `akua` binary required**. Verbs that need network / OCI registry / cryptographic signing shell out to the CLI.
+
+### Transport table (v0.1.0)
+
+| Verb | Transport | Binary required? |
+|---|---|---|
+| `renderSource` | WASM | no |
+| `check` | WASM | no |
+| `lint` | WASM | no |
+| `fmt` | WASM | no |
+| `inspect` (package mode) | WASM | no |
+| `inspect` (tarball mode) | — | deferred to v0.2.0 |
+| `tree` | WASM | no |
+| `diff` | WASM | no |
+| `render` (on-disk) | shell-out | yes |
+| `verify` | shell-out | yes (cosign WASM deferred to v0.2.0) |
+| `version`, `whoami` | shell-out | yes (describe the CLI binary) |
+| `add`, `publish`, `pull`, `push`, `pack`, `sign`, `lock`, `update`, `cache`, `auth`, `dev`, `repl` | shell-out | yes (network / OCI / OS) |
+
+See [security-model.md](security-model.md) for the sandbox-layers table and [spikes/engines-on-wasm32-unknown-unknown.md](spikes/engines-on-wasm32-unknown-unknown.md) for why engine-using verbs + verify stay shell-out in v0.1.0.
 
 ---
 

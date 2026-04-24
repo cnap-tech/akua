@@ -135,6 +135,56 @@ pub fn diff(before: &Path, after: &Path) -> Result<DirDiff, DirDiffError> {
     })
 }
 
+/// Diff two `{relative_path → sha256-hex}` maps. Pure function — no
+/// filesystem access; the caller (typically `@akua/sdk`'s `diff`
+/// verb or a WASM host that lacks `std::fs`) pre-walks the trees and
+/// hashes each file.
+///
+/// Hex values MUST be bare lowercase without the `sha256:` prefix —
+/// the prefix is added when wrapping a change into [`FileChange`].
+/// Keys are relative paths; they participate in the sort + dedup
+/// exactly the way [`diff`] treats them.
+pub fn diff_manifests(
+    before: &std::collections::BTreeMap<PathBuf, String>,
+    after: &std::collections::BTreeMap<PathBuf, String>,
+) -> DirDiff {
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    let mut changed = Vec::new();
+    let mut unchanged = Vec::new();
+
+    let mut all_keys: Vec<&PathBuf> = before.keys().chain(after.keys()).collect();
+    all_keys.sort();
+    all_keys.dedup();
+
+    for rel in all_keys {
+        match (before.get(rel), after.get(rel)) {
+            (Some(b), Some(a)) => {
+                if b == a {
+                    unchanged.push(rel.clone());
+                } else {
+                    changed.push(FileChange {
+                        path: rel.clone(),
+                        before: format!("sha256:{b}"),
+                        after: format!("sha256:{a}"),
+                    });
+                }
+            }
+            (Some(_), None) => removed.push(rel.clone()),
+            (None, Some(_)) => added.push(rel.clone()),
+            (None, None) => unreachable!("key came from either map"),
+        }
+    }
+
+    DirDiff {
+        added,
+        removed,
+        changed,
+        unchanged,
+        skipped: Vec::new(),
+    }
+}
+
 struct FileMeta {
     size: u64,
 }
@@ -229,8 +279,39 @@ fn hash_file(path: &Path, _hint_size: u64) -> Result<String, DirDiffError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn diff_manifests_classifies_changes() {
+        let mut before = BTreeMap::new();
+        before.insert(PathBuf::from("a.yaml"), "aaaaaa".to_string());
+        before.insert(PathBuf::from("b.yaml"), "bbbbbb".to_string());
+        before.insert(PathBuf::from("gone.yaml"), "gone".to_string());
+        let mut after = BTreeMap::new();
+        after.insert(PathBuf::from("a.yaml"), "aaaaaa".to_string());
+        after.insert(PathBuf::from("b.yaml"), "bbbbb2".to_string());
+        after.insert(PathBuf::from("new.yaml"), "newnew".to_string());
+
+        let d = diff_manifests(&before, &after);
+        assert_eq!(d.unchanged, vec![PathBuf::from("a.yaml")]);
+        assert_eq!(d.added, vec![PathBuf::from("new.yaml")]);
+        assert_eq!(d.removed, vec![PathBuf::from("gone.yaml")]);
+        assert_eq!(d.changed.len(), 1);
+        assert_eq!(d.changed[0].path, PathBuf::from("b.yaml"));
+        assert_eq!(d.changed[0].before, "sha256:bbbbbb");
+        assert_eq!(d.changed[0].after, "sha256:bbbbb2");
+        assert!(!d.is_clean());
+    }
+
+    #[test]
+    fn diff_manifests_empty_maps_are_clean() {
+        let empty: BTreeMap<PathBuf, String> = BTreeMap::new();
+        let d = diff_manifests(&empty, &empty);
+        assert!(d.is_clean());
+        assert!(d.added.is_empty() && d.removed.is_empty() && d.changed.is_empty());
+    }
 
     fn write(dir: &Path, rel: &str, content: &str) {
         let path = dir.join(rel);

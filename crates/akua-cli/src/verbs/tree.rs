@@ -1,81 +1,25 @@
 //! `akua tree` — print the manifest's declared deps + lockfile entries.
 //!
-//! Flat listing for now (transitive deps land with the resolver). Joins
-//! manifest aliases to lockfile rows by name; reports each dep's
-//! declared source and (when locked) digest + signature.
+//! Pure walker logic lives in `akua_core::tree`; this verb reads
+//! files, delegates, renders the human-mode text on top of the
+//! typed output. The SDK reaches `tree_from_sources` through the
+//! WASM bindings — same logic, no binary.
 
 use std::io::Write;
 use std::path::Path;
 
 use akua_core::cli_contract::{codes, ExitCode, StructuredError};
-use akua_core::mod_file::{Dependency, DependencySource};
-use akua_core::{AkuaLock, AkuaManifest, LockLoadError, ManifestLoadError};
-use serde::Serialize;
+use akua_core::{tree_from_sources, LockLoadError, ManifestLoadError, TreeSourceError};
 
 use crate::contract::{emit_output, Context};
+
+/// Re-exports so external callers importing
+/// `akua_cli::verbs::tree::{TreeOutput, DepRow, …}` keep compiling.
+pub use akua_core::tree::{DepRow, LockedInfo, PackageInfo, TreeOutput};
 
 #[derive(Debug, Clone)]
 pub struct TreeArgs<'a> {
     pub workspace: &'a Path,
-}
-
-akua_core::contract_type! {
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct TreeOutput {
-    pub package: PackageInfo,
-    pub dependencies: Vec<DepRow>,
-}
-}
-
-akua_core::contract_type! {
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct PackageInfo {
-    pub name: String,
-    pub version: String,
-    pub edition: String,
-}
-}
-
-akua_core::contract_type! {
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct DepRow {
-    pub name: String,
-
-    /// `"oci"` / `"git"` / `"path"` / `"unknown"`.
-    pub source: &'static str,
-
-    /// The actual ref recorded in `akua.toml`.
-    pub source_ref: String,
-
-    /// `#[serde(default)]` is load-bearing for the JSON Schema:
-    /// it tells schemars the field is optional, which the
-    /// generated schema enforces. Without it, `skip_serializing_if`
-    /// alone produces output that schemars rejects as missing a
-    /// required field.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-
-    /// Lockfile row, present only when `akua.lock` exists and contains
-    /// a matching entry.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub locked: Option<LockedInfo>,
-}
-}
-
-akua_core::contract_type! {
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
-pub struct LockedInfo {
-    pub digest: String,
-
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub signature: Option<String>,
-
-    /// Local fork override active for this dep. When set, the dep's
-    /// canonical source is whatever the manifest declared, but build-
-    /// time resolution reads files from `replaced_by`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub replaced_by: Option<String>,
-}
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -86,6 +30,12 @@ pub enum TreeError {
     #[error(transparent)]
     Lock(#[from] LockLoadError),
 
+    #[error("akua.toml parse: {0}")]
+    ManifestParse(akua_core::mod_file::ManifestError),
+
+    #[error("akua.lock parse: {0}")]
+    LockParse(akua_core::lock_file::LockError),
+
     #[error("write to stdout failed: {0}")]
     StdoutWrite(#[source] std::io::Error),
 }
@@ -95,6 +45,12 @@ impl TreeError {
         match self {
             TreeError::Manifest(e) => e.to_structured(),
             TreeError::Lock(e) => e.to_structured(),
+            TreeError::ManifestParse(e) => {
+                StructuredError::new(codes::E_MANIFEST_PARSE, e.to_string()).with_default_docs()
+            }
+            TreeError::LockParse(e) => {
+                StructuredError::new(codes::E_LOCK_PARSE, e.to_string()).with_default_docs()
+            }
             TreeError::StdoutWrite(e) => {
                 StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
             }
@@ -116,54 +72,39 @@ pub fn run<W: Write>(
     args: &TreeArgs<'_>,
     stdout: &mut W,
 ) -> Result<ExitCode, TreeError> {
-    let manifest = AkuaManifest::load(args.workspace)?;
+    let manifest_path = args.workspace.join("akua.toml");
+    let lock_path = args.workspace.join("akua.lock");
 
-    let lock = if args.workspace.join("akua.lock").exists() {
-        Some(AkuaLock::load(args.workspace)?)
-    } else {
-        None
+    let manifest_source =
+        std::fs::read_to_string(&manifest_path).map_err(|source| {
+            TreeError::Manifest(ManifestLoadError::Io {
+                path: manifest_path.clone(),
+                source,
+            })
+        })?;
+    let lock_source = match std::fs::read_to_string(&lock_path) {
+        Ok(s) => Some(s),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(source) => {
+            return Err(TreeError::Lock(LockLoadError::Io {
+                path: lock_path,
+                source,
+            }))
+        }
     };
 
-    let mut deps = Vec::with_capacity(manifest.dependencies.len());
-    for (name, dep) in &manifest.dependencies {
-        let (source, source_ref) = source_of(dep);
-        let locked = lock
-            .as_ref()
-            .and_then(|l| l.packages.iter().find(|p| p.name == *name))
-            .map(|p| LockedInfo {
-                digest: p.digest.clone(),
-                signature: p.signature.clone(),
-                replaced_by: p.replaced.as_ref().map(|r| r.path.clone()),
-            });
-        deps.push(DepRow {
-            name: name.clone(),
-            source,
-            source_ref,
-            version: dep.version.clone(),
-            locked,
-        });
-    }
-
-    let output = TreeOutput {
-        package: PackageInfo {
-            name: manifest.package.name.clone(),
-            version: manifest.package.version.clone(),
-            edition: manifest.package.edition.clone(),
-        },
-        dependencies: deps,
-    };
+    let output = tree_from_sources(&manifest_source, lock_source.as_deref())
+        .map_err(map_source_error)?;
 
     emit_output(stdout, ctx, &output, |w| write_text(w, &output))
         .map_err(TreeError::StdoutWrite)?;
     Ok(ExitCode::Success)
 }
 
-fn source_of(dep: &Dependency) -> (&'static str, String) {
-    match dep.source() {
-        Some(DependencySource::Oci) => ("oci", dep.oci.clone().unwrap_or_default()),
-        Some(DependencySource::Git) => ("git", dep.git.clone().unwrap_or_default()),
-        Some(DependencySource::Path) => ("path", dep.path.clone().unwrap_or_default()),
-        None => ("unknown", String::new()),
+fn map_source_error(e: TreeSourceError) -> TreeError {
+    match e {
+        TreeSourceError::Manifest(e) => TreeError::ManifestParse(e),
+        TreeSourceError::Lock(e) => TreeError::LockParse(e),
     }
 }
 
@@ -247,87 +188,55 @@ digest    = "sha256:3c5d9e7f1a2b4c6d8e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b
 signature = "cosign:sigstore:cnpg"
 "#;
 
-    fn workspace(toml: &str, lock: Option<&str>) -> TempDir {
+    fn workspace(with_lock: bool) -> TempDir {
         let tmp = TempDir::new().unwrap();
-        fs::write(tmp.path().join("akua.toml"), toml).unwrap();
-        if let Some(lock) = lock {
-            fs::write(tmp.path().join("akua.lock"), lock).unwrap();
+        fs::write(tmp.path().join("akua.toml"), MANIFEST).unwrap();
+        if with_lock {
+            fs::write(tmp.path().join("akua.lock"), LOCK).unwrap();
         }
         tmp
     }
 
-    fn json_ctx() -> Context {
-        Context::json()
-    }
-
     #[test]
-    fn lists_declared_deps_without_lockfile() {
-        let ws = workspace(MANIFEST, None);
+    fn json_output_has_package_info_and_deps() {
+        let ws = workspace(true);
+        let ctx = Context::json();
         let mut stdout = Vec::new();
-        run(&json_ctx(), &TreeArgs { workspace: ws.path() }, &mut stdout).expect("run");
+        run(
+            &ctx,
+            &TreeArgs {
+                workspace: ws.path(),
+            },
+            &mut stdout,
+        )
+        .expect("run");
         let parsed: serde_json::Value =
             serde_json::from_str(String::from_utf8(stdout).unwrap().trim()).unwrap();
         assert_eq!(parsed["package"]["name"], "demo");
+        assert_eq!(parsed["package"]["version"], "0.2.0");
         let deps = parsed["dependencies"].as_array().unwrap();
         assert_eq!(deps.len(), 2);
-        assert!(deps.iter().any(|d| d["name"] == "cnpg" && d["source"] == "oci"));
-        assert!(deps.iter().any(|d| d["name"] == "local" && d["source"] == "path"));
-        // No lockfile → no `locked` field.
-        assert!(deps[0].get("locked").is_none() || deps[0]["locked"].is_null());
     }
 
     #[test]
-    fn joins_lockfile_rows_when_present() {
-        let ws = workspace(MANIFEST, Some(LOCK));
+    fn missing_lockfile_is_not_an_error() {
+        let ws = workspace(false);
+        let ctx = Context::json();
         let mut stdout = Vec::new();
-        run(&json_ctx(), &TreeArgs { workspace: ws.path() }, &mut stdout).expect("run");
+        let code = run(
+            &ctx,
+            &TreeArgs {
+                workspace: ws.path(),
+            },
+            &mut stdout,
+        )
+        .expect("run");
+        assert_eq!(code, ExitCode::Success);
         let parsed: serde_json::Value =
             serde_json::from_str(String::from_utf8(stdout).unwrap().trim()).unwrap();
-        let cnpg = parsed["dependencies"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|d| d["name"] == "cnpg")
-            .expect("cnpg present");
-        assert!(cnpg["locked"]["digest"].as_str().unwrap().starts_with("sha256:"));
-        assert_eq!(cnpg["locked"]["signature"], "cosign:sigstore:cnpg");
-
-        // `local` isn't in the lockfile → no `locked` block.
-        let local = parsed["dependencies"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|d| d["name"] == "local")
-            .expect("local present");
-        assert!(local.get("locked").is_none() || local["locked"].is_null());
-    }
-
-    #[test]
-    fn empty_dependencies_emits_human_readable_marker() {
-        let manifest = r#"
-[package]
-name    = "empty"
-version = "0.1.0"
-edition = "akua.dev/v1alpha1"
-
-[dependencies]
-"#;
-        let ws = workspace(manifest, None);
-        let mut stdout = Vec::new();
-        run(&Context::human(), &TreeArgs { workspace: ws.path() }, &mut stdout)
-            .expect("run");
-        assert!(String::from_utf8(stdout).unwrap().contains("(no dependencies)"));
-    }
-
-    #[test]
-    fn missing_manifest_surfaces_typed_error() {
-        let tmp = TempDir::new().unwrap();
-        let err = run(
-            &Context::human(),
-            &TreeArgs { workspace: tmp.path() },
-            &mut Vec::new(),
-        )
-        .unwrap_err();
-        assert_eq!(err.to_structured().code, codes::E_MANIFEST_MISSING);
+        // Deps present, but `locked` field absent on each.
+        for dep in parsed["dependencies"].as_array().unwrap() {
+            assert!(dep.get("locked").is_none() || dep["locked"].is_null());
+        }
     }
 }

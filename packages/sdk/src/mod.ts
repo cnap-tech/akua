@@ -1,4 +1,7 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { posix as path } from 'node:path';
 
 import type { CheckOutput } from './types/CheckOutput.ts';
 import type { CheckResult } from './types/CheckResult.ts';
@@ -19,12 +22,24 @@ import type { WhoamiOutput } from './types/WhoamiOutput.ts';
 import { classifyCliError } from './errors.ts';
 import { type SchemaName, validateAs } from './validate.ts';
 
-// The WASM bundle is CommonJS (wasm-pack `--target nodejs`). Lazy
-// `await import` keeps it off the module graph until the first
-// in-process render — the shell-out verbs don't need it.
+// Lazy-load the WASM bundle (~7.6 MB) so the SDK's shell-out verbs
+// (`version`, `whoami`, `render`, `verify`) don't pay the parse
+// cost when a consumer never touches an in-process verb. Static
+// imports above cover all other dependencies.
 type WasmBinding = {
 	render: (packageFilename: string, source: string, inputsJson: string | null) => string;
 	version: () => string;
+	lint: (filename: string, source: string) => string;
+	fmt: (filename: string, source: string, checkMode: boolean) => string;
+	inspect_package: (filename: string, source: string) => string;
+	check: (
+		manifest: string | null,
+		lock: string | null,
+		packageFilename: string | null,
+		packageSource: string | null,
+	) => string;
+	tree: (manifest: string, lock: string | null) => string;
+	diff: (beforeJson: string, afterJson: string) => string;
 };
 let wasmPromise: Promise<WasmBinding> | undefined;
 function loadWasm(): Promise<WasmBinding> {
@@ -32,6 +47,50 @@ function loadWasm(): Promise<WasmBinding> {
 		wasmPromise = import('../wasm/nodejs/akua_wasm.js') as Promise<WasmBinding>;
 	}
 	return wasmPromise;
+}
+
+async function readOptional(p: string): Promise<string | undefined> {
+	try {
+		return await readFile(p, 'utf8');
+	} catch (err: unknown) {
+		const code = (err as { code?: string } | null | undefined)?.code;
+		if (code === 'ENOENT') return undefined;
+		throw err;
+	}
+}
+
+/**
+ * Walk `root` recursively and return `{ relPath: "sha256-hex" }`
+ * for every regular file. Used by `Akua.diff` to hand the WASM
+ * bundle two comparable manifests. Siblings are hashed in
+ * parallel; the outer tree walk stays recursive so deep
+ * hierarchies don't blow the task-queue budget.
+ */
+async function hashTree(root: string): Promise<Record<string, string>> {
+	const rootStat = await stat(root);
+	if (!rootStat.isDirectory()) {
+		throw new Error(`diff: ${root} is not a directory`);
+	}
+	const out: Record<string, string> = {};
+	async function walk(dir: string, rel: string): Promise<void> {
+		const entries = await readdir(dir, { withFileTypes: true });
+		await Promise.all(
+			entries.map(async (entry) => {
+				const absPath = path.join(dir, entry.name);
+				const relPath = rel ? path.join(rel, entry.name) : entry.name;
+				if (entry.isDirectory()) {
+					await walk(absPath, relPath);
+				} else if (entry.isFile()) {
+					const bytes = await readFile(absPath);
+					out[relPath] = createHash('sha256').update(bytes).digest('hex');
+				}
+				// Non-regular files (symlinks, sockets) are skipped —
+				// mirrors `akua_core::dir_diff::diff`.
+			}),
+		);
+	}
+	await walk(root, '');
+	return out;
 }
 
 export * from './errors.ts';
@@ -182,56 +241,109 @@ export class Akua {
 	 * [`docs/cli.md#akua-render`](../../../docs/cli.md#akua-render).
 	 */
 	/**
-	 * Fast syntax / type / dep check over the workspace. No
-	 * execution; no engine callouts. Mirrors `akua check --json`.
+	 * Fast syntax / type / dep check over the workspace. Runs
+	 * entirely in-process via the bundled `akua-wasm` module — no
+	 * `akua` binary required.
 	 */
 	async check(opts: CheckOptions = {}): Promise<CheckOutput> {
-		const extra: string[] = [];
-		if (opts.workspace) extra.push('--workspace', opts.workspace);
-		if (opts.package) extra.push('--package', opts.package);
-		return this.callDiagnostic<CheckOutput>('check', extra, 'CheckOutput');
+		const ws = opts.workspace ?? '.';
+		const manifestPath = path.join(ws, 'akua.toml');
+		const lockPath = path.join(ws, 'akua.lock');
+		const pkgPath = opts.package ?? path.join(ws, 'package.k');
+
+		const [manifest, lock, pkgSource] = await Promise.all([
+			readOptional(manifestPath),
+			readOptional(lockPath),
+			readOptional(pkgPath),
+		]);
+
+		const wasm = await loadWasm();
+		const coreOutput = JSON.parse(
+			wasm.check(manifest ?? null, lock ?? null, pkgPath, pkgSource ?? null),
+		) as CheckOutput;
+
+		// CLI-parity: required-file failures the pure-compute core
+		// doesn't gate on its own. Mirrors the CLI envelope so
+		// CLI-JSON and SDK-JSON agree on scratch workspaces.
+		const checks: CheckResult[] = [];
+		if (manifest === undefined) {
+			checks.push({ name: 'manifest', ok: false, error: `${manifestPath} not found`, issues: [] });
+		}
+		checks.push(...coreOutput.checks);
+		if (pkgSource === undefined) {
+			checks.push({ name: 'package', ok: false, error: `${pkgPath} not found`, issues: [] });
+		}
+		const status = checks.every((c) => c.ok) ? 'ok' : 'fail';
+		return validateAs<CheckOutput>('CheckOutput', { status, checks });
 	}
 
 	/**
-	 * Run the KCL linter against the Package. Mirrors
-	 * `akua lint --json`.
+	 * Run the KCL linter against the Package. In-process via WASM —
+	 * no binary required.
 	 */
 	async lint(opts: LintOptions = {}): Promise<LintOutput> {
-		const extra: string[] = [];
-		if (opts.package) extra.push('--package', opts.package);
-		return this.callDiagnostic<LintOutput>('lint', extra, 'LintOutput');
+		const pkg = opts.package ?? './package.k';
+		const source = await readFile(pkg, 'utf8');
+		const wasm = await loadWasm();
+		return validateAs<LintOutput>('LintOutput', JSON.parse(wasm.lint(pkg, source)));
 	}
 
 	/**
-	 * Format KCL sources. Mirrors `akua fmt --json`. Without
-	 * `check`, the file is rewritten in place; with `check`, the
-	 * verb reports which files would change without touching them.
+	 * Format KCL sources. In-process via WASM — no binary required.
+	 * With `check=true`, reports which files would change without
+	 * touching disk. Without `check`, the formatted text is written
+	 * back to the file (mirroring `akua fmt`'s in-place behavior).
 	 */
 	async fmt(opts: FmtOptions = {}): Promise<FmtOutput> {
-		const extra: string[] = [];
-		if (opts.package) extra.push('--package', opts.package);
-		if (opts.check) extra.push('--check');
-		if (opts.stdout) extra.push('--stdout');
-		return this.callDiagnostic<FmtOutput>('fmt', extra, 'FmtOutput');
+		const pkg = opts.package ?? './package.k';
+		const source = await readFile(pkg, 'utf8');
+		const wasm = await loadWasm();
+		const raw = JSON.parse(wasm.fmt(pkg, source, opts.check ?? false)) as {
+			files: FmtFile[];
+			formatted: string;
+		};
+		const shouldEmit = !opts.check && (raw.files[0]?.changed ?? false);
+		if (shouldEmit && opts.stdout) {
+			process.stdout.write(raw.formatted);
+		} else if (shouldEmit) {
+			await writeFile(pkg, raw.formatted, 'utf8');
+		}
+		return validateAs<FmtOutput>('FmtOutput', { files: raw.files });
 	}
 
 	/**
 	 * Introspect a Package or a packed tarball — surface the option
-	 * set, tarball layer digest + size, etc. Mirrors
-	 * `akua inspect --json`.
+	 * set, etc. Package mode runs in-process via WASM; tarball mode
+	 * is not yet available in the WASM bundle (deferred to v0.2.0
+	 * along with engine bundling) and currently throws.
 	 */
 	async inspect(opts: InspectOptions = {}): Promise<InspectOutput> {
-		const extra: string[] = [];
-		if (opts.package) extra.push('--package', opts.package);
-		if (opts.tarball) extra.push('--tarball', opts.tarball);
-		return this.callDiagnostic<InspectOutput>('inspect', extra, 'InspectOutput');
+		if (opts.tarball) {
+			throw new Error(
+				'Akua.inspect({ tarball }) is not yet available in the WASM bundle — use the akua CLI for tarball introspection.',
+			);
+		}
+		const pkg = opts.package ?? './package.k';
+		const source = await readFile(pkg, 'utf8');
+		const wasm = await loadWasm();
+		return validateAs<InspectOutput>(
+			'InspectOutput',
+			JSON.parse(wasm.inspect_package(pkg, source)),
+		);
 	}
 
-	/** Print the workspace's declared deps + lockfile entries. */
+	/**
+	 * Print the workspace's declared deps + lockfile entries.
+	 * In-process via WASM — no binary required.
+	 */
 	async tree(opts: TreeOptions = {}): Promise<TreeOutput> {
-		const extra: string[] = [];
-		if (opts.workspace) extra.push('--workspace', opts.workspace);
-		return this.callDiagnostic<TreeOutput>('tree', extra, 'TreeOutput');
+		const ws = opts.workspace ?? '.';
+		const [manifest, lock] = await Promise.all([
+			readFile(path.join(ws, 'akua.toml'), 'utf8'),
+			readOptional(path.join(ws, 'akua.lock')),
+		]);
+		const wasm = await loadWasm();
+		return validateAs<TreeOutput>('TreeOutput', JSON.parse(wasm.tree(manifest, lock ?? null)));
 	}
 
 	/**
@@ -249,12 +361,17 @@ export class Akua {
 
 	/**
 	 * Structural diff between two directory trees of rendered
-	 * manifests. Positional args map to the CLI's `before` + `after`.
-	 * Exit `1` signals a non-clean diff; the typed `DirDiff` is
-	 * returned either way.
+	 * manifests. JS side walks both trees + computes sha256 per
+	 * file; akua-wasm compares the two `{path: hash}` manifests.
+	 * No binary required.
 	 */
 	async diff(before: string, after: string): Promise<DirDiff> {
-		return this.callDiagnostic<DirDiff>('diff', [before, after], 'DirDiff');
+		const [beforeMap, afterMap] = await Promise.all([hashTree(before), hashTree(after)]);
+		const wasm = await loadWasm();
+		return validateAs<DirDiff>(
+			'DirDiff',
+			JSON.parse(wasm.diff(JSON.stringify(beforeMap), JSON.stringify(afterMap))),
+		);
 	}
 
 	async render(opts: RenderOptions = {}): Promise<RenderSummary> {
