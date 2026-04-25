@@ -12,10 +12,11 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0  # CI cache is happier without per-run incremental state
 
 jobs:
-  ci:
-    name: Full CI pipeline
+  rust:
+    name: Rust (fmt + clippy + test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +29,79 @@ jobs:
       - name: Install rustfmt + clippy components + wasm32-wasip1 target
         run: mise exec -- rustup component add rustfmt clippy && mise exec -- rustup target add wasm32-wasip1
 
+      # Rust cache. `cache-all-crates: true` keeps build-deps (proc-macros)
+      # in the cache too — clippy and tests both touch them. `shared-key`
+      # lets every workflow ref reuse the same cache slot when the
+      # lockfile is identical.
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-ci
+          cache-all-crates: true
+
+      # Engine .wasm artifacts are deterministic in their inputs:
+      # (Go version, engine source, helm patch). Restore them by content
+      # hash and skip the 1-2 min Go→wasip1 build entirely on cache hit.
+      - name: Restore helm engine wasm cache
+        id: cache-helm-engine
+        uses: actions/cache@v4
+        with:
+          path: crates/helm-engine-wasm/assets/helm-engine.wasm
+          key: helm-engine-${{ runner.os }}-${{ hashFiles('.mise.toml', 'crates/helm-engine-wasm/go-src/**', 'crates/helm-engine-wasm/fork/**') }}
+
+      - name: Restore kustomize engine wasm cache
+        id: cache-kustomize-engine
+        uses: actions/cache@v4
+        with:
+          path: crates/kustomize-engine-wasm/assets/kustomize-engine.wasm
+          key: kustomize-engine-${{ runner.os }}-${{ hashFiles('.mise.toml', 'crates/kustomize-engine-wasm/go-src/**') }}
+
+      # Go module download cache + build cache (per Go version). Keys
+      # the helm/kustomize go-src/go.mod files so a dep bump invalidates
+      # cleanly.
+      - name: Cache Go module + build cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('.mise.toml', '**/go.mod') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+
+      # Cache the helm fork tree (cloned by fork/apply.sh). Keyed on the
+      # patch + apply script hashes so any patch change forces re-clone.
+      - name: Cache helm fork tree
+        uses: actions/cache@v4
+        with:
+          path: crates/helm-engine-wasm/third_party/helm-fork
+          key: helm-fork-${{ runner.os }}-${{ hashFiles('crates/helm-engine-wasm/fork/**') }}
 
       - name: task ci
         run: mise exec -- task ci
+
+      # Type + schema drift guard. `sdk:check` runs the Rust `ts-rs` +
+      # `schemars` emitters and diffs the result against committed
+      # packages/sdk/src/types + schemas. Rust is already set up here, so
+      # piggyback rather than spinning up a second runner.
+      - name: SDK type + schema drift check
+        run: mise exec -- task sdk:check
+
+  sdk:
+    name: SDK (bun, in-process WASM)
+    runs-on: ubuntu-latest
+    # Bun-only — exercises the @akua/sdk surface against the committed
+    # packages/sdk/wasm/nodejs/ bundle. Runs concurrently with the rust
+    # job since it shares no toolchain.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v2
+        with:
+          install: true
+          cache: true
+
+      - name: bun install
+        run: cd packages/sdk && mise exec -- bun install --frozen-lockfile
+
+      - name: SDK tests
+        run: mise exec -- task sdk:test
