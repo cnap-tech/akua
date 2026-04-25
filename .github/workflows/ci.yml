@@ -19,7 +19,7 @@ jobs:
     name: Rust (fmt + clippy + test)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: jdx/mise-action@v2
         with:
@@ -93,7 +93,7 @@ jobs:
     # packages/sdk/wasm/nodejs/ bundle. Runs concurrently with the rust
     # job since it shares no toolchain.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: jdx/mise-action@v2
         with:

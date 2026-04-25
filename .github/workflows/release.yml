@@ -44,7 +44,7 @@ jobs:
             archive_suffix: macos-aarch64
             cargo: cargo
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: jdx/mise-action@v2
         with:
@@ -87,7 +87,7 @@ jobs:
     needs: binary
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
