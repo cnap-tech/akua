@@ -182,12 +182,23 @@ impl PackageK {
         let charts_tmp = crate::stdlib::materialize_charts_if_any(charts)
             .map_err(|e| PackageKError::KclEval(format!("materializing charts pkg: {e}")))?;
 
+        // KCL ecosystem deps need standalone ExternalPkg entries so
+        // imports like `import k8s.api.apps.v1` resolve against the
+        // upstream module tree rather than the synthetic `charts.*`
+        // umbrella. Path stays the resolved on-disk root — KCL
+        // reads it directly.
+        let kcl_pkgs: std::collections::BTreeMap<String, std::path::PathBuf> = charts
+            .kcl_pkgs()
+            .map(|(alias, c)| (alias.to_string(), c.abs_path.clone()))
+            .collect();
+
         let json = serde_json::to_string(inputs)?;
         let yaml = eval_kcl(
             &self.path,
             &self.source,
             &json,
             charts_tmp.as_ref().map(|d| d.path()),
+            &kcl_pkgs,
         )?;
         let parsed = parse_rendered(&yaml)?;
 
@@ -464,29 +475,43 @@ pub fn eval_source_with_inputs(
     source: &str,
     inputs: &Value,
 ) -> Result<String, PackageKError> {
-    eval_source_full(path, source, inputs, None)
+    eval_source_full(
+        path,
+        source,
+        inputs,
+        None,
+        &std::collections::BTreeMap::new(),
+    )
 }
 
-/// Full-surface eval: inputs + a generated `charts` KCL pkg dir.
+/// Full-surface eval: inputs + a generated `charts` KCL pkg dir +
+/// any KCL ecosystem pkg mounts (`kcl_pkgs`).
 ///
 /// The render worker calls this with a preopened path where the host
-/// has dropped the output of
-/// [`crate::stdlib::materialize_charts`]. KCL's import resolver sees
-/// the `charts` ExternalPkg and resolves `import charts.<name>` to
-/// the files there. Plugin callouts from those imports still flow
-/// through the host-side plugin bridge (helm / kustomize handlers
-/// live on akua-cli's side, not in the worker).
+/// has dropped the output of [`crate::stdlib::materialize_charts`].
+/// KCL's import resolver sees the `charts` ExternalPkg and resolves
+/// `import charts.<name>` to the files there. Plugin callouts from
+/// those imports still flow through the host-side plugin bridge
+/// (helm / kustomize handlers live on akua-cli's side, not in the
+/// worker).
 ///
-/// `charts_pkg_dir = None` is equivalent to [`eval_source_with_inputs`]
-/// — no `charts.*` resolution, bare-KCL only.
+/// `kcl_pkgs` is an alias→guest-path map of upstream KCL packages
+/// (e.g. `oci://ghcr.io/kcl-lang/k8s`). Each entry registers as its
+/// own `ExternalPkg` so the Package can write
+/// `import k8s.api.apps.v1` directly.
+///
+/// `charts_pkg_dir = None` and `kcl_pkgs.is_empty()` is equivalent
+/// to [`eval_source_with_inputs`] — no extern resolution, bare-KCL
+/// only.
 pub fn eval_source_full(
     path: &Path,
     source: &str,
     inputs: &Value,
     charts_pkg_dir: Option<&Path>,
+    kcl_pkgs: &std::collections::BTreeMap<String, std::path::PathBuf>,
 ) -> Result<String, PackageKError> {
     let json = serde_json::to_string(inputs)?;
-    eval_kcl(path, source, &json, charts_pkg_dir)
+    eval_kcl(path, source, &json, charts_pkg_dir, kcl_pkgs)
 }
 
 fn eval_kcl(
@@ -494,6 +519,7 @@ fn eval_kcl(
     code: &str,
     option_json: &str,
     charts_pkg_dir: Option<&Path>,
+    kcl_pkgs: &std::collections::BTreeMap<String, std::path::PathBuf>,
 ) -> Result<String, PackageKError> {
     use kcl_lang::{Argument, ExecProgramArgs, ExternalPkg, API};
 
@@ -527,6 +553,14 @@ fn eval_kcl(
         external_pkgs.push(ExternalPkg {
             pkg_name: "charts".to_string(),
             pkg_path: dir.to_string_lossy().into_owned(),
+        });
+    }
+    // Upstream KCL ecosystem deps — one ExternalPkg per alias. The
+    // host has preopened each at the matching guest path.
+    for (alias, guest_path) in kcl_pkgs {
+        external_pkgs.push(ExternalPkg {
+            pkg_name: alias.clone(),
+            pkg_path: guest_path.to_string_lossy().into_owned(),
         });
     }
     let args = ExecProgramArgs {
@@ -692,6 +726,7 @@ input: Input = option("input") or Input {}
                 name: "nginx".to_string(),
                 abs_path: PathBuf::from("/opt/charts/nginx"),
                 sha256: "sha256:deadbeef".to_string(),
+                kind: crate::chart_resolver::PackageKind::HelmChart,
                 source: crate::chart_resolver::ResolvedSource::Path {
                     declared: "./charts/nginx".to_string(),
                 },

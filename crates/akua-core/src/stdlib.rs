@@ -60,11 +60,13 @@ const KCL_MOD: &str = "[package]\nname = \"akua\"\nedition = \"0.0.1\"\nversion 
 /// union that consumes them) ship in Phase 2b.
 /// `Some(tempdir)` when `resolved` has entries; `None` otherwise.
 /// Saves every caller the "if .is_empty() { None } else { Some(...) }"
-/// guard around [`materialize_charts`].
+/// guard around [`materialize_charts`]. Skips if there are no Helm
+/// deps to wrap (KCL deps are materialized separately by the render
+/// verb and don't go through the synthetic `charts.*` umbrella).
 pub fn materialize_charts_if_any(
     resolved: &crate::chart_resolver::ResolvedCharts,
 ) -> std::io::Result<Option<tempfile::TempDir>> {
-    if resolved.entries.is_empty() {
+    if resolved.helm_charts().next().is_none() {
         return Ok(None);
     }
     materialize_charts(resolved).map(Some)
@@ -77,7 +79,9 @@ pub fn materialize_charts(
     const CHARTS_KCL_MOD: &str =
         "[package]\nname = \"charts\"\nedition = \"0.0.1\"\nversion = \"0.0.1\"\n";
     std::fs::write(dir.path().join("kcl.mod"), CHARTS_KCL_MOD)?;
-    for (name, chart) in &resolved.entries {
+    // Only Helm deps get the synthetic wrapper. KCL ecosystem deps
+    // are mounted as standalone ExternalPkg entries by the render verb.
+    for (name, chart) in resolved.helm_charts() {
         let values_schema = load_values_schema(&chart.abs_path);
         let body = build_chart_module(
             name,
@@ -248,6 +252,7 @@ mod tests {
                 name: "nginx".to_string(),
                 abs_path: PathBuf::from("/tmp/charts/nginx"),
                 sha256: "sha256:abc123".to_string(),
+                kind: crate::chart_resolver::PackageKind::HelmChart,
                 source: crate::chart_resolver::ResolvedSource::Path {
                     declared: "./charts/nginx".to_string(),
                 },
@@ -288,6 +293,7 @@ mod tests {
                 // otherwise mis-parse.
                 abs_path: PathBuf::from(r#"C:\charts\w"ei"rd"#),
                 sha256: "sha256:f00".to_string(),
+                kind: crate::chart_resolver::PackageKind::HelmChart,
                 source: crate::chart_resolver::ResolvedSource::Path {
                     declared: r#"C:\charts\w"ei"rd"#.to_string(),
                 },
@@ -338,6 +344,7 @@ mod tests {
                 name: "nginx".to_string(),
                 abs_path: chart_root.path().canonicalize().unwrap(),
                 sha256: "sha256:deadbeef".to_string(),
+                kind: crate::chart_resolver::PackageKind::HelmChart,
                 source: crate::chart_resolver::ResolvedSource::Path {
                     declared: "./vendor/nginx".to_string(),
                 },
@@ -381,6 +388,7 @@ mod tests {
                 name: "nginx".to_string(),
                 abs_path: chart_root.path().canonicalize().unwrap(),
                 sha256: "sha256:abc".to_string(),
+                kind: crate::chart_resolver::PackageKind::HelmChart,
                 source: crate::chart_resolver::ResolvedSource::Path {
                     declared: "./vendor/nginx".to_string(),
                 },

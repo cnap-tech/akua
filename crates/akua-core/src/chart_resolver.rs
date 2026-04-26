@@ -29,21 +29,46 @@ use sha2::{Digest, Sha256};
 
 use crate::hex::hex_encode;
 use crate::mod_file::{AkuaManifest, Dependency, DependencySource};
+#[cfg(feature = "oci-fetch")]
+pub use crate::oci_fetcher::PackageKind;
 
-/// A single resolved chart dep — a materialized on-disk directory plus
+/// Stand-in for non-oci-fetch builds so resolver consumers can name
+/// the kind unconditionally. Same shape as the oci_fetcher version.
+#[cfg(not(feature = "oci-fetch"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageKind {
+    HelmChart,
+    KclModule,
+}
+
+/// A single resolved dep — a materialized on-disk directory plus
 /// a content-addressed digest of the tree (filenames + contents).
+/// "Chart" in the type name is historical; the resolver also handles
+/// KCL ecosystem packages now (see [`ResolvedChart::kind`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedChart {
-    /// Local alias in `akua.toml` / the `import charts.<name>` stem.
+    /// Local alias in `akua.toml`. Imported as `import charts.<name>`
+    /// for Helm charts (akua synthesizes a wrapper) or as
+    /// `import <name>` for KCL packages (registered as a kcl-lang
+    /// `ExternalPkg` directly).
     pub name: String,
 
-    /// Canonicalized absolute path on disk. Safe to hand to
-    /// `helm-engine-wasm::render_dir` directly.
+    /// Canonicalized absolute path on disk. For Helm, hand directly to
+    /// `helm-engine-wasm::render_dir`. For KCL, this is the package
+    /// root containing `kcl.mod`.
     pub abs_path: PathBuf,
 
     /// `sha256:<hex>` of the chart tree. Stable across machines when
     /// file contents + names are identical.
     pub sha256: String,
+
+    /// Whether the resolved tree is a Helm chart or a KCL package.
+    /// The render pipeline routes on this — Helm goes to
+    /// `materialize_charts_if_any` (synthesized wrapper); KCL goes to
+    /// `materialize_kcl_pkgs_if_any` (mounted as ExternalPkg).
+    /// Path-deps default to [`PackageKind::HelmChart`] for backwards
+    /// compatibility — every existing path-dep is a vendored chart.
+    pub kind: PackageKind,
 
     /// Where the chart canonically comes from. Used by the lockfile
     /// writer to record the source of record even when a `replace`
@@ -162,6 +187,26 @@ impl ResolvedSource {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ResolvedCharts {
     pub entries: BTreeMap<String, ResolvedChart>,
+}
+
+impl ResolvedCharts {
+    /// Iterate over the Helm subset only — the deps that flow through
+    /// `materialize_charts_if_any` and `helm.template`.
+    pub fn helm_charts(&self) -> impl Iterator<Item = (&str, &ResolvedChart)> {
+        self.entries
+            .iter()
+            .filter(|(_, c)| c.kind == PackageKind::HelmChart)
+            .map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// Iterate over the KCL subset only — the deps that mount as
+    /// `ExternalPkg` entries in the KCL evaluator.
+    pub fn kcl_pkgs(&self) -> impl Iterator<Item = (&str, &ResolvedChart)> {
+        self.entries
+            .iter()
+            .filter(|(_, c)| c.kind == PackageKind::KclModule)
+            .map(|(k, v)| (k.as_str(), v))
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -501,8 +546,9 @@ fn resolve_oci(
     // the blob digest rather than re-hashing the tree.
     Ok(ResolvedChart {
         name: name.to_string(),
-        abs_path: fetched.chart_dir,
+        abs_path: fetched.root_dir,
         sha256: fetched.blob_digest.clone(),
+        kind: fetched.kind,
         source: ResolvedSource::Oci {
             oci: oci.to_string(),
             version: version.to_string(),
@@ -593,10 +639,18 @@ fn resolve_git(
         crate::lock_file::GIT_DIGEST_PREFIX,
         fetched.commit_sha
     );
+    // Same auto-detect as path deps — git-fetched repos are usually
+    // Helm charts; KCL packages on git surface a `kcl.mod` we honour.
+    let kind = if fetched.chart_dir.join("kcl.mod").is_file() {
+        PackageKind::KclModule
+    } else {
+        PackageKind::HelmChart
+    };
     Ok(ResolvedChart {
         name: name.to_string(),
         abs_path: fetched.chart_dir,
         sha256: digest,
+        kind,
         source: ResolvedSource::Git {
             git: git.to_string(),
             tag_or_rev,
@@ -771,10 +825,21 @@ fn resolve_path(
         source: e,
     })?;
 
+    // Auto-detect KCL packages by their `kcl.mod` marker; everything
+    // else stays HelmChart for backwards compatibility (every existing
+    // path-dep is a vendored chart, and the `Chart.yaml` check would
+    // gate on a marker we don't strictly need to verify here).
+    let kind = if canon.join("kcl.mod").is_file() {
+        PackageKind::KclModule
+    } else {
+        PackageKind::HelmChart
+    };
+
     Ok(ResolvedChart {
         name: name.to_string(),
         abs_path: canon,
         sha256,
+        kind,
         source,
     })
 }
