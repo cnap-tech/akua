@@ -69,7 +69,7 @@ tempfile = { version = "3", optional = true }
 
 # SDK type-emission deps. Optional; pulled in only when the
 # `ts-export` / `schema-export` features are enabled.
-ts-rs = { version = "11", optional = true }
+ts-rs = { version = "12", optional = true }
 schemars = { version = "1", optional = true }
 
 # Host-only deps — compiled into the CLI binary that *hosts* the
