@@ -43,14 +43,14 @@ jobs:
       # hash and skip the 1-2 min Go→wasip1 build entirely on cache hit.
       - name: Restore helm engine wasm cache
         id: cache-helm-engine
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: crates/helm-engine-wasm/assets/helm-engine.wasm
           key: helm-engine-${{ runner.os }}-${{ hashFiles('.mise.toml', 'crates/helm-engine-wasm/go-src/**', 'crates/helm-engine-wasm/fork/**') }}
 
       - name: Restore kustomize engine wasm cache
         id: cache-kustomize-engine
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: crates/kustomize-engine-wasm/assets/kustomize-engine.wasm
           key: kustomize-engine-${{ runner.os }}-${{ hashFiles('.mise.toml', 'crates/kustomize-engine-wasm/go-src/**') }}
@@ -59,7 +59,7 @@ jobs:
       # the helm/kustomize go-src/go.mod files so a dep bump invalidates
       # cleanly.
       - name: Cache Go module + build cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/go/pkg/mod
@@ -71,7 +71,7 @@ jobs:
       # Cache the helm fork tree (cloned by fork/apply.sh). Keyed on the
       # patch + apply script hashes so any patch change forces re-clone.
       - name: Cache helm fork tree
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: crates/helm-engine-wasm/third_party/helm-fork
           key: helm-fork-${{ runner.os }}-${{ hashFiles('crates/helm-engine-wasm/fork/**') }}
