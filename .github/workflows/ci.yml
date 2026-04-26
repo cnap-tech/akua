@@ -51,14 +51,19 @@ jobs:
       - name: Install rustfmt + clippy components + wasm32-wasip1 target
         run: mise exec -- rustup component add rustfmt clippy && mise exec -- rustup target add wasm32-wasip1
 
-      # Rust cache. `cache-all-crates: true` keeps build-deps (proc-macros)
-      # in the cache too — clippy and tests both touch them. `shared-key`
-      # lets every workflow ref reuse the same cache slot when the
-      # lockfile is identical.
+      # Rust cache.
+      # - `cache-all-crates: true` — also caches build-deps (proc-macros).
+      # - `cache-workspace-crates: true` — caches our 7 workspace crates'
+      #   target/ artifacts. cargo's incremental invalidation handles the
+      #   "did this crate actually change" question; the cache just feeds
+      #   it the previous build state instead of starting cold.
+      # - `shared-key: rust-ci` — every workflow ref reuses the same cache
+      #   slot when the lockfile is identical.
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: rust-ci
           cache-all-crates: true
+          cache-workspace-crates: true
 
       # Engine .wasm artifacts are deterministic in their inputs:
       # (Go version, engine source, helm patch). Restore them by content
