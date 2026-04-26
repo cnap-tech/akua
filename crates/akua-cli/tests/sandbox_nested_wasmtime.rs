@@ -105,6 +105,7 @@ fn charts_import_resolves_inside_sandbox_via_preopen() {
                 source: src,
                 inputs: None,
                 charts_pkg_path: Some("/charts".into()),
+                kcl_pkgs: std::collections::BTreeMap::new(),
             },
             ResourceLimits {
                 epoch_deadline: 300,
@@ -180,6 +181,7 @@ fn helm_template_through_plugin_bridge_across_engines() {
                 source: src,
                 inputs: None,
                 charts_pkg_path: None,
+                kcl_pkgs: std::collections::BTreeMap::new(),
             },
             limits,
         )

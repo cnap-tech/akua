@@ -45,6 +45,7 @@ fn run(source: &str, limits: ResourceLimits) -> Result<WorkerResponse, WorkerErr
             source: source.to_string(),
             inputs: None,
             charts_pkg_path: None,
+            kcl_pkgs: std::collections::BTreeMap::new(),
         },
         limits,
     )

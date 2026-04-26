@@ -47,6 +47,7 @@ pub fn render(
         source,
         &inputs,
         None,
+        &std::collections::BTreeMap::new(),
     )
     .map_err(|e| JsError::new(&e.to_string()))
 }

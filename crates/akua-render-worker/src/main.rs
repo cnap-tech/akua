@@ -92,6 +92,13 @@ enum Request {
         /// must be bare-KCL + plugin-call-only.
         #[serde(default)]
         charts_pkg_path: Option<String>,
+        /// Upstream KCL ecosystem deps the host has preopened: alias
+        /// → guest-visible path inside the sandbox. Each entry maps
+        /// directly to a kcl-lang ExternalPkg, so the Package can
+        /// `import <alias>.<module>` (e.g. `import k8s.api.apps.v1`)
+        /// without going through the synthetic `charts.*` umbrella.
+        #[serde(default)]
+        kcl_pkgs: std::collections::BTreeMap<String, String>,
     },
 }
 
@@ -155,7 +162,8 @@ fn run() -> Result<(), WorkerError> {
             source,
             inputs,
             charts_pkg_path,
-        } => render_request(package_filename, source, inputs, charts_pkg_path),
+            kcl_pkgs,
+        } => render_request(package_filename, source, inputs, charts_pkg_path, kcl_pkgs),
     };
 
     let out =
@@ -171,6 +179,7 @@ fn render_request(
     source: String,
     inputs: Option<serde_json::Value>,
     charts_pkg_path: Option<String>,
+    kcl_pkgs: std::collections::BTreeMap<String, String>,
 ) -> Response {
     let ver = env!("CARGO_PKG_VERSION");
 
@@ -195,11 +204,17 @@ fn render_request(
     let charts_path_buf = charts_pkg_path.map(std::path::PathBuf::from);
     let charts_ref = charts_path_buf.as_deref();
 
+    let kcl_pkgs_paths: std::collections::BTreeMap<String, std::path::PathBuf> = kcl_pkgs
+        .into_iter()
+        .map(|(alias, p)| (alias, std::path::PathBuf::from(p)))
+        .collect();
+
     match akua_core::eval_source_full(
         std::path::Path::new(&package_filename),
         &source,
         &inputs_value,
         charts_ref,
+        &kcl_pkgs_paths,
     ) {
         Ok(yaml) => Response::Render {
             status: "ok",

@@ -345,11 +345,25 @@ pub fn render_in_worker(
     let _scope =
         akua_core::kcl_plugin::RenderScope::enter_for_render(&package.path, charts, strict);
 
+    // Helm deps go through the synthetic `charts.<name>` umbrella —
+    // materialize as a single tempdir keyed at /charts.
     let charts_tmp = akua_core::stdlib::materialize_charts_if_any(charts).map_err(|e| {
         RenderError::PackageK(PackageKError::KclEval(format!(
             "materializing charts pkg: {e}"
         )))
     })?;
+
+    // KCL ecosystem deps mount as their own ExternalPkg per alias.
+    // No tempdir indirection — preopen each resolved root directly at
+    // `/kcl-pkgs/<alias>` and tell the worker the alias→path mapping.
+    let kcl_preopens: Vec<(std::path::PathBuf, String)> = charts
+        .kcl_pkgs()
+        .map(|(alias, c)| (c.abs_path.clone(), format!("/kcl-pkgs/{alias}")))
+        .collect();
+    let kcl_pkgs_request: std::collections::BTreeMap<String, String> = charts
+        .kcl_pkgs()
+        .map(|(alias, _)| (alias.to_string(), format!("/kcl-pkgs/{alias}")))
+        .collect();
 
     let host = RenderHost::shared().map_err(worker_to_render_err)?;
 
@@ -365,13 +379,17 @@ pub fn render_in_worker(
         source: package.source.clone(),
         inputs: Some(inputs_json),
         charts_pkg_path: charts_tmp.as_ref().map(|_| "/charts".to_string()),
+        kcl_pkgs: kcl_pkgs_request,
     };
 
-    let response = match charts_tmp.as_ref() {
-        Some(dir) => host.invoke_with_charts(&request, ResourceLimits::default(), dir.path()),
-        None => host.invoke(&request, ResourceLimits::default()),
-    }
-    .map_err(worker_to_render_err)?;
+    let response = host
+        .invoke_with_deps(
+            &request,
+            ResourceLimits::default(),
+            charts_tmp.as_ref().map(|d| d.path()),
+            &kcl_preopens,
+        )
+        .map_err(worker_to_render_err)?;
 
     let yaml = response
         .into_render_yaml()
@@ -403,6 +421,7 @@ pub(crate) fn eval_source_in_worker(
         source: source.to_string(),
         inputs: None,
         charts_pkg_path: None,
+        kcl_pkgs: std::collections::BTreeMap::new(),
     };
     let response = host
         .invoke(&request, ResourceLimits::default())

@@ -87,10 +87,15 @@ pub enum WorkerRequest {
         #[serde(skip_serializing_if = "Option::is_none")]
         inputs: Option<serde_json::Value>,
         /// Guest-visible path to the preopened `charts` pkg dir.
-        /// Set by [`RenderHost::invoke_with_charts`]; omit for
+        /// Set by [`RenderHost::invoke_with_deps`]; omit for
         /// Packages that don't `import charts.*`.
         #[serde(skip_serializing_if = "Option::is_none")]
         charts_pkg_path: Option<String>,
+        /// Upstream KCL ecosystem deps the host has preopened: alias
+        /// → guest-visible path. Empty when the Package has no
+        /// KCL-OCI deps. Wire-compat with `akua-render-worker`.
+        #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+        kcl_pkgs: std::collections::BTreeMap<String, String>,
     },
 }
 
@@ -242,32 +247,52 @@ impl RenderHost {
 
     /// Run one worker invocation with the given limits + request.
     /// Every call gets a fresh `Store`; caps are re-applied every time.
-    /// No preopens — use [`invoke_with_charts`](Self::invoke_with_charts)
-    /// for Packages that `import charts.*`.
+    /// No `charts.*` or KCL-pkg preopens — use
+    /// [`invoke_with_deps`](Self::invoke_with_deps) for Packages that
+    /// `import charts.*` or pull in upstream KCL ecosystem packages.
     pub fn invoke(
         &self,
         req: &WorkerRequest,
         limits: ResourceLimits,
     ) -> Result<WorkerResponse, WorkerError> {
-        self.invoke_inner(req, limits, None)
+        self.invoke_inner(req, limits, None, &[])
     }
 
-    /// As [`invoke`](Self::invoke), but preopens `charts_host_dir`
-    /// read-only at the guest path `/charts`. The `Render` request's
-    /// `charts_pkg_path` must be `Some("/charts".into())` for the
-    /// guest's evaluator to see the mount.
+    /// As [`invoke`](Self::invoke), but preopens any extra dirs the
+    /// Package's deps need:
     ///
-    /// `charts_host_dir` is typically the tempdir returned by
-    /// [`akua_core::stdlib::materialize_charts`]. It stays on the
-    /// host until this call returns; the WASI layer holds its own
-    /// file-descriptor handle while the guest runs.
+    /// - `charts_host_dir` (when set): the synthesized
+    ///   [`akua_core::stdlib::materialize_charts`] tempdir, mounted
+    ///   read-only at the guest path `/charts`. The Render request's
+    ///   `charts_pkg_path` must be `Some("/charts".into())` for the
+    ///   guest's evaluator to see the mount.
+    /// - `kcl_pkgs`: each entry is `(host_dir, guest_path)` for one
+    ///   upstream KCL ecosystem package. The Render request's
+    ///   `kcl_pkgs` map carries `alias → guest_path` so the worker
+    ///   registers a matching `ExternalPkg` per dep.
+    ///
+    /// All preopens stay alive until this call returns; the WASI
+    /// layer holds its own file-descriptor handles while the guest
+    /// runs.
+    pub fn invoke_with_deps(
+        &self,
+        req: &WorkerRequest,
+        limits: ResourceLimits,
+        charts_host_dir: Option<&std::path::Path>,
+        kcl_pkgs: &[(std::path::PathBuf, String)],
+    ) -> Result<WorkerResponse, WorkerError> {
+        self.invoke_inner(req, limits, charts_host_dir, kcl_pkgs)
+    }
+
+    /// Backwards-compatible wrapper. New callers should prefer
+    /// [`invoke_with_deps`](Self::invoke_with_deps).
     pub fn invoke_with_charts(
         &self,
         req: &WorkerRequest,
         limits: ResourceLimits,
         charts_host_dir: &std::path::Path,
     ) -> Result<WorkerResponse, WorkerError> {
-        self.invoke_inner(req, limits, Some(charts_host_dir))
+        self.invoke_inner(req, limits, Some(charts_host_dir), &[])
     }
 
     fn invoke_inner(
@@ -275,6 +300,7 @@ impl RenderHost {
         req: &WorkerRequest,
         limits: ResourceLimits,
         charts_preopen: Option<&std::path::Path>,
+        kcl_pkg_preopens: &[(std::path::PathBuf, String)],
     ) -> Result<WorkerResponse, WorkerError> {
         let req_bytes = serde_json::to_vec(req).map_err(WorkerError::EncodeRequest)?;
 
@@ -315,6 +341,18 @@ impl RenderHost {
                 wasmtime_wasi::FilePerms::READ,
             )
             .map_err(|e| WorkerError::Wasmtime(format!("preopen charts: {e}")))?;
+        }
+        // KCL ecosystem packages — one preopen per upstream dep at
+        // its guest path. The render request's `kcl_pkgs` map names
+        // each as an ExternalPkg in the worker's KCL evaluator.
+        for (host_dir, guest_path) in kcl_pkg_preopens {
+            wasi.preopened_dir(
+                host_dir,
+                guest_path,
+                wasmtime_wasi::DirPerms::READ,
+                wasmtime_wasi::FilePerms::READ,
+            )
+            .map_err(|e| WorkerError::Wasmtime(format!("preopen kcl pkg `{guest_path}`: {e}")))?;
         }
 
         let wasi_ctx = wasi.build_p1();
@@ -639,6 +677,7 @@ mod tests {
                     source: "x = 42\ngreeting = \"hello\"\n".into(),
                     inputs: None,
                     charts_pkg_path: None,
+                    kcl_pkgs: std::collections::BTreeMap::new(),
                 },
                 ResourceLimits::default(),
             )
@@ -681,6 +720,7 @@ mod tests {
                     source: source.into(),
                     inputs: None,
                     charts_pkg_path: None,
+                    kcl_pkgs: std::collections::BTreeMap::new(),
                 },
                 ResourceLimits::default(),
             )
@@ -727,6 +767,7 @@ mod tests {
                     source: source.into(),
                     inputs: None,
                     charts_pkg_path: None,
+                    kcl_pkgs: std::collections::BTreeMap::new(),
                 },
                 ResourceLimits::default(),
             )
@@ -758,6 +799,7 @@ mod tests {
                     source: source.into(),
                     inputs: Some(inputs),
                     charts_pkg_path: None,
+                    kcl_pkgs: std::collections::BTreeMap::new(),
                 },
                 ResourceLimits::default(),
             )
@@ -789,6 +831,7 @@ mod tests {
                     source: "this is not valid kcl".into(),
                     inputs: None,
                     charts_pkg_path: None,
+                    kcl_pkgs: std::collections::BTreeMap::new(),
                 },
                 ResourceLimits::default(),
             )
