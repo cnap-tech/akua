@@ -3,8 +3,30 @@ name: CI
 on:
   push:
     branches: [main]
+    # Skip for pure-doc / marketing-site / install-script changes —
+    # these touch nothing the Rust or SDK build cares about.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'site/**'
+      - 'scripts/install.sh'
+      - 'scripts/install.ps1'
+      - '.github/workflows/pages.yml'
+      - '.github/CODEOWNERS'
+      - '.gitignore'
+      - 'LICENSE*'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'site/**'
+      - 'scripts/install.sh'
+      - 'scripts/install.ps1'
+      - '.github/workflows/pages.yml'
+      - '.github/CODEOWNERS'
+      - '.gitignore'
+      - 'LICENSE*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
