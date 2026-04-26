@@ -46,15 +46,15 @@ fn fetches_public_helm_oci_chart() {
         Err(e) => panic!("unexpected fetch error: {e}"),
     };
 
-    assert!(fetched.chart_dir.join("Chart.yaml").is_file());
+    assert!(fetched.root_dir.join("Chart.yaml").is_file());
     assert!(fetched.blob_digest.starts_with("sha256:"));
-    let chart = std::fs::read_to_string(fetched.chart_dir.join("Chart.yaml")).unwrap();
+    let chart = std::fs::read_to_string(fetched.root_dir.join("Chart.yaml")).unwrap();
     assert!(chart.contains("name: podinfo"), "Chart.yaml: {chart}");
 
     // Second call must be a cache hit — no network, same digest.
     let cached =
         oci_fetcher::fetch(OCI_REF, VERSION, cache.path(), Some(&fetched.blob_digest)).unwrap();
-    assert_eq!(cached.chart_dir, fetched.chart_dir);
+    assert_eq!(cached.root_dir, fetched.root_dir);
     assert_eq!(cached.blob_digest, fetched.blob_digest);
 }
 

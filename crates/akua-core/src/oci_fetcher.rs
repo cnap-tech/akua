@@ -1,10 +1,16 @@
-//! Fetch Helm charts from OCI registries into a local content-addressed
-//! cache. Phase 2b slice B.
+//! Fetch OCI-distributed packages into a local content-addressed
+//! cache. Two artifact families today:
+//!
+//! - **Helm charts** — `application/vnd.cncf.helm.chart.content.v1.tar+gzip`,
+//!   the canonical helm-v3+ format.
+//! - **KCL ecosystem packages** — `application/vnd.oci.image.layer.v1.tar`
+//!   (plain tar) carrying `org.kcllang.package.*` (or legacy
+//!   `org.kclpkg.package.*`) annotations on the manifest. Published by
+//!   `kpm push` and consumed transparently by `import <name>` in a
+//!   Package's KCL source. See `examples/10-kcl-ecosystem/` for a
+//!   worked example.
 //!
 //! ## Protocol summary
-//!
-//! An OCI artifact (helm's chart format since helm-v3) lives under a
-//! registry-repo-tag triple:
 //!
 //! ```text
 //! oci://ghcr.io/grafana/helm-charts/grafana:7.3.0
@@ -14,29 +20,25 @@
 //! Two HTTPS GETs, per the distribution spec:
 //!
 //! 1. `/v2/<repo>/manifests/<tag>` with
-//!    `Accept: application/vnd.oci.image.manifest.v1+json` →
-//!    JSON manifest listing layers.
-//! 2. Pick the layer whose `mediaType` is
-//!    `application/vnd.cncf.helm.chart.content.v1.tar+gzip` → its
-//!    `digest` is the chart tarball's sha256.
-//! 3. `/v2/<repo>/blobs/<digest>` → tarball bytes.
+//!    `Accept: application/vnd.oci.image.manifest.v1+json` → JSON
+//!    manifest listing layers + (optional) `annotations`.
+//! 2. Pick the layer matching the artifact family — Helm by media type,
+//!    KCL by media type *and* manifest annotations.
+//! 3. `/v2/<repo>/blobs/<digest>` → the tarball bytes (gzipped for
+//!    Helm, plain for KCL).
 //!
-//! That tarball is the *same shape* Helm produces via `helm package` —
-//! a directory with `Chart.yaml` + `values.yaml` + `templates/` at the
-//! top level, wrapped in a single directory named after the chart.
-//!
-//! ## Scope (Phase 2b slice B)
+//! ## Scope
 //!
 //! - Public registries (ghcr.io, registry-1.docker.io, quay.io). All
 //!   three use `WWW-Authenticate: Bearer` on the initial manifest
 //!   request; we do the anonymous token dance transparently.
-//! - No private repos (user-supplied credentials = slice B+).
-//! - No multi-layer charts (every helm chart we've seen is one layer).
-//!
-//! Private-repo auth (reading `~/.docker/config.json` or prompting for
-//! credentials) lives in a follow-up slice; this one handles `Err(
-//! AuthRequired)` when the registry demands credentials we don't have.
+//! - User-supplied credentials via `~/.config/akua/auth.toml` and
+//!   `~/.docker/config.json`; on miss the fetch surfaces
+//!   [`OciFetchError::AuthRequired`].
+//! - One-layer artifacts only — every Helm chart and KCL module
+//!   we've seen is single-layer.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -51,6 +53,19 @@ use crate::oci_transport::{
 /// Media type the helm-v3+ OCI chart format uses for the chart blob.
 const HELM_CHART_LAYER_MEDIA_TYPE: &str = "application/vnd.cncf.helm.chart.content.v1.tar+gzip";
 
+/// Media type kpm uses for KCL ecosystem packages (plain tar). The
+/// manifest is identified as a *KCL* package via the
+/// `KCL_PACKAGE_ANNOTATION_KEYS` annotations — this media type alone
+/// is too generic (other artifact types also use it).
+const KCL_LAYER_MEDIA_TYPE: &str = "application/vnd.oci.image.layer.v1.tar";
+
+/// Annotation keys kpm stamps onto KCL package manifests. `org.kcllang.*`
+/// is the current canonical form (kpm 0.10+); `org.kclpkg.*` is the
+/// older form some packages still publish under. Presence of either on
+/// the manifest's `annotations` map is the kind discriminator.
+const KCL_PACKAGE_ANNOTATION_KEYS: &[&str] =
+    &["org.kcllang.package.name", "org.kclpkg.package.name"];
+
 /// OCI image manifest media type. Some registries (ghcr.io with
 /// compatibility mode, ECR) still serve `application/vnd.docker.*`
 /// instead — we accept both in the request headers.
@@ -59,16 +74,44 @@ const OCI_MANIFEST_MEDIA_TYPES: &[&str] = &[
     "application/vnd.docker.distribution.manifest.v2+json",
 ];
 
+/// Which artifact family a fetched OCI manifest is. Carried through to
+/// the resolver so the render pipeline knows how to materialize the
+/// resulting cache directory (Helm = a chart hand to `helm.template`;
+/// KCL = an `ExternalPkg` registered with the KCL evaluator).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageKind {
+    HelmChart,
+    KclModule,
+}
+
+/// Decompression flavour for the layer blob. Tied 1:1 to `PackageKind`
+/// today but kept distinct because the kind is *what* the artifact is
+/// while the format is *how* the bytes are framed — they could diverge
+/// (e.g. a future KCL gzip flavour) without changing the kind enum.
+#[derive(Debug, Clone, Copy)]
+enum ArchiveFormat {
+    GzipTar,
+    PlainTar,
+}
+
 /// Result of a successful fetch. The tarball has been pulled, the
-/// digest verified, and the chart directory lives at `chart_dir`
-/// (containing `Chart.yaml` at the root).
+/// digest verified, and the unpacked tree lives at `root_dir`
+/// (containing `Chart.yaml` for Helm or `kcl.mod` for KCL).
 #[derive(Debug, Clone)]
-pub struct FetchedChart {
-    /// Absolute path to the unpacked chart root (contains `Chart.yaml`).
-    pub chart_dir: PathBuf,
+pub struct FetchedArtifact {
+    /// Absolute path to the unpacked package root.
+    pub root_dir: PathBuf,
     /// sha256 of the pulled blob, prefixed `sha256:`.
     pub blob_digest: String,
+    /// Whether this is a Helm chart or a KCL package — the resolver
+    /// needs to know to route it to the right consumer.
+    pub kind: PackageKind,
 }
+
+/// Backwards-compatible alias. Retained so external callers that named
+/// the type `FetchedChart` keep compiling; new code should use
+/// [`FetchedArtifact`] directly.
+pub type FetchedChart = FetchedArtifact;
 
 #[derive(Debug, thiserror::Error)]
 pub enum OciFetchError {
@@ -120,7 +163,7 @@ pub enum OciFetchError {
         detail: String,
     },
 
-    #[error("manifest for `{oci_ref}:{version}` has no helm chart layer (media type {HELM_CHART_LAYER_MEDIA_TYPE})")]
+    #[error("manifest for `{oci_ref}:{version}` has no recognised package layer — expected helm `{HELM_CHART_LAYER_MEDIA_TYPE}` or KCL `{KCL_LAYER_MEDIA_TYPE}` with `org.kcllang.package.*` annotations")]
     NoChartLayer { oci_ref: String, version: String },
 
     #[error("pulled blob digest `{actual}` doesn't match layer-declared `{declared}`")]
@@ -150,10 +193,14 @@ pub enum OciFetchError {
 
 // --- Manifest shape -------------------------------------------------------
 
-/// Subset of the OCI image manifest we actually use.
+/// Subset of the OCI image manifest we actually use. `annotations` is
+/// load-bearing for KCL-package detection — kpm doesn't ship a unique
+/// layer media type, only manifest annotations naming the package.
 #[derive(Debug, Deserialize)]
 struct OciManifest {
     layers: Vec<OciLayer>,
+    #[serde(default)]
+    annotations: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,21 +212,81 @@ struct OciLayer {
     size: u64,
 }
 
+/// Identify which package family a manifest carries and where in its
+/// `layers` the bytes live. Helm wins ties (a manifest tagged with both
+/// kpm annotations *and* a Helm layer would be served as Helm).
+fn detect_package(manifest: &OciManifest) -> Option<(PackageKind, &OciLayer, ArchiveFormat)> {
+    if let Some(layer) = manifest
+        .layers
+        .iter()
+        .find(|l| l.media_type == HELM_CHART_LAYER_MEDIA_TYPE)
+    {
+        return Some((PackageKind::HelmChart, layer, ArchiveFormat::GzipTar));
+    }
+    let is_kcl = KCL_PACKAGE_ANNOTATION_KEYS
+        .iter()
+        .any(|k| manifest.annotations.contains_key(*k));
+    if is_kcl {
+        if let Some(layer) = manifest
+            .layers
+            .iter()
+            .find(|l| l.media_type == KCL_LAYER_MEDIA_TYPE)
+        {
+            return Some((PackageKind::KclModule, layer, ArchiveFormat::PlainTar));
+        }
+    }
+    None
+}
+
+/// Detect which kind a *cached* package directory is, from the marker
+/// files visible at its root (or one level down — single-dir tarball).
+/// Returns `None` if no marker is found, which signals "cache miss"
+/// to the caller's offline path.
+fn detect_cached_kind(dir: &Path) -> Option<PackageKind> {
+    if has_marker(dir, "Chart.yaml") {
+        Some(PackageKind::HelmChart)
+    } else if has_marker(dir, "kcl.mod") {
+        Some(PackageKind::KclModule)
+    } else {
+        None
+    }
+}
+
+/// True if `marker` lives directly at `dir` or in exactly one
+/// immediate subdirectory of `dir`. Matches the two layouts both Helm
+/// (`<chart>/Chart.yaml`) and kpm (`<pkg>/kcl.mod`) ship.
+fn has_marker(dir: &Path, marker: &str) -> bool {
+    if dir.join(marker).is_file() {
+        return true;
+    }
+    std::fs::read_dir(dir)
+        .ok()
+        .map(|rd| {
+            rd.flatten().any(|e| {
+                let p = e.path();
+                p.is_dir() && p.join(marker).is_file()
+            })
+        })
+        .unwrap_or(false)
+}
+
 // --- Public entry point ---------------------------------------------------
 
-/// Cache-hit lookup only. Returns `Some(FetchedChart)` when the
+/// Cache-hit lookup only. Returns `Some(FetchedArtifact)` when the
 /// content-addressed cache already has the blob, `None` otherwise.
 /// Used by the resolver's offline path so air-gapped renders succeed
 /// as long as `akua add` populated the cache earlier.
-pub fn fetch_from_cache(cache_root: &Path, digest: &str) -> Option<FetchedChart> {
+///
+/// The kind is detected from cached contents (Chart.yaml vs kcl.mod)
+/// — callers don't need to remember it.
+pub fn fetch_from_cache(cache_root: &Path, digest: &str) -> Option<FetchedArtifact> {
     let cached = cache_dir_for(cache_root, digest);
-    if !has_chart(&cached) {
-        return None;
-    }
-    let chart_dir = find_chart_root(&cached).ok()?;
-    Some(FetchedChart {
-        chart_dir,
+    let kind = detect_cached_kind(&cached)?;
+    let root_dir = find_package_root(&cached, kind).ok()?;
+    Some(FetchedArtifact {
+        root_dir,
         blob_digest: digest.to_string(),
+        kind,
     })
 }
 
@@ -218,7 +325,7 @@ pub fn fetch(
     version: &str,
     cache_root: &Path,
     expected_digest: Option<&str>,
-) -> Result<FetchedChart, OciFetchError> {
+) -> Result<FetchedArtifact, OciFetchError> {
     let creds = oci_auth::CredsStore::load().map_err(|source| OciFetchError::AuthConfig {
         detail: source.to_string(),
     })?;
@@ -241,7 +348,7 @@ pub fn fetch_with_opts(
     version: &str,
     cache_root: &Path,
     opts: &FetchOpts<'_>,
-) -> Result<FetchedChart, OciFetchError> {
+) -> Result<FetchedArtifact, OciFetchError> {
     let expected_digest = opts.expected_digest;
     let creds = opts.creds;
     let parsed = parse_ref(oci_ref)?;
@@ -251,11 +358,12 @@ pub fn fetch_with_opts(
     // by exactly the digest we'd otherwise be pulling.
     if let Some(digest) = expected_digest {
         let cached = cache_dir_for(cache_root, digest);
-        if has_chart(&cached) {
-            let chart_dir = find_chart_root(&cached)?;
-            return Ok(FetchedChart {
-                chart_dir,
+        if let Some(kind) = detect_cached_kind(&cached) {
+            let root_dir = find_package_root(&cached, kind)?;
+            return Ok(FetchedArtifact {
+                root_dir,
                 blob_digest: digest.to_string(),
+                kind,
             });
         }
     }
@@ -295,18 +403,16 @@ pub fn fetch_with_opts(
         )?;
     }
 
-    let chart_layer = manifest
-        .layers
-        .into_iter()
-        .find(|l| l.media_type == HELM_CHART_LAYER_MEDIA_TYPE)
-        .ok_or_else(|| OciFetchError::NoChartLayer {
+    let (kind, layer, format) =
+        detect_package(&manifest).ok_or_else(|| OciFetchError::NoChartLayer {
             oci_ref: oci_ref.to_string(),
             version: version.to_string(),
         })?;
+    let layer_digest = layer.digest.clone();
 
     let blob_url = format!(
         "https://{}/v2/{}/blobs/{}",
-        parsed.registry, parsed.repository, chart_layer.digest
+        parsed.registry, parsed.repository, layer_digest
     );
     let blob_bytes = get_blob(
         &client,
@@ -319,10 +425,10 @@ pub fn fetch_with_opts(
     // Verify: what the registry handed us must match the layer's
     // self-declared digest, AND (if the lockfile pins one) match that.
     let actual_digest = format!("sha256:{}", hex_encode(&Sha256::digest(&blob_bytes)));
-    if actual_digest != chart_layer.digest {
+    if actual_digest != layer_digest {
         return Err(OciFetchError::ManifestDigestMismatch {
             actual: actual_digest,
-            declared: chart_layer.digest,
+            declared: layer_digest,
         });
     }
     if let Some(expected) = expected_digest {
@@ -337,16 +443,18 @@ pub fn fetch_with_opts(
     }
 
     let target = cache_dir_for(cache_root, &actual_digest);
-    extract_blob(&blob_bytes, &target)?;
+    extract_blob(&blob_bytes, &target, format)?;
 
-    // Helm charts tar a single top-level `<chart-name>/` dir. Return
-    // the directory that contains `Chart.yaml` so `chart_dir` can be
-    // handed directly to `helm-engine-wasm::render_dir`.
-    let chart_dir = find_chart_root(&target)?;
+    // Helm charts tar a single top-level `<chart-name>/` dir; KCL
+    // packages do the same with `<pkg-name>/`. `find_package_root`
+    // descends into either layout and returns the dir holding the
+    // marker file (`Chart.yaml` / `kcl.mod`).
+    let root_dir = find_package_root(&target, kind)?;
 
-    Ok(FetchedChart {
-        chart_dir,
+    Ok(FetchedArtifact {
+        root_dir,
         blob_digest: actual_digest,
+        kind,
     })
 }
 
@@ -360,24 +468,18 @@ fn cache_dir_for(root: &Path, digest: &str) -> PathBuf {
     root.join("sha256").join(hex)
 }
 
-fn has_chart(dir: &Path) -> bool {
-    dir.join("Chart.yaml").is_file()
-        || std::fs::read_dir(dir)
-            .ok()
-            .map(|rd| {
-                rd.flatten().any(|e| {
-                    let p = e.path();
-                    p.is_dir() && p.join("Chart.yaml").is_file()
-                })
-            })
-            .unwrap_or(false)
-}
-
-/// Return the directory inside `cache_dir` that holds `Chart.yaml`.
-/// Handles both tar layouts: `<chart>/Chart.yaml` (common — helm v3+
-/// package output) and direct `Chart.yaml` at root (rarer).
-fn find_chart_root(cache_dir: &Path) -> Result<PathBuf, OciFetchError> {
-    if cache_dir.join("Chart.yaml").is_file() {
+/// Return the directory inside `cache_dir` that holds the
+/// kind-appropriate marker (`Chart.yaml` for Helm; `kcl.mod` for KCL).
+/// Handles both tar layouts: marker at root *or* in a single
+/// `<name>/` wrapper subdirectory. Fails with [`OciFetchError::Extract`]
+/// when the cached tree is missing the expected marker entirely —
+/// usually means the cache slot was clobbered by a different artifact.
+fn find_package_root(cache_dir: &Path, kind: PackageKind) -> Result<PathBuf, OciFetchError> {
+    let marker = match kind {
+        PackageKind::HelmChart => "Chart.yaml",
+        PackageKind::KclModule => "kcl.mod",
+    };
+    if cache_dir.join(marker).is_file() {
         return Ok(cache_dir.to_path_buf());
     }
     let rd = std::fs::read_dir(cache_dir).map_err(|source| OciFetchError::Io {
@@ -386,12 +488,12 @@ fn find_chart_root(cache_dir: &Path) -> Result<PathBuf, OciFetchError> {
     })?;
     for entry in rd.flatten() {
         let p = entry.path();
-        if p.is_dir() && p.join("Chart.yaml").is_file() {
+        if p.is_dir() && p.join(marker).is_file() {
             return Ok(p);
         }
     }
     Err(OciFetchError::Extract(format!(
-        "no Chart.yaml found under {}",
+        "no {marker} found under {}",
         cache_dir.display()
     )))
 }
@@ -552,13 +654,12 @@ fn get_blob(
 
 // --- Tarball extraction ---------------------------------------------------
 
-/// Unpack a helm chart tarball (`.tar.gz`) into `dest`. Strips `..`
-/// entries defensively — tar's unpacker in rustland already guards
-/// against absolute/escape paths but we keep the belt-and-suspenders.
-fn extract_blob(bytes: &[u8], dest: &Path) -> Result<(), OciFetchError> {
-    // Write to a temp dir first, then atomically rename into place —
-    // avoids partial state when two parallel akua processes race on
-    // the same chart.
+/// Unpack an OCI layer tarball into `dest`. `format` selects whether
+/// to decompress (Helm = `.tar.gz`) or unpack the bytes directly (KCL
+/// kpm = plain `.tar`). Tar's unpacker guards against absolute/escape
+/// paths internally; we still write to a staging dir and atomically
+/// rename so concurrent akua processes don't see partial state.
+fn extract_blob(bytes: &[u8], dest: &Path, format: ArchiveFormat) -> Result<(), OciFetchError> {
     let parent = dest.parent().ok_or_else(|| {
         OciFetchError::Extract(format!("cache path has no parent: {}", dest.display()))
     })?;
@@ -579,13 +680,25 @@ fn extract_blob(bytes: &[u8], dest: &Path) -> Result<(), OciFetchError> {
             source,
         })?;
 
-    let gz = flate2::read::GzDecoder::new(bytes);
-    let mut archive = tar::Archive::new(gz);
-    archive.set_overwrite(true);
-    archive.set_preserve_permissions(false);
-    archive
-        .unpack(staging.path())
-        .map_err(|e| OciFetchError::Extract(e.to_string()))?;
+    match format {
+        ArchiveFormat::GzipTar => {
+            let gz = flate2::read::GzDecoder::new(bytes);
+            let mut archive = tar::Archive::new(gz);
+            archive.set_overwrite(true);
+            archive.set_preserve_permissions(false);
+            archive
+                .unpack(staging.path())
+                .map_err(|e| OciFetchError::Extract(e.to_string()))?;
+        }
+        ArchiveFormat::PlainTar => {
+            let mut archive = tar::Archive::new(bytes);
+            archive.set_overwrite(true);
+            archive.set_preserve_permissions(false);
+            archive
+                .unpack(staging.path())
+                .map_err(|e| OciFetchError::Extract(e.to_string()))?;
+        }
+    }
 
     // Atomic move into the final content-addressed slot. Fall back to
     // a recursive copy on rename error — common causes are cross-
@@ -661,13 +774,13 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let dest = tmp.path().join("sha256").join("deadbeef");
-        extract_blob(&buf, &dest).unwrap();
+        extract_blob(&buf, &dest, ArchiveFormat::GzipTar).unwrap();
         assert!(
             dest.join("nginx/Chart.yaml").is_file(),
             "Chart.yaml at {:?}",
             dest
         );
-        let root = find_chart_root(&dest).unwrap();
+        let root = find_package_root(&dest, PackageKind::HelmChart).unwrap();
         assert!(root.ends_with("nginx"));
     }
 
@@ -691,7 +804,101 @@ mod tests {
 
         let tmp = tempfile::tempdir().unwrap();
         let dest = tmp.path().join("sha256").join("deadbeef");
-        extract_blob(&buf, &dest).unwrap();
-        extract_blob(&buf, &dest).expect("second call must be a no-op");
+        extract_blob(&buf, &dest, ArchiveFormat::GzipTar).unwrap();
+        extract_blob(&buf, &dest, ArchiveFormat::GzipTar).expect("second call must be a no-op");
+    }
+
+    /// Round-trip a kpm-style plain tar carrying a `kcl.mod`.
+    /// `find_package_root` should descend into the wrapping `<pkg>/`
+    /// directory and `detect_cached_kind` should label the cache entry
+    /// as `KclModule`.
+    #[test]
+    fn extract_blob_unpacks_kcl_plain_tar() {
+        let mut buf = Vec::new();
+        {
+            let mut tar_b = tar::Builder::new(&mut buf);
+            let mut hdr = tar::Header::new_gnu();
+
+            let mod_body = b"[package]\nname = \"k8s\"\nversion = \"1.31.2\"\n";
+            hdr.set_size(mod_body.len() as u64);
+            hdr.set_mode(0o644);
+            hdr.set_cksum();
+            tar_b
+                .append_data(&mut hdr.clone(), "k8s/kcl.mod", &mod_body[..])
+                .unwrap();
+
+            let kcl_body = b"schema Deployment:\n    name: str\n";
+            hdr.set_size(kcl_body.len() as u64);
+            hdr.set_cksum();
+            tar_b
+                .append_data(&mut hdr, "k8s/api/apps/v1/deployment.k", &kcl_body[..])
+                .unwrap();
+
+            tar_b.finish().unwrap();
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("sha256").join("c0ffee");
+        extract_blob(&buf, &dest, ArchiveFormat::PlainTar).unwrap();
+        assert!(dest.join("k8s/kcl.mod").is_file());
+        let root = find_package_root(&dest, PackageKind::KclModule).unwrap();
+        assert!(root.ends_with("k8s"));
+        assert_eq!(detect_cached_kind(&dest), Some(PackageKind::KclModule));
+    }
+
+    #[test]
+    fn detect_package_prefers_helm_then_kcl_via_annotation() {
+        // Manifest with both Helm + KCL layers + KCL annotation —
+        // Helm wins. (We don't expect this in the wild, but it's the
+        // documented tie-break.)
+        let manifest = OciManifest {
+            layers: vec![
+                OciLayer {
+                    media_type: HELM_CHART_LAYER_MEDIA_TYPE.into(),
+                    digest: "sha256:helm".into(),
+                    size: 1,
+                },
+                OciLayer {
+                    media_type: KCL_LAYER_MEDIA_TYPE.into(),
+                    digest: "sha256:kcl".into(),
+                    size: 1,
+                },
+            ],
+            annotations: BTreeMap::from([(
+                "org.kcllang.package.name".to_string(),
+                "k8s".to_string(),
+            )]),
+        };
+        let (kind, layer, format) = detect_package(&manifest).unwrap();
+        assert_eq!(kind, PackageKind::HelmChart);
+        assert_eq!(layer.digest, "sha256:helm");
+        assert!(matches!(format, ArchiveFormat::GzipTar));
+
+        // KCL-only: plain-tar layer + annotation.
+        let manifest = OciManifest {
+            layers: vec![OciLayer {
+                media_type: KCL_LAYER_MEDIA_TYPE.into(),
+                digest: "sha256:kcl".into(),
+                size: 1,
+            }],
+            annotations: BTreeMap::from([(
+                "org.kclpkg.package.name".to_string(),
+                "legacy".to_string(),
+            )]),
+        };
+        let (kind, _, format) = detect_package(&manifest).unwrap();
+        assert_eq!(kind, PackageKind::KclModule);
+        assert!(matches!(format, ArchiveFormat::PlainTar));
+
+        // Plain tar without KCL annotation → not a package we know.
+        let manifest = OciManifest {
+            layers: vec![OciLayer {
+                media_type: KCL_LAYER_MEDIA_TYPE.into(),
+                digest: "sha256:other".into(),
+                size: 1,
+            }],
+            annotations: BTreeMap::new(),
+        };
+        assert!(detect_package(&manifest).is_none());
     }
 }
