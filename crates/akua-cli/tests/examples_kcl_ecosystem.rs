@@ -1,11 +1,13 @@
-//! End-to-end render of `examples/10-kcl-ecosystem/` — proves the
-//! KCL OCI fetch + ExternalPkg wiring by composing a typed Deployment
-//! against the upstream `kcl-lang/k8s` schema bundle.
+//! End-to-end render of `examples/10-kcl-ecosystem/` against the live
+//! `oci://ghcr.io/kcl-lang/k8s` registry. Proves the KCL OCI fetch +
+//! ExternalPkg wiring by composing a typed Deployment against the
+//! upstream schema bundle.
 //!
-//! The example's akua.toml lists `oci://ghcr.io/kcl-lang/k8s@1.31.2`
-//! with a `replace = { path = "./vendor/k8s" }` override so this test
-//! runs offline. Drop the replace + run `akua render` to exercise the
-//! live OCI path.
+//! First run pulls the layer from ghcr.io into `$XDG_CACHE_HOME/akua/oci/`;
+//! subsequent runs (including subsequent CI runs that share the cache)
+//! cache-hit and skip the network. The committed `akua.lock` digest
+//! pins the exact blob the test resolves, so a drifted upstream tag
+//! fails fast instead of silently picking up new bytes.
 //!
 //! Skips cleanly if the render-worker module hasn't been built yet.
 
@@ -14,6 +16,8 @@
 use std::path::{Path, PathBuf};
 
 use akua_cli::verbs::render::render_in_worker;
+use akua_core::chart_resolver::ResolverOptions;
+use akua_core::lock_file::{AkuaLock, LockedPackage};
 use akua_core::{chart_resolver, AkuaManifest, PackageK};
 
 fn example_dir() -> PathBuf {
@@ -34,17 +38,32 @@ fn renders_kcl_ecosystem_dep_against_golden() {
         "example 10 must declare the k8s dep"
     );
 
-    let resolved = chart_resolver::resolve(&manifest, &dir).expect("resolve k8s pkg");
+    // Mirror the production `akua render` flow: load akua.lock for
+    // digest pinning, run the resolver online so first-time pulls
+    // populate `~/.cache/akua/oci/sha256/<digest>/` from ghcr.io.
+    let lock = AkuaLock::load(&dir).expect("load akua.lock");
+    let expected_digests = lock
+        .packages
+        .into_iter()
+        .filter(LockedPackage::is_oci)
+        .map(|p| (p.name, p.digest))
+        .collect();
+    let opts = ResolverOptions {
+        offline: false,
+        cache_root: None,
+        expected_digests,
+        cosign_public_key_pem: None,
+    };
+    let resolved =
+        chart_resolver::resolve_with_options(&manifest, &dir, &opts).expect("resolve k8s pkg");
     let k8s = resolved.entries.get("k8s").expect("k8s entry");
     assert_eq!(
         k8s.kind,
         chart_resolver::PackageKind::KclModule,
-        "vendor tree has kcl.mod → resolver must label it KclModule"
+        "kpm-published artifact must be detected as KclModule"
     );
     assert!(k8s.abs_path.is_absolute());
-    assert!(k8s.abs_path.ends_with("vendor/k8s"));
-    // Marker file confirms the resolver pointed us at the package root,
-    // not the parent vendor/ dir.
+    // Marker file confirms the resolver pointed us at the package root.
     assert!(k8s.abs_path.join("kcl.mod").is_file());
 
     let package = PackageK::load(&dir.join("package.k")).expect("load package.k");

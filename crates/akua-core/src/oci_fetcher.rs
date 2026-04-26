@@ -212,16 +212,28 @@ struct OciLayer {
     size: u64,
 }
 
+/// One package family detected on a manifest. Tied 1:1 to the layer
+/// + archive format the registry will hand back.
+struct DetectedLayer<'a> {
+    kind: PackageKind,
+    layer: &'a OciLayer,
+    format: ArchiveFormat,
+}
+
 /// Identify which package family a manifest carries and where in its
 /// `layers` the bytes live. Helm wins ties (a manifest tagged with both
 /// kpm annotations *and* a Helm layer would be served as Helm).
-fn detect_package(manifest: &OciManifest) -> Option<(PackageKind, &OciLayer, ArchiveFormat)> {
+fn detect_package(manifest: &OciManifest) -> Option<DetectedLayer<'_>> {
     if let Some(layer) = manifest
         .layers
         .iter()
         .find(|l| l.media_type == HELM_CHART_LAYER_MEDIA_TYPE)
     {
-        return Some((PackageKind::HelmChart, layer, ArchiveFormat::GzipTar));
+        return Some(DetectedLayer {
+            kind: PackageKind::HelmChart,
+            layer,
+            format: ArchiveFormat::GzipTar,
+        });
     }
     let is_kcl = KCL_PACKAGE_ANNOTATION_KEYS
         .iter()
@@ -232,42 +244,40 @@ fn detect_package(manifest: &OciManifest) -> Option<(PackageKind, &OciLayer, Arc
             .iter()
             .find(|l| l.media_type == KCL_LAYER_MEDIA_TYPE)
         {
-            return Some((PackageKind::KclModule, layer, ArchiveFormat::PlainTar));
+            return Some(DetectedLayer {
+                kind: PackageKind::KclModule,
+                layer,
+                format: ArchiveFormat::PlainTar,
+            });
         }
     }
     None
 }
 
-/// Detect which kind a *cached* package directory is, from the marker
-/// files visible at its root (or one level down — single-dir tarball).
-/// Returns `None` if no marker is found, which signals "cache miss"
-/// to the caller's offline path.
-fn detect_cached_kind(dir: &Path) -> Option<PackageKind> {
-    if has_marker(dir, "Chart.yaml") {
-        Some(PackageKind::HelmChart)
-    } else if has_marker(dir, "kcl.mod") {
-        Some(PackageKind::KclModule)
-    } else {
-        None
-    }
+/// Detect what kind a directory tree is, from the marker file at its
+/// root (or in a single wrapper subdir). Returns `None` when neither
+/// marker is found — signals cache miss / unrecognised tree.
+///
+/// Public so chart_resolver can route path/git deps without
+/// re-implementing the heuristic. The same logic answers two
+/// questions: "is this a recognised package?" (Some/None) and
+/// "which kind?" (the variant).
+pub fn detect_kind(dir: &Path) -> Option<PackageKind> {
+    detect_kind_at(dir, "Chart.yaml", PackageKind::HelmChart)
+        .or_else(|| detect_kind_at(dir, "kcl.mod", PackageKind::KclModule))
 }
 
-/// True if `marker` lives directly at `dir` or in exactly one
-/// immediate subdirectory of `dir`. Matches the two layouts both Helm
-/// (`<chart>/Chart.yaml`) and kpm (`<pkg>/kcl.mod`) ship.
-fn has_marker(dir: &Path, marker: &str) -> bool {
+fn detect_kind_at(dir: &Path, marker: &str, kind: PackageKind) -> Option<PackageKind> {
     if dir.join(marker).is_file() {
-        return true;
+        return Some(kind);
     }
-    std::fs::read_dir(dir)
-        .ok()
-        .map(|rd| {
-            rd.flatten().any(|e| {
-                let p = e.path();
-                p.is_dir() && p.join(marker).is_file()
-            })
+    let rd = std::fs::read_dir(dir).ok()?;
+    rd.flatten()
+        .find(|e| {
+            let p = e.path();
+            p.is_dir() && p.join(marker).is_file()
         })
-        .unwrap_or(false)
+        .map(|_| kind)
 }
 
 // --- Public entry point ---------------------------------------------------
@@ -281,7 +291,7 @@ fn has_marker(dir: &Path, marker: &str) -> bool {
 /// — callers don't need to remember it.
 pub fn fetch_from_cache(cache_root: &Path, digest: &str) -> Option<FetchedArtifact> {
     let cached = cache_dir_for(cache_root, digest);
-    let kind = detect_cached_kind(&cached)?;
+    let kind = detect_kind(&cached)?;
     let root_dir = find_package_root(&cached, kind).ok()?;
     Some(FetchedArtifact {
         root_dir,
@@ -358,7 +368,7 @@ pub fn fetch_with_opts(
     // by exactly the digest we'd otherwise be pulling.
     if let Some(digest) = expected_digest {
         let cached = cache_dir_for(cache_root, digest);
-        if let Some(kind) = detect_cached_kind(&cached) {
+        if let Some(kind) = detect_kind(&cached) {
             let root_dir = find_package_root(&cached, kind)?;
             return Ok(FetchedArtifact {
                 root_dir,
@@ -403,12 +413,11 @@ pub fn fetch_with_opts(
         )?;
     }
 
-    let (kind, layer, format) =
-        detect_package(&manifest).ok_or_else(|| OciFetchError::NoChartLayer {
-            oci_ref: oci_ref.to_string(),
-            version: version.to_string(),
-        })?;
-    let layer_digest = layer.digest.clone();
+    let detected = detect_package(&manifest).ok_or_else(|| OciFetchError::NoChartLayer {
+        oci_ref: oci_ref.to_string(),
+        version: version.to_string(),
+    })?;
+    let layer_digest = detected.layer.digest.clone();
 
     let blob_url = format!(
         "https://{}/v2/{}/blobs/{}",
@@ -443,13 +452,14 @@ pub fn fetch_with_opts(
     }
 
     let target = cache_dir_for(cache_root, &actual_digest);
-    extract_blob(&blob_bytes, &target, format)?;
+    extract_blob(&blob_bytes, &target, detected.format)?;
 
     // Helm charts tar a single top-level `<chart-name>/` dir; KCL
     // packages do the same with `<pkg-name>/`. `find_package_root`
     // descends into either layout and returns the dir holding the
     // marker file (`Chart.yaml` / `kcl.mod`).
-    let root_dir = find_package_root(&target, kind)?;
+    let root_dir = find_package_root(&target, detected.kind)?;
+    let kind = detected.kind;
 
     Ok(FetchedArtifact {
         root_dir,
@@ -810,7 +820,7 @@ mod tests {
 
     /// Round-trip a kpm-style plain tar carrying a `kcl.mod`.
     /// `find_package_root` should descend into the wrapping `<pkg>/`
-    /// directory and `detect_cached_kind` should label the cache entry
+    /// directory and `detect_kind` should label the cache entry
     /// as `KclModule`.
     #[test]
     fn extract_blob_unpacks_kcl_plain_tar() {
@@ -843,7 +853,7 @@ mod tests {
         assert!(dest.join("k8s/kcl.mod").is_file());
         let root = find_package_root(&dest, PackageKind::KclModule).unwrap();
         assert!(root.ends_with("k8s"));
-        assert_eq!(detect_cached_kind(&dest), Some(PackageKind::KclModule));
+        assert_eq!(detect_kind(&dest), Some(PackageKind::KclModule));
     }
 
     #[test]
@@ -869,10 +879,10 @@ mod tests {
                 "k8s".to_string(),
             )]),
         };
-        let (kind, layer, format) = detect_package(&manifest).unwrap();
-        assert_eq!(kind, PackageKind::HelmChart);
-        assert_eq!(layer.digest, "sha256:helm");
-        assert!(matches!(format, ArchiveFormat::GzipTar));
+        let detected = detect_package(&manifest).unwrap();
+        assert_eq!(detected.kind, PackageKind::HelmChart);
+        assert_eq!(detected.layer.digest, "sha256:helm");
+        assert!(matches!(detected.format, ArchiveFormat::GzipTar));
 
         // KCL-only: plain-tar layer + annotation.
         let manifest = OciManifest {
@@ -886,9 +896,9 @@ mod tests {
                 "legacy".to_string(),
             )]),
         };
-        let (kind, _, format) = detect_package(&manifest).unwrap();
-        assert_eq!(kind, PackageKind::KclModule);
-        assert!(matches!(format, ArchiveFormat::PlainTar));
+        let detected = detect_package(&manifest).unwrap();
+        assert_eq!(detected.kind, PackageKind::KclModule);
+        assert!(matches!(detected.format, ArchiveFormat::PlainTar));
 
         // Plain tar without KCL annotation → not a package we know.
         let manifest = OciManifest {

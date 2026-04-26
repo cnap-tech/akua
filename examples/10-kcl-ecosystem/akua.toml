@@ -2,15 +2,21 @@
 name    = "10-kcl-ecosystem"
 version = "0.1.0"
 edition = "akua.dev/v1alpha1"
+# kpm-published artifacts under `ghcr.io/kcl-lang/*` are not cosign-
+# signed today. Production workspaces pulling from a signed registry
+# should leave the default (`true`) on.
+strict_signing = false
 
 [dependencies]
 # Pull a real KCL ecosystem package — kpm publishes `kcl-lang/k8s` as a
-# typed schema bundle for every Kubernetes 1.x release. Same dep machinery
-# as Helm charts: digest-pinned in akua.lock, signature-verified on pull,
-# imported as `import k8s.api.<group>.<version>` inside package.k.
+# typed schema bundle for every Kubernetes 1.x release. Same dep
+# machinery as Helm charts: digest-pinned in akua.lock, signature-
+# verified on pull, imported as `import k8s.api.<group>.<version>`
+# inside package.k.
 #
-# `replace = { path = ... }` keeps CI hermetic — the repo vendors the
-# unpacked v1.31.2 release under ./vendor/k8s/ so render+golden tests
-# don't need network. Drop the `replace` entry to exercise the live OCI
-# pull path; `akua.lock` records the canonical oci:// either way.
-k8s = { oci = "oci://ghcr.io/kcl-lang/k8s", version = "1.31.2", replace = { path = "./vendor/k8s" } }
+# This example deliberately uses the live OCI ref (no `replace`) — the
+# render+golden test pulls from ghcr.io on first run and caches under
+# `$XDG_CACHE_HOME/akua/oci/sha256/<digest>/`. Subsequent runs are
+# cache hits with no network. akua.lock pins the canonical digest so
+# CI rejects any registry-side drift.
+k8s = { oci = "oci://ghcr.io/kcl-lang/k8s", version = "1.31.2" }

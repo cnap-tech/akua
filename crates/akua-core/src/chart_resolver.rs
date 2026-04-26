@@ -639,13 +639,10 @@ fn resolve_git(
         crate::lock_file::GIT_DIGEST_PREFIX,
         fetched.commit_sha
     );
-    // Same auto-detect as path deps — git-fetched repos are usually
-    // Helm charts; KCL packages on git surface a `kcl.mod` we honour.
-    let kind = if fetched.chart_dir.join("kcl.mod").is_file() {
-        PackageKind::KclModule
-    } else {
-        PackageKind::HelmChart
-    };
+    // Same auto-detect as path deps. Falls back to HelmChart for
+    // unrecognised trees — every existing path/git dep was a vendored
+    // Helm chart before KCL pkg support landed.
+    let kind = detect_dep_kind(&fetched.chart_dir);
     Ok(ResolvedChart {
         name: name.to_string(),
         abs_path: fetched.chart_dir,
@@ -769,6 +766,26 @@ pub fn merge_into_lock(lock: &mut crate::lock_file::AkuaLock, resolved: &Resolve
 
 /// Human-readable tag for a dep source. Used by `UnsupportedSource`'s
 /// `#[error(...)]` template.
+/// Pick the package kind for a path/git dep tree. Reuses the marker
+/// heuristic [`oci_fetcher::detect_kind`] applies to OCI cache trees,
+/// so all three resolver branches agree on what counts as a KCL
+/// package vs a Helm chart. Falls back to `HelmChart` for trees that
+/// match neither marker — the historical default for path-deps.
+fn detect_dep_kind(dir: &Path) -> PackageKind {
+    #[cfg(feature = "oci-fetch")]
+    {
+        crate::oci_fetcher::detect_kind(dir).unwrap_or(PackageKind::HelmChart)
+    }
+    #[cfg(not(feature = "oci-fetch"))]
+    {
+        if dir.join("kcl.mod").is_file() {
+            PackageKind::KclModule
+        } else {
+            PackageKind::HelmChart
+        }
+    }
+}
+
 fn source_kind_label(source: DependencySource) -> &'static str {
     match source {
         DependencySource::Oci => "oci://",
@@ -825,15 +842,7 @@ fn resolve_path(
         source: e,
     })?;
 
-    // Auto-detect KCL packages by their `kcl.mod` marker; everything
-    // else stays HelmChart for backwards compatibility (every existing
-    // path-dep is a vendored chart, and the `Chart.yaml` check would
-    // gate on a marker we don't strictly need to verify here).
-    let kind = if canon.join("kcl.mod").is_file() {
-        PackageKind::KclModule
-    } else {
-        PackageKind::HelmChart
-    };
+    let kind = detect_dep_kind(&canon);
 
     Ok(ResolvedChart {
         name: name.to_string(),

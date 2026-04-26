@@ -46,15 +46,18 @@ the single canonical thing it produces.
 
 ## 2. Imports
 
-An import brings one of three things into scope:
+An import brings one of four things into scope:
 
 | import form | purpose | pinned by |
 |---|---|---|
 | `import akua.<engine>` | a source-engine callable (`helm`, `rgd`, `kustomize`, `oci`) | the akua CLI version |
-| `import charts.<name>` | a typed source package previously added via `akua add` | `akua.toml` |
+| `import charts.<name>` | a typed Helm chart dep previously added via `akua add` (synthetic wrapper that exposes the chart path + a pre-bound `template` callable) | `akua.toml` |
+| `import <name>` | an upstream KCL ecosystem package (e.g. `import k8s.api.apps.v1` against `oci://ghcr.io/kcl-lang/k8s`) | `akua.toml` |
 | `import <local/path>` | a local KCL module within this package | the filesystem |
 
 Imports are resolved at build time against `akua.toml` (declared deps) and verified against `akua.lock` (digest + signature). Failed verification is a compile error. A missing pin is a compile error.
+
+Helm-chart deps and KCL-package deps both land in `[dependencies]` with the same `{ oci = "...", version = "..." }` shape; akua tells them apart from the manifest media type + `org.kcllang.package.*` annotations and routes them to the right consumer (Helm via the synthetic `charts.*` wrapper, KCL packages as direct `ExternalPkg` entries inside the render sandbox).
 
 Engine callables live at `akua.*`:
 

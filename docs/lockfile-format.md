@@ -240,6 +240,8 @@ Members inherit workspace dependencies; they may override in a member-local `aku
 
 akua's `akua.toml` is not the same as KCL's `kcl.mod`. We don't try to be. akua packages can contain a `kcl.mod` in their source tree for pure-KCL consumers who want to use upstream `kcl run` against the package directly; akua's resolver honors either file when it's unambiguous.
 
+**Pulling kpm-published packages.** OCI deps published by `kpm push` (e.g. everything under `ghcr.io/kcl-lang/*`) work transparently through the same `[dependencies]` shape Helm charts use. The fetcher detects the artifact family from the manifest's media type + `org.kcllang.package.*` annotations, unpacks the plain tar, and registers each as a typed `ExternalPkg` entry inside the wasmtime render sandbox — so a Package.k can write `import k8s.api.apps.v1` and have it resolve against the upstream schema bundle. See [examples/10-kcl-ecosystem/](../examples/10-kcl-ecosystem/) for a worked example.
+
 See [the broader architecture note](https://github.com/cnap-tech/cortex/blob/docs/cnap-masterplan/workspaces/robin/akua-masterplan.md) for the "akua is the outer package manager; kpm is the inner KCL-layer tool" framing.
 
 ---

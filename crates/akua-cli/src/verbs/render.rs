@@ -356,14 +356,17 @@ pub fn render_in_worker(
     // KCL ecosystem deps mount as their own ExternalPkg per alias.
     // No tempdir indirection — preopen each resolved root directly at
     // `/kcl-pkgs/<alias>` and tell the worker the alias→path mapping.
-    let kcl_preopens: Vec<(std::path::PathBuf, String)> = charts
-        .kcl_pkgs()
-        .map(|(alias, c)| (c.abs_path.clone(), format!("/kcl-pkgs/{alias}")))
-        .collect();
-    let kcl_pkgs_request: std::collections::BTreeMap<String, String> = charts
-        .kcl_pkgs()
-        .map(|(alias, _)| (alias.to_string(), format!("/kcl-pkgs/{alias}")))
-        .collect();
+    // Single iteration of `charts.kcl_pkgs()` produces both shapes the
+    // downstream APIs need (Vec for the host preopen list, BTreeMap
+    // for the wire request).
+    let mut kcl_preopens: Vec<(std::path::PathBuf, String)> = Vec::new();
+    let mut kcl_pkgs_request: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    for (alias, c) in charts.kcl_pkgs() {
+        let guest_path = format!("/kcl-pkgs/{alias}");
+        kcl_preopens.push((c.abs_path.clone(), guest_path.clone()));
+        kcl_pkgs_request.insert(alias.to_string(), guest_path);
+    }
 
     let host = RenderHost::shared().map_err(worker_to_render_err)?;
 
