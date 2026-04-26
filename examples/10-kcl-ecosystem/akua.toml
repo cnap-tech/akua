@@ -1,0 +1,16 @@
+[package]
+name    = "10-kcl-ecosystem"
+version = "0.1.0"
+edition = "akua.dev/v1alpha1"
+
+[dependencies]
+# Pull a real KCL ecosystem package — kpm publishes `kcl-lang/k8s` as a
+# typed schema bundle for every Kubernetes 1.x release. Same dep machinery
+# as Helm charts: digest-pinned in akua.lock, signature-verified on pull,
+# imported as `import k8s.api.<group>.<version>` inside package.k.
+#
+# `replace = { path = ... }` keeps CI hermetic — the repo vendors the
+# unpacked v1.31.2 release under ./vendor/k8s/ so render+golden tests
+# don't need network. Drop the `replace` entry to exercise the live OCI
+# pull path; `akua.lock` records the canonical oci:// either way.
+k8s = { oci = "oci://ghcr.io/kcl-lang/k8s", version = "1.31.2", replace = { path = "./vendor/k8s" } }

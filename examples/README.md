@@ -18,6 +18,7 @@ Every green row in the table below renders through the shipped `akua` binary and
 | 07 | [07-package-reuse/](07-package-reuse/) | one akua Package composing another via `pkg.render()` | ⚠ target-state (references `pkg.acme.corp` — fictional) |
 | 08 | [08-pkg-compose/](08-pkg-compose/) | pure-KCL Package-of-Packages composition via local `pkg.render("./shared", …)` | ✅ renders |
 | 09 | [09-kustomize-hello/](09-kustomize-hello/) | smallest `kustomize.build` example — overlay adds namePrefix + labels | ✅ renders |
+| 10 | [10-kcl-ecosystem/](10-kcl-ecosystem/) | pull `oci://ghcr.io/kcl-lang/k8s` (a kpm-published KCL package) and author a typed `Deployment` against it | ✅ renders |
 
 **Legend:**
 
@@ -44,7 +45,7 @@ akua render --out /tmp/hello
 diff -r /tmp/hello rendered/   # byte-identical to committed golden
 ```
 
-The other green examples (01, 08, 09) follow the same pattern — `akua render --package ./package.k --inputs ./inputs.yaml --out /tmp/<name>` and compare against `rendered/`.
+The other green examples (01, 08, 09, 10) follow the same pattern — `akua render --package ./package.k --inputs ./inputs.yaml --out /tmp/<name>` and compare against `rendered/`.
 
 ---
 
