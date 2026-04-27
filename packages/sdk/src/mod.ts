@@ -1,7 +1,9 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
-import { posix as path } from 'node:path';
+import { basename, dirname, posix as posixPath, resolve as resolvePath } from 'node:path';
+
+import { RenderHost } from './wasi-host/worker.ts';
 
 import type { CheckOutput } from './types/CheckOutput.ts';
 import type { CheckResult } from './types/CheckResult.ts';
@@ -78,8 +80,8 @@ async function hashTree(root: string): Promise<Record<string, string>> {
 		const entries = await readdir(dir, { withFileTypes: true });
 		await Promise.all(
 			entries.map(async (entry) => {
-				const absPath = path.join(dir, entry.name);
-				const relPath = rel ? path.join(rel, entry.name) : entry.name;
+				const absPath = posixPath.join(dir, entry.name);
+				const relPath = rel ? posixPath.join(rel, entry.name) : entry.name;
 				if (entry.isDirectory()) {
 					await walk(absPath, relPath);
 				} else if (entry.isFile()) {
@@ -197,6 +199,42 @@ export interface RenderOptions {
 	offline?: boolean;
 }
 
+export interface RenderSourceOptions {
+	/**
+	 * Raw KCL Package source. Mutually exclusive with `package`.
+	 */
+	source?: string;
+	/** Path to the Package.k on disk. */
+	package?: string;
+	/**
+	 * Diagnostic filename — only used when `source` is provided
+	 * directly (KCL surfaces it in error spans). Default `package.k`.
+	 */
+	packageFilename?: string;
+	/**
+	 * Workspace directory for resolving relative `helm.template` /
+	 * `kustomize.build` paths. Defaults to `dirname(package)` when
+	 * `package` is provided; required if the source uses either
+	 * plugin and `source` is given directly.
+	 */
+	packageDir?: string;
+	/**
+	 * Inputs to inject as KCL's `option("input")`. Pass any
+	 * JSON-serializable value, or omit for an empty mapping.
+	 */
+	inputs?: unknown;
+}
+
+/**
+ * Cheap probe: does the Package source mention either engine plugin?
+ * Substring scan; false positives just route to the WASI worker
+ * unnecessarily (correct, just slower). False negatives surface as
+ * KCL "no plugin registered under …" errors.
+ */
+function needsEngineHost(source: string): boolean {
+	return source.includes('helm.') || source.includes('kustomize.');
+}
+
 /**
  * Thin wrapper around the `akua` CLI. Each method shells out to a verb,
  * parses the `--json` output, and returns a value typed by the ts-rs
@@ -219,27 +257,84 @@ export class Akua {
 	}
 
 	/**
-	 * Evaluate a Package.k source buffer against optional inputs and
-	 * return the rendered top-level YAML. Runs entirely in-process via
-	 * the bundled `akua-wasm` module — no `akua` binary required. KCL
-	 * plugin callouts (`helm.template`, `kustomize.build`,
-	 * `pkg.render`) are not yet available in the WASM bundle; Packages
-	 * that use them surface a `__kcl_PanicInfo__` error via the
-	 * backing KCL runtime. Use the CLI binary path (this class's
-	 * other verbs) when plugin callouts are required.
+	 * Evaluate a Package against optional inputs and return the
+	 * rendered top-level YAML. Runs entirely in-process via the
+	 * sandboxed `akua-render-worker.wasm` hosted under Node WASI —
+	 * no `akua` binary required. Helm + Kustomize engine callouts
+	 * (`helm.template`, `kustomize.build`) work transparently when
+	 * `packageDir` is provided so relative chart / overlay paths
+	 * resolve.
 	 *
-	 * `packageFilename` is used for diagnostic rendering only — no
-	 * filesystem is touched. `inputs` is optional; pass any
-	 * JSON-serializable value to inject as KCL's `option("input")`.
+	 * Two argument shapes:
+	 * - **Object form (preferred):** `renderSource({ package, source,
+	 *   inputs, packageFilename, packageDir })`. Mix `package` (path
+	 *   on disk) + `inputs` together for the common case.
+	 * - **Legacy form:** `renderSource(packageFilename, source,
+	 *   inputs)` — kept for backwards-compat with the pre-engine
+	 *   pure-KCL helper. Cannot resolve `helm.template` paths;
+	 *   prefer the object form for new code.
 	 */
+	renderSource(opts: RenderSourceOptions): Promise<string>;
+	renderSource(packageFilename: string, source: string, inputs?: unknown): Promise<string>;
 	async renderSource(
-		packageFilename: string,
-		source: string,
-		inputs?: unknown,
+		optsOrFilename: RenderSourceOptions | string,
+		legacySource?: string,
+		legacyInputs?: unknown,
 	): Promise<string> {
+		const opts =
+			typeof optsOrFilename === 'string'
+				? {
+						source: legacySource ?? '',
+						packageFilename: optsOrFilename,
+						inputs: legacyInputs,
+					}
+				: optsOrFilename;
+
+		let source: string;
+		let packageFilename: string;
+		let packageDir: string | undefined;
+		if (opts.source !== undefined) {
+			source = opts.source;
+			packageFilename = opts.packageFilename ?? 'package.k';
+			packageDir = opts.packageDir;
+		} else if (opts.package !== undefined) {
+			const abs = resolvePath(opts.package);
+			source = await readFile(abs, 'utf8');
+			packageFilename = opts.packageFilename ?? basename(abs);
+			packageDir = opts.packageDir ?? dirname(abs);
+		} else {
+			throw new Error('renderSource: provide either `source` or `package`');
+		}
+
+		// Dispatch: pure-KCL goes through `akua-wasm` (fast, runtime-
+		// portable Node + Bun + browser). Packages calling
+		// `helm.template` or `kustomize.build` need the WASI worker
+		// host that bridges to the embedded engines. Plugin probe is a
+		// substring scan — false positives just route to the slower
+		// path; false negatives surface as KCL plugin-not-registered
+		// errors, easy to spot.
+		if (needsEngineHost(source)) {
+			const host = await this.renderHost();
+			const result = await host.render({
+				packageFilename,
+				source,
+				packageDir,
+				inputs: opts.inputs,
+			});
+			return result.yaml;
+		}
+
 		const wasm = await loadWasm();
-		const inputsJson = inputs === undefined ? null : JSON.stringify(inputs);
+		const inputsJson = opts.inputs === undefined ? null : JSON.stringify(opts.inputs);
 		return wasm.render(packageFilename, source, inputsJson);
+	}
+
+	private renderHostPromise?: Promise<RenderHost>;
+	private renderHost(): Promise<RenderHost> {
+		if (!this.renderHostPromise) {
+			this.renderHostPromise = RenderHost.create();
+		}
+		return this.renderHostPromise;
 	}
 
 	/**
@@ -260,9 +355,9 @@ export class Akua {
 	 */
 	async check(opts: CheckOptions = {}): Promise<CheckOutput> {
 		const ws = opts.workspace ?? '.';
-		const manifestPath = path.join(ws, 'akua.toml');
-		const lockPath = path.join(ws, 'akua.lock');
-		const pkgPath = opts.package ?? path.join(ws, 'package.k');
+		const manifestPath = posixPath.join(ws, 'akua.toml');
+		const lockPath = posixPath.join(ws, 'akua.lock');
+		const pkgPath = opts.package ?? posixPath.join(ws, 'package.k');
 
 		const [manifest, lock, pkgSource] = await Promise.all([
 			readOptional(manifestPath),
@@ -374,8 +469,8 @@ export class Akua {
 	async tree(opts: TreeOptions = {}): Promise<TreeOutput> {
 		const ws = opts.workspace ?? '.';
 		const [manifest, lock] = await Promise.all([
-			readFile(path.join(ws, 'akua.toml'), 'utf8'),
-			readOptional(path.join(ws, 'akua.lock')),
+			readFile(posixPath.join(ws, 'akua.toml'), 'utf8'),
+			readOptional(posixPath.join(ws, 'akua.lock')),
 		]);
 		const wasm = await loadWasm();
 		return validateAs<TreeOutput>('TreeOutput', JSON.parse(wasm.tree(manifest, lock ?? null)));

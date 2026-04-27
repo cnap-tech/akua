@@ -251,11 +251,18 @@ tasks:
       - bun install --frozen-lockfile
 
   sdk:test:
-    desc: Run @akua/sdk TS unit tests (bun — native TS, no transpile step)
-    deps: [sdk:install]
+    desc: Run @akua/sdk TS unit tests (bun + Node — engine-bridge tests gate on Node WASI)
+    deps: [sdk:install, build:render-worker, build:engines]
     dir: packages/sdk
     cmds:
+      # Bun runs the cross-runtime suite; the WASI worker tests skip
+      # under Bun automatically (bun.wasi stdin-fd issue tracked in #464).
       - bun test
+      # Node runs the engine-bridge integration tests + tar-format
+      # unit tests (wasi-host/* + tarball.ts). `--experimental-strip-
+      # types` lets node import the SDK's `.ts` source directly, no
+      # transpile step.
+      - node --experimental-strip-types --test test/*.test.mts
 
   sdk:e2e:
     desc: End-to-end — build akua, then run every SDK test with AKUA_E2E=1 (unlocks the gated e2e cases)
