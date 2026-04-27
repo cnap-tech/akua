@@ -78,6 +78,18 @@ Violations of these are architectural bugs:
 
 That's it. akua does **not** specify `App`, `Environment`, `Cluster`, `Secret`, `SecretStore`, `Gateway`, `PolicySet`, `Runbook`, `Rollout`, `Budget`, `Incident`, `Experiment`, or `Tenant` as akua-owned kinds. Users define their own schemas for those concepts in their workspace, shaped to their reality; ecosystems like ArgoCD / Flux / kro consume the rendered raw-Kubernetes output. akua Cloud may carry its own Convex-backed schemas for coordination concepts (Workspace, Tenant, etc.) — those live in Cloud, not in the OSS surface.
 
+## Shipping checklists
+
+**New CLI verb — one PR moves all of these together** (binary/SDK/docs are one contract):
+
+- `crates/akua-core/src/<verb>.rs` (logic) → `crates/akua-cli/src/verbs/<verb>.rs` (verb wrapper) → `main.rs` (clap dispatch)
+- `crates/akua-wasm/src/lib.rs` (`#[wasm_bindgen]` wrapper) → `packages/sdk/src/mod.ts` (`Akua.<verb>()` method + `WasmBinding` entry)
+- Tests at every layer; integration golden under `crates/akua-cli/tests/` if the verb operates on a Package
+- `docs/cli.md` section, verb-count bump (grep for the current count across docs/README), 🚧 → ✅
+- `CHANGELOG.md` entry; `task release:validate` still green
+
+**Touching `eval_kcl` or anything called from it:** `cargo build` does NOT rebuild `akua-render-worker.cwasm`. Run `task build:render-worker --force` first. Symptom of forgetting: binary + unit tests green, but `akua render` reproduces old behavior.
+
 ## What we refuse
 
 - Marketing-speak ("empower," "democratize," "unlock," "revolutionize," "AI-first"). Describe what things do; don't frame.
@@ -87,6 +99,7 @@ That's it. akua does **not** specify `App`, `Environment`, `Cluster`, `Secret`, 
 - Inventing akua-specific vocabulary when a standard exists (JSON Schema, OpenAPI, KRM, OCI, cosign, SLSA, Agent Skills Specification).
 - Vendor lock-in without escape hatches. Every artifact exports to standards; every user can leave.
 - YAML-typed-everywhere. Typed composition demands KCL; raw values can be YAML; don't confuse layers.
+- Verbose edits to this file. New rules go in as one bullet or one short paragraph — the rule itself, no preamble. If it needs a section, the section gets a one-line lede and a tight body. If you can't say it tersely, the rule isn't crisp enough yet.
 
 ## Quality gates
 
