@@ -35,7 +35,10 @@ jobs:
         include:
           - host: macos-14
             target: aarch64-apple-darwin
-          - host: macos-13
+          # macos-13 (Intel) runners are being deprecated and queue for
+          # 40min+. Cross-compile x86_64 from macos-14 (arm64) instead;
+          # rustc + Apple SDK handle this without extra setup.
+          - host: macos-14
             target: x86_64-apple-darwin
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
