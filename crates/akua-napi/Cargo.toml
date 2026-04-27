@@ -1,0 +1,50 @@
+[package]
+name = "akua-napi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+# Native Node.js addon exposing `akua-core` via napi-rs. JS consumers
+# (`@akua/sdk`) load the per-platform `.node` binary via the standard
+# `optionalDependencies` pattern (the loader stub picks the right
+# arch/libc, mirroring @swc/core / @biomejs/biome / lightningcss).
+#
+# Why this exists: the `akua-wasm` bundle (wasm32-unknown-unknown)
+# can't host engines (helm/kustomize, both Go→wasip1) or do OCI
+# fetch (`reqwest` doesn't compile to wasm32-unknown-unknown). napi
+# gets us the full akua-core feature set into Node + Bun without
+# shelling out to the binary. The wasm bundle stays for browser +
+# pure-KCL fast path.
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Reuse the CLI verb impls verbatim — every Akua.* method on the JS
+# side maps 1:1 to a CLI verb, so depending on `akua-cli`'s lib gives
+# us identical envelopes + identical behavior, no logic at the napi
+# boundary. The wasmtime-hosted render worker, chart resolver, OCI
+# fetcher, cosign verifier all flow through this single dep.
+akua-cli = { path = "../akua-cli", default-features = false, features = [
+    "oci-fetch",
+    "cosign-verify",
+] }
+akua-core = { path = "../akua-core", default-features = false, features = [
+    "engine-kcl",
+    "engine-helm",
+    "engine-kustomize",
+    "oci-fetch",
+    "git-fetch",
+    "cosign-verify",
+] }
+napi = { version = "3", features = ["napi9", "serde-json"] }
+napi-derive = "3"
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+
+[build-dependencies]
+napi-build = "2"
