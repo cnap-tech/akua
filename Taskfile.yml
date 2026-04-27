@@ -370,20 +370,20 @@ tasks:
         # claiming the name).
         for dir in crates/akua-napi/npm/*/; do
           echo "--- publishing ${dir} ---"
-          (cd "$dir" && npm publish --access public)
+          (cd "$dir" && npm publish --access public --tag bootstrap)
         done
 
         # Meta package — declares optionalDependencies on the per-
         # platform stubs we just published.
         echo "--- publishing meta @akua-dev/native ---"
-        (cd crates/akua-napi && npm publish --access public)
+        (cd crates/akua-napi && npm publish --access public --tag bootstrap)
 
         # SDK — depends on the meta. Build dist/ first so the tarball
         # has the same shape as a real release (lets us validate the
         # full publish manifest end-to-end).
         echo "--- building + publishing @akua-dev/sdk ---"
         task sdk:build
-        (cd packages/sdk && npm publish --access public)
+        (cd packages/sdk && npm publish --access public --tag bootstrap)
 
         echo
         echo "Bootstrap complete. Next:"
