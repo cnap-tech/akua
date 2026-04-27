@@ -59,14 +59,24 @@ export interface NapiWorkspaceArgs {
 
 export declare function render(args: NapiRenderArgs): any
 
+/**
+ * Render a Package and return the multi-document YAML directly,
+ * bypassing the on-disk write + summary envelope. Mirrors
+ * `akua render --stdout`. The SDK uses this for `renderSource()`
+ * where the caller wants raw YAML, not a `RenderSummary`.
+ */
+export declare function renderToYaml(args: NapiRenderArgs): string
+
 export declare function tree(args: NapiWorkspaceArgs): any
 
 export declare function verify(args: NapiWorkspaceArgs): any
 
 /**
- * Crate version baked at compile time. Cheap sanity check the SDK's
- * loader runs after `require()` to confirm it loaded the real addon.
+ * Routes through `verbs::version::run` so the JSON envelope stays
+ * byte-stable with the CLI (`akua version --json`). Picking up
+ * future fields the verb adds is automatic — no per-binding shape
+ * drift like a `String`-only return would invite.
  */
-export declare function version(): string
+export declare function version(): any
 
 export declare function whoami(): any

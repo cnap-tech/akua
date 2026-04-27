@@ -84,6 +84,35 @@ const BY_EXIT_CODE: Record<Exclude<ExitCode, 'success'>, AkuaErrorSubclass> = {
 	timeout: AkuaTimeoutError,
 };
 
+/**
+ * Shared exit-code → typed-subclass router. Used by both the
+ * shell-out path (`classifyCliError`) and the napi path
+ * (`parseNapiError`) so the same numeric code routes to the same
+ * subclass regardless of transport.
+ */
+export function classifyByExitCode(rawExitCode: number): AkuaErrorSubclass | undefined {
+	const exitCode = exitCodeFromNumber(rawExitCode);
+	if (!exitCode || exitCode === 'success') return undefined;
+	return BY_EXIT_CODE[exitCode];
+}
+
+/**
+ * Shape predicate for the structured-error envelope CLI verbs emit.
+ * Returns true iff `parsed` carries the load-bearing `code` +
+ * `message` string fields. Used by both `parseStructuredError`
+ * (multi-line stderr scan) and `parseNapiError` (single-message JSON).
+ */
+export function isStructuredErrorShape(parsed: unknown): parsed is StructuredError {
+	return (
+		!!parsed &&
+		typeof parsed === 'object' &&
+		'code' in parsed &&
+		'message' in parsed &&
+		typeof (parsed as { code: unknown }).code === 'string' &&
+		typeof (parsed as { message: unknown }).message === 'string'
+	);
+}
+
 // Cap the stderr scan — a runaway CLI could emit millions of log lines
 // before exit, and we only need to find one JSONL record.
 const MAX_STDERR_LINES_SCANNED = 200;
@@ -99,16 +128,7 @@ export function parseStructuredError(stderr: string | undefined): StructuredErro
 		if (!trimmed.startsWith('{')) continue;
 		try {
 			const parsed = JSON.parse(trimmed) as unknown;
-			if (
-				parsed &&
-				typeof parsed === 'object' &&
-				'code' in parsed &&
-				'message' in parsed &&
-				typeof (parsed as { code: unknown }).code === 'string' &&
-				typeof (parsed as { message: unknown }).message === 'string'
-			) {
-				return parsed as StructuredError;
-			}
+			if (isStructuredErrorShape(parsed)) return parsed;
 		} catch {
 			// Not JSON — keep scanning.
 		}

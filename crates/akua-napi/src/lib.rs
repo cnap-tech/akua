@@ -20,11 +20,13 @@ use akua_core::cli_contract::{ExitCode, StructuredError};
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
-/// Crate version baked at compile time. Cheap sanity check the SDK's
-/// loader runs after `require()` to confirm it loaded the real addon.
+/// Routes through `verbs::version::run` so the JSON envelope stays
+/// byte-stable with the CLI (`akua version --json`). Picking up
+/// future fields the verb adds is automatic — no per-binding shape
+/// drift like a `String`-only return would invite.
 #[napi]
-pub fn version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
+pub fn version() -> Result<serde_json::Value> {
+    invoke_verb(|ctx, stdout| verbs::version::run(ctx, stdout).map_err(into_napi_io))
 }
 
 // ---------------------------------------------------------------------------
@@ -55,7 +57,36 @@ pub fn render(args: NapiRenderArgs) -> Result<serde_json::Value> {
         strict: args.strict.unwrap_or(false),
         offline: args.offline.unwrap_or(false),
     };
-    invoke_verb(|ctx, stdout| verbs::render::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured())))
+    invoke_verb(|ctx, stdout| verbs::render::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
+}
+
+/// Render a Package and return the multi-document YAML directly,
+/// bypassing the on-disk write + summary envelope. Mirrors
+/// `akua render --stdout`. The SDK uses this for `renderSource()`
+/// where the caller wants raw YAML, not a `RenderSummary`.
+#[napi]
+pub fn render_to_yaml(args: NapiRenderArgs) -> Result<String> {
+    let package_path = Path::new(&args.package);
+    let inputs_path = args.inputs.as_deref().map(Path::new);
+    let out_dir = Path::new(&args.out);
+    let verb_args = verbs::render::RenderArgs {
+        package_path,
+        inputs_path,
+        out_dir,
+        dry_run: args.dry_run.unwrap_or(false),
+        // Critical: stdout_mode short-circuits the file-writing path
+        // and emits raw multi-doc YAML to stdout. Same path
+        // `akua render --stdout` uses.
+        stdout_mode: true,
+        strict: args.strict.unwrap_or(false),
+        offline: args.offline.unwrap_or(false),
+    };
+    let ctx = Context::json();
+    let mut out = Cursor::new(Vec::new());
+    verbs::render::run(&ctx, &verb_args, &mut out)
+        .map_err(|e| into_napi(e.to_structured(), e.exit_code()))?;
+    let bytes = out.into_inner();
+    String::from_utf8(bytes).map_err(|e| Error::from_reason(format!("render output not utf-8: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -71,7 +102,7 @@ pub struct NapiPackageArgs {
 pub fn lint(args: NapiPackageArgs) -> Result<serde_json::Value> {
     let path = Path::new(&args.package);
     let verb_args = verbs::lint::LintArgs { package_path: path };
-    invoke_verb(|ctx, stdout| verbs::lint::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured())))
+    invoke_verb(|ctx, stdout| verbs::lint::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
 }
 
 #[napi(object)]
@@ -91,7 +122,7 @@ pub fn fmt(args: NapiFmtArgs) -> Result<serde_json::Value> {
         check: args.check.unwrap_or(false),
         stdout_mode: args.stdout.unwrap_or(false),
     };
-    invoke_verb(|ctx, stdout| verbs::fmt::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured())))
+    invoke_verb(|ctx, stdout| verbs::fmt::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +153,7 @@ pub fn check(args: NapiCheckArgs) -> Result<serde_json::Value> {
         workspace,
         package_path,
     };
-    invoke_verb(|ctx, stdout| verbs::check::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured())))
+    invoke_verb(|ctx, stdout| verbs::check::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
 }
 
 // ---------------------------------------------------------------------------
@@ -138,7 +169,7 @@ pub struct NapiWorkspaceArgs {
 pub fn tree(args: NapiWorkspaceArgs) -> Result<serde_json::Value> {
     let workspace = Path::new(&args.workspace);
     let verb_args = verbs::tree::TreeArgs { workspace };
-    invoke_verb(|ctx, stdout| verbs::tree::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured())))
+    invoke_verb(|ctx, stdout| verbs::tree::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
 }
 
 #[napi(object)]
@@ -152,7 +183,7 @@ pub fn diff(args: NapiDiffArgs) -> Result<serde_json::Value> {
     let before = Path::new(&args.before);
     let after = Path::new(&args.after);
     let verb_args = verbs::diff::DiffArgs { before, after };
-    invoke_verb(|ctx, stdout| verbs::diff::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured())))
+    invoke_verb(|ctx, stdout| verbs::diff::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
 }
 
 // ---------------------------------------------------------------------------
@@ -195,7 +226,7 @@ pub fn export(args: NapiExportArgs) -> Result<serde_json::Value> {
         format,
         out,
     };
-    invoke_verb(|ctx, stdout| verbs::export::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured())))
+    invoke_verb(|ctx, stdout| verbs::export::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +236,7 @@ pub fn export(args: NapiExportArgs) -> Result<serde_json::Value> {
 #[napi]
 pub fn verify(args: NapiWorkspaceArgs) -> Result<serde_json::Value> {
     let workspace = Path::new(&args.workspace);
-    invoke_verb(|ctx, stdout| verbs::verify::run(ctx, workspace, stdout).map_err(|e| into_napi(e.to_structured())))
+    invoke_verb(|ctx, stdout| verbs::verify::run(ctx, workspace, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
 }
 
 // ---------------------------------------------------------------------------
@@ -247,16 +278,25 @@ where
     })
 }
 
-/// Convert a verb's [`StructuredError`] into a napi `Error` that
-/// preserves the structured `code` field. The SDK's
-/// `classifyCliError` (`packages/sdk/src/errors.ts`) parses the
-/// thrown error's message as JSON and routes on `code` — same shape
-/// the CLI emits to stderr. Without this, every JS-side error would
-/// collapse to the generic `AkuaError` and lose typed routing
-/// (`E_PACKAGE_MISSING`, `E_RENDER_KCL`, etc.).
-fn into_napi(structured: StructuredError) -> Error {
-    let body = serde_json::to_string(&structured).unwrap_or_else(|_| structured.message.clone());
-    Error::from_reason(body)
+/// Convert a verb's [`StructuredError`] + [`ExitCode`] into a napi
+/// `Error` that preserves both the structured `code` (for fine-grain
+/// matching) and the numeric exit code (for SDK error-class routing
+/// — `AkuaUserError` / `AkuaSystemError` / etc.). Same envelope the
+/// CLI emits to stderr, plus the `exit_code` numeric from the verb.
+/// Without this, every JS-side error would collapse to the generic
+/// `AkuaError` and lose typed routing.
+fn into_napi(structured: StructuredError, exit_code: ExitCode) -> Error {
+    let mut body = match serde_json::to_value(&structured) {
+        Ok(v) => v,
+        Err(_) => return Error::from_reason(structured.message),
+    };
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert(
+            "exit_code".to_string(),
+            serde_json::json!(exit_code as i32),
+        );
+    }
+    Error::from_reason(body.to_string())
 }
 
 /// Fallback for verbs whose `run()` returns a non-structured error

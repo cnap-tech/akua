@@ -3,30 +3,9 @@
 // surface. Not exported from `mod.ts`; tests import via the
 // relative path.
 
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-/**
- * Absolute path to the freshly-built `akua` binary. `task sdk:e2e`
- * runs `cargo build -p akua-cli` first and sets `AKUA_E2E=1`.
- */
-export const BINARY = resolve(
-	dirname(fileURLToPath(import.meta.url)),
-	'../../../target/debug/akua',
-);
-
-/** True when the caller opted into end-to-end tests via `AKUA_E2E=1`. */
-export const E2E_ENABLED = process.env.AKUA_E2E === '1';
-
-/** Throws if the binary isn't present — prefer an explicit diagnostic
- * to the far-downstream `ENOENT` from `execFile`. */
-export function assertBinaryBuilt(): void {
-	if (!existsSync(BINARY)) {
-		throw new Error(`missing: ${BINARY} — run \`task sdk:e2e\``);
-	}
-}
+import { join } from 'node:path';
 
 /**
  * Disposable scratch Package dir. Caller writes `package.k` via

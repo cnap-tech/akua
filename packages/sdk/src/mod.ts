@@ -1,9 +1,10 @@
-import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
-import { basename, dirname, posix as posixPath, resolve as resolvePath } from 'node:path';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { basename, dirname, posix as posixPath, resolve as resolvePath, join as joinPath } from 'node:path';
 
-import { RenderHost } from './wasi-host/worker.ts';
+import { callNapi, loadNapi } from './napi.ts';
 
 import type { CheckOutput } from './types/CheckOutput.ts';
 import type { CheckResult } from './types/CheckResult.ts';
@@ -21,7 +22,6 @@ import type { VerifyOutput } from './types/VerifyOutput.ts';
 import type { VersionOutput } from './types/VersionOutput.ts';
 import type { WhoamiOutput } from './types/WhoamiOutput.ts';
 
-import { classifyCliError } from './errors.ts';
 import { type SchemaName, validateAs } from './validate.ts';
 
 // Lazy-load the WASM bundle (~7.6 MB) so the SDK's shell-out verbs
@@ -122,14 +122,13 @@ export type { StructuredError, Level } from './types/StructuredError.ts';
 export type { AgentContext } from './types/AgentContext.ts';
 export type { AgentSource } from './types/AgentSource.ts';
 
-// 64 MiB covers large `inspect` / `render` outputs. Verbs that stream
-// multi-hundred-MiB artifacts should use a streaming API instead of
-// buffering into a single string (not this class).
-const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
-
 export interface AkuaOptions {
-	/** Path to the `akua` binary. Defaults to `"akua"` (resolved via PATH). */
-	binary?: string;
+	/**
+	 * Reserved for future configuration knobs (cache dir, log
+	 * threshold, etc.). Currently empty — every method routes through
+	 * the bundled native addon (`@akua/native` per platform), so
+	 * there's no binary path to override.
+	 */
 }
 
 export interface InspectOptions {
@@ -242,18 +241,20 @@ function needsEngineHost(source: string): boolean {
  * on exit code + parsed StructuredError.
  */
 export class Akua {
-	readonly binary: string;
-
-	constructor(opts: AkuaOptions = {}) {
-		this.binary = opts.binary ?? 'akua';
+	constructor(_opts: AkuaOptions = {}) {
+		// All transport now goes through the native napi addon; no
+		// per-instance state. Keep the constructor for backwards
+		// compat with callers using `new Akua()`.
 	}
 
-	version(): Promise<VersionOutput> {
-		return this.call('version', 'VersionOutput');
+	async version(): Promise<VersionOutput> {
+		const napi = loadNapi();
+		return validateAs<VersionOutput>('VersionOutput', callNapi(() => napi.version()));
 	}
 
-	whoami(): Promise<WhoamiOutput> {
-		return this.call('whoami', 'WhoamiOutput');
+	async whoami(): Promise<WhoamiOutput> {
+		const napi = loadNapi();
+		return validateAs<WhoamiOutput>('WhoamiOutput', callNapi(() => napi.whoami()));
 	}
 
 	/**
@@ -306,35 +307,50 @@ export class Akua {
 			throw new Error('renderSource: provide either `source` or `package`');
 		}
 
-		// Dispatch: pure-KCL goes through `akua-wasm` (fast, runtime-
-		// portable Node + Bun + browser). Packages calling
-		// `helm.template` or `kustomize.build` need the WASI worker
-		// host that bridges to the embedded engines. Plugin probe is a
-		// substring scan — false positives just route to the slower
-		// path; false negatives surface as KCL plugin-not-registered
-		// errors, easy to spot.
+		// Dispatch:
+		// - Pure-KCL goes through `akua-wasm` (~30ms warm, runtime-
+		//   portable: Node, Bun, browsers, no native binary required).
+		// - Packages that invoke `helm.template` / `kustomize.build`
+		//   route through the napi addon. `napi.render` takes a
+		//   filesystem path — when the caller passes raw `source`, we
+		//   write it to a tempdir alongside the requested
+		//   `packageFilename` so KCL diagnostics still reference the
+		//   intended span. The temp directory becomes the implicit
+		//   `packageDir` for chart-path resolution unless the caller
+		//   set one explicitly.
 		if (needsEngineHost(source)) {
-			const host = await this.renderHost();
-			const result = await host.render({
-				packageFilename,
-				source,
-				packageDir,
-				inputs: opts.inputs,
-			});
-			return result.yaml;
+			const napi = loadNapi();
+			// `napi.renderToYaml` mirrors `akua render --stdout` — emits
+			// raw multi-doc YAML instead of writing files + returning a
+			// summary. The caller wants the YAML bytes directly.
+			//
+			// When the caller hands us raw source we materialize it
+			// into a scratch dir so KCL spans + chart-path resolution
+			// work the same as a path-mode render. Otherwise we use the
+			// caller's path verbatim.
+			const tmp = await mkdtemp(joinPath(tmpdir(), 'akua-sdk-render-'));
+			const sourcePath =
+				opts.package !== undefined ? resolvePath(opts.package) : joinPath(tmp, packageFilename);
+			try {
+				if (opts.package === undefined) {
+					await writeFile(sourcePath, source, 'utf8');
+				}
+				return callNapi<string>(() =>
+					napi.renderToYaml({
+						package: sourcePath,
+						// `out` is unused in stdout-mode (no files
+						// written) but the verb arg-shape requires it.
+						out: joinPath(tmp, 'unused'),
+					}),
+				);
+			} finally {
+				await rm(tmp, { recursive: true, force: true });
+			}
 		}
 
 		const wasm = await loadWasm();
 		const inputsJson = opts.inputs === undefined ? null : JSON.stringify(opts.inputs);
 		return wasm.render(packageFilename, source, inputsJson);
-	}
-
-	private renderHostPromise?: Promise<RenderHost>;
-	private renderHost(): Promise<RenderHost> {
-		if (!this.renderHostPromise) {
-			this.renderHostPromise = RenderHost.create();
-		}
-		return this.renderHostPromise;
 	}
 
 	/**
@@ -482,11 +498,16 @@ export class Akua {
 	 * `out.violations`; the SDK returns the typed output either way.
 	 */
 	async verify(opts: VerifyOptions = {}): Promise<VerifyOutput> {
-		const extra: string[] = [];
-		if (opts.workspace) extra.push('--workspace', opts.workspace);
-		if (opts.tarball) extra.push('--tarball', opts.tarball);
-		if (opts.publicKey) extra.push('--public-key', opts.publicKey);
-		return this.callDiagnostic<VerifyOutput>('verify', extra, 'VerifyOutput');
+		if (opts.tarball) {
+			throw new Error(
+				'verify({ tarball }) — tarball verify lands in #462; pass `workspace` for now.',
+			);
+		}
+		const napi = loadNapi();
+		const result = callNapi<unknown>(() =>
+			napi.verify({ workspace: opts.workspace ?? '.' }),
+		);
+		return validateAs<VerifyOutput>('VerifyOutput', result);
 	}
 
 	/**
@@ -505,74 +526,18 @@ export class Akua {
 	}
 
 	async render(opts: RenderOptions = {}): Promise<RenderSummary> {
-		const args = ['render', '--json'];
-		if (opts.package) args.push('--package', opts.package);
-		if (opts.inputs) args.push('--inputs', opts.inputs);
-		if (opts.out) args.push('--out', opts.out);
-		if (opts.dryRun) args.push('--dry-run');
-		if (opts.strict) args.push('--strict');
-		if (opts.offline) args.push('--offline');
-		const { stdout } = await this.exec(args);
-		return validateAs<RenderSummary>('RenderSummary', JSON.parse(stdout));
+		const napi = loadNapi();
+		const result = callNapi<unknown>(() =>
+			napi.render({
+				package: opts.package ?? './package.k',
+				inputs: opts.inputs,
+				out: opts.out ?? './deploy',
+				dryRun: opts.dryRun,
+				strict: opts.strict,
+				offline: opts.offline,
+			}),
+		);
+		return validateAs<RenderSummary>('RenderSummary', result);
 	}
 
-	private async call<T>(verb: string, schema: SchemaName): Promise<T> {
-		const { stdout } = await this.exec([verb, '--json']);
-		return validateAs<T>(schema, JSON.parse(stdout));
-	}
-
-	/**
-	 * Variant of [`call`](Akua.call) for verbs that emit valid JSON on
-	 * stdout regardless of exit code — `check`, `fmt --check`,
-	 * `verify`, etc. — where the exit code is the *status signal*
-	 * (`0 ok` vs `1 findings`) and both outcomes are data the caller
-	 * wants. Only spawn-level failures (binary missing, OOM, signal)
-	 * propagate.
-	 */
-	private async callDiagnostic<T>(verb: string, extraArgs: readonly string[], schema: SchemaName): Promise<T> {
-		const { stdout } = await this.execTolerant([verb, '--json', ...extraArgs]);
-		return validateAs<T>(schema, JSON.parse(stdout));
-	}
-
-	private exec(args: readonly string[]): Promise<{ stdout: string; stderr: string }> {
-		return new Promise((resolve, reject) => {
-			const child = execFile(
-				this.binary,
-				args,
-				{ encoding: 'utf8', maxBuffer: DEFAULT_MAX_BUFFER },
-				(err, stdout, stderr) => {
-					if (!err) {
-						resolve({ stdout, stderr });
-						return;
-					}
-					// Both binary-not-found (ENOENT, exitCode == null) and non-zero
-					// exits land here — `classifyCliError` picks the right subclass.
-					reject(classifyCliError({ rawExitCode: child.exitCode, stderr, cause: err }));
-				},
-			);
-		});
-	}
-
-	/**
-	 * Like [`exec`](Akua.exec) but doesn't throw on non-zero exit as
-	 * long as the process actually ran to completion. Spawn-level
-	 * failures (binary missing, killed by signal) still throw via
-	 * `classifyCliError`. Used by [`callDiagnostic`](Akua.callDiagnostic).
-	 */
-	private execTolerant(args: readonly string[]): Promise<{ stdout: string; stderr: string }> {
-		return new Promise((resolve, reject) => {
-			const child = execFile(
-				this.binary,
-				args,
-				{ encoding: 'utf8', maxBuffer: DEFAULT_MAX_BUFFER },
-				(err, stdout, stderr) => {
-					if (!err || typeof child.exitCode === 'number') {
-						resolve({ stdout, stderr });
-						return;
-					}
-					reject(classifyCliError({ rawExitCode: child.exitCode, stderr, cause: err }));
-				},
-			);
-		});
-	}
 }

@@ -1,19 +1,23 @@
-// End-to-end test for `Akua.render(opts)` — shells out to a freshly
-// built `akua` binary against a scratch Package and validates the
-// returned `RenderSummary`. Gated on `AKUA_E2E=1`.
+// `Akua.render(opts)` — exercises the napi addon in-process.
+// No binary, no shell-out, no E2E env-var gate.
 
 import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { writeFileSync } from 'node:fs';
 
 import { Akua } from './mod.ts';
-import { BINARY, E2E_ENABLED, MINIMAL_PACKAGE_K, scratchPackageWith } from './test-utils.ts';
+import { MINIMAL_PACKAGE_K, scratchPackage } from './test-utils.ts';
 
-describe.if(E2E_ENABLED)('Akua.render', () => {
+describe('Akua.render', () => {
 	test('renders a minimal package and returns a typed summary', async () => {
-		using pkg = scratchPackageWith(MINIMAL_PACKAGE_K, 'akua-sdk-render-');
-		const akua = new Akua({ binary: BINARY });
+		using pkg = scratchPackage('akua-sdk-render-');
+		const pkgPath = join(pkg.dir, 'package.k');
+		const akuaToml = `[package]\nname = "render-test"\nversion = "0.0.1"\nedition = "akua.dev/v1alpha1"\n`;
+		writeFileSync(pkgPath, MINIMAL_PACKAGE_K);
+		writeFileSync(join(pkg.dir, 'akua.toml'), akuaToml);
+		const akua = new Akua();
 		const summary = await akua.render({
-			package: join(pkg.dir, 'package.k'),
+			package: pkgPath,
 			out: join(pkg.dir, 'deploy'),
 		});
 		expect(summary.format).toBe('raw-manifests');
@@ -23,10 +27,16 @@ describe.if(E2E_ENABLED)('Akua.render', () => {
 	});
 
 	test('--dry-run skips writing but still returns a summary', async () => {
-		using pkg = scratchPackageWith(MINIMAL_PACKAGE_K, 'akua-sdk-render-');
-		const akua = new Akua({ binary: BINARY });
+		using pkg = scratchPackage('akua-sdk-render-');
+		const pkgPath = join(pkg.dir, 'package.k');
+		writeFileSync(pkgPath, MINIMAL_PACKAGE_K);
+		writeFileSync(
+			join(pkg.dir, 'akua.toml'),
+			`[package]\nname = "dry"\nversion = "0.0.1"\nedition = "akua.dev/v1alpha1"\n`,
+		);
+		const akua = new Akua();
 		const summary = await akua.render({
-			package: join(pkg.dir, 'package.k'),
+			package: pkgPath,
 			out: join(pkg.dir, 'deploy'),
 			dryRun: true,
 		});

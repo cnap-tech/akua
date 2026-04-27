@@ -582,6 +582,7 @@ module.exports.export = nativeBinding.export
 module.exports.fmt = nativeBinding.fmt
 module.exports.lint = nativeBinding.lint
 module.exports.render = nativeBinding.render
+module.exports.renderToYaml = nativeBinding.renderToYaml
 module.exports.tree = nativeBinding.tree
 module.exports.verify = nativeBinding.verify
 module.exports.version = nativeBinding.version
