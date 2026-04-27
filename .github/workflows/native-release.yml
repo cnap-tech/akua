@@ -128,7 +128,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm to 11+ (trusted publishing requires npm >= 11.5)
+        # Node 22 ships npm 10.x which has no OIDC trusted-publishing
+        # support — the publish would silently fall back to anonymous
+        # auth and 404. setup-node's `registry-url` is also omitted on
+        # purpose: it writes a `.npmrc` containing a literal placeholder
+        # `_authToken=${NODE_AUTH_TOKEN}` that intercepts OIDC.
+        run: npm install -g npm@latest
 
       - uses: oven-sh/setup-bun@v2
 

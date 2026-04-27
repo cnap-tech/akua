@@ -38,7 +38,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm to 11+ (trusted publishing requires npm >= 11.5)
+        # See native-release.yml for the rationale on dropping
+        # `registry-url` and bumping npm.
+        run: npm install -g npm@latest
 
       # The Rust generator writes into packages/sdk/src/{types,schemas}.
       # Regenerate on the runner so we publish from the same bytes main
