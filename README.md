@@ -25,8 +25,8 @@
 `akua` is a single Rust binary that does for cloud-native what `bun` and `deno` do for JavaScript: package manager, runtime, formatter, linter, test runner, REPL, dev loop, and signed-OCI publisher — one CLI, one contract, no `$PATH` dependency. Packages are authored in [KCL](https://kcl-lang.io) (typed configuration language); existing Helm charts and Kustomize bases are callable inside KCL programs (`helm.template(...)`, `kustomize.build(...)`); every render runs in a wasmtime WASI sandbox.
 
 ```sh
-# install
-cargo install --git https://github.com/cnap-tech/akua akua-cli
+# install (macOS / Linux)
+curl -fsSL https://akua.dev/install | sh
 
 # render anywhere
 akua render --inputs inputs.yaml --out ./deploy
@@ -71,13 +71,24 @@ Ten worked examples (Helm, Kustomize, multi-engine, Package composition, KCL eco
 ## Install
 
 ```sh
-# Rust toolchain — 26 verbs, the binary
-cargo install --git https://github.com/cnap-tech/akua akua-cli
+# macOS / Linux
+curl -fsSL https://akua.dev/install | sh
 
+# Homebrew
+brew install cnap-tech/tap/akua
+
+# Windows
+irm https://akua.dev/install.ps1 | iex
+
+# From source
+cargo install --git https://github.com/cnap-tech/akua akua-cli
+```
+
+```sh
 # TypeScript SDK — in-process WASM, no binary required for pure-compute verbs
 bun add jsr:@akua/sdk
 
-# Install agent skills (universal — works across 25+ agents)
+# Agent skills (universal — works across 25+ agents)
 npx skills install github:cnap-tech/akua/skills
 ```
 
