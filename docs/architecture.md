@@ -16,8 +16,9 @@ This document describes the **target architecture**. Implementation is tracked i
     Rego Policy      ──▶    ├─ embedded           kubectl / Crossplane
     (*.rego)                │  engines:
                             │   KCL
-    @ui decorators   ──▶    │   Helm v4
-    (on KCL schemas)        │   OPA + Regal
+    @ui decorators 🚧 ──▶   │   Helm v4
+    (on KCL schemas,        │   OPA + Regal
+     v0.2.0)                │
                             │   Kyverno→Rego
     akua.toml + akua.lock ──▶ │   CEL
     (human intent +         │   Kustomize
@@ -33,7 +34,7 @@ Three stages, each independently pluggable. See [`docs/package-format.md`](./pac
 
 | consumer | surface | when used |
 |---|---|---|
-| **CLI** — `akua` binary | 30 verbs (see [`cli.md`](./cli.md)) | developers, CI, agents in sandboxes |
+| **CLI** — `akua` binary | 25 shipped verbs + ~10 planned (see [`cli.md`](./cli.md)) | developers, CI, agents in sandboxes |
 | **SDK** — `@akua/sdk` | same capabilities, Node/Bun-native | backend services that embed akua in-process |
 | **Browser** — playground at `akua.dev` + local `akua dev` UI | subset that compiles to WebAssembly | authoring, review, live-preview |
 

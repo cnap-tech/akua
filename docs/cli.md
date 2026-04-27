@@ -6,8 +6,8 @@ For the universal contract every verb honors (JSON output, exit codes, idempoten
 
 > **Status marker.** Sections marked ✅ describe verbs available in the shipping binary. Sections marked 🚧 describe verbs from the target surface that aren't wired yet. If a verb isn't marked, assume 🚧.
 >
-> **Shipped today (13 verbs):**
-> `init` · `whoami` · `version` · `verify` · `render` · `fmt` · `lint` · `check` · `diff` · `add` · `remove` · `tree` · `inspect`
+> **Shipped today (25 verbs):**
+> `init` · `whoami` · `version` · `verify` · `render` · `add` · `dev` · `test` · `tree` · `pull` · `publish` · `sign` · `update` · `lock` · `push` · `repl` · `pack` · `remove` · `diff` · `check` · `inspect` · `lint` · `fmt` · `cache` · `auth`
 >
 > Run `akua --help` at the command line for the authoritative live list.
 

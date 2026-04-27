@@ -105,7 +105,7 @@ Prebuilt binaries: [Releases](https://github.com/cnap-tech/akua/releases). Conta
 
 ## Status
 
-**Alpha** — v0.1.0 is the first tagged release. Stable contracts: the 26-verb CLI surface, the universal flag/exit-code contract, the WASM-backed SDK methods, the sandbox invariant. Anything in [`docs/roadmap.md`](docs/roadmap.md) under Phase 5+ may change before v0.2.0. Safe for CI and agent workflows today; pin akua versions for production rollouts.
+**Alpha** — v0.1.0 is the first tagged release. Stable contracts: the 25-verb CLI surface, the universal flag/exit-code contract, the WASM-backed SDK methods, the sandbox invariant. Anything in [`docs/roadmap.md`](docs/roadmap.md) under Phase 5+ may change before v0.2.0. Safe for CI and agent workflows today; pin akua versions for production rollouts.
 
 ## Security
 
