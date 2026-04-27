@@ -120,8 +120,14 @@ thread_local! {
 
 fn call_guest(input: &[u8]) -> Result<Vec<u8>, KustomizeEngineError> {
     SESSION.with(|slot| {
-        engine_host_wasm::thread_local_call_with(slot, KUSTOMIZE_ENGINE_BYTES, SPEC, input, IS_PRECOMPILED)
-            .map_err(KustomizeEngineError::from)
+        engine_host_wasm::thread_local_call_with(
+            slot,
+            KUSTOMIZE_ENGINE_BYTES,
+            SPEC,
+            input,
+            IS_PRECOMPILED,
+        )
+        .map_err(KustomizeEngineError::from)
     })
 }
 

@@ -120,8 +120,8 @@ pub fn precompile(wasm: &[u8]) -> Result<Vec<u8>, String> {
 ///
 pub fn build_engine_wasm(name: &str) {
     use std::path::PathBuf;
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .expect("CARGO_MANIFEST_DIR not set in build.rs");
+    let manifest_dir =
+        std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set in build.rs");
     let wasm_path = PathBuf::from(&manifest_dir)
         .join("assets")
         .join(format!("{name}.wasm"));
@@ -142,8 +142,8 @@ pub fn build_engine_wasm(name: &str) {
         return;
     }
 
-    let wasm = std::fs::read(&wasm_path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", wasm_path.display()));
+    let wasm =
+        std::fs::read(&wasm_path).unwrap_or_else(|e| panic!("read {}: {e}", wasm_path.display()));
     // Stage source `.wasm` regardless of feature — `lib.rs` picks
     // the right path via `cfg(feature = "precompile")` but the
     // unused `include_bytes!` slot still has to exist (cargo

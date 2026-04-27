@@ -114,11 +114,11 @@ jobs:
         run: mise exec -- task sdk:check
 
   sdk:
-    name: SDK (bun, in-process WASM)
+    name: SDK (bun + node WASI)
     runs-on: ubuntu-latest
-    # Bun-only — exercises the @akua/sdk surface against the committed
-    # packages/sdk/wasm/nodejs/ bundle. Runs concurrently with the rust
-    # job since it shares no toolchain.
+    # Exercises the @akua-dev/sdk surface end-to-end. `task sdk:test`
+    # depends on `build:render-worker` + `build:engines`, so we need
+    # the same Rust + wasm32-wasip1 setup as the rust job.
     steps:
       - uses: actions/checkout@v6
 
@@ -127,8 +127,48 @@ jobs:
           install: true
           cache: true
 
-      - name: bun install
-        run: cd packages/sdk && mise exec -- bun install --frozen-lockfile
+      - name: Install wasm32-wasip1 target
+        run: mise exec -- rustup target add wasm32-wasip1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-sdk-ci
+          cache-all-crates: true
+          cache-workspace-crates: true
+
+      - name: Restore helm engine wasm cache
+        uses: actions/cache@v5
+        with:
+          path: crates/helm-engine-wasm/assets/helm-engine.wasm
+          key: helm-engine-${{ runner.os }}-${{ hashFiles('.mise.toml', 'crates/helm-engine-wasm/go-src/**', 'crates/helm-engine-wasm/fork/**') }}
+
+      - name: Restore kustomize engine wasm cache
+        uses: actions/cache@v5
+        with:
+          path: crates/kustomize-engine-wasm/assets/kustomize-engine.wasm
+          key: kustomize-engine-${{ runner.os }}-${{ hashFiles('.mise.toml', 'crates/kustomize-engine-wasm/go-src/**') }}
+
+      - name: Cache Go module + build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('.mise.toml', '**/go.mod') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+
+      - name: Cache helm fork tree
+        uses: actions/cache@v5
+        with:
+          path: crates/helm-engine-wasm/third_party/helm-fork
+          key: helm-fork-${{ runner.os }}-${{ hashFiles('crates/helm-engine-wasm/fork/**') }}
+
+      - name: Workspace bun install
+        # Root workspace install (packages/* + crates/akua-napi).
+        # Resolves @akua-dev/native to the local napi crate so the SDK
+        # tests can require() it via the workspace symlink.
+        run: mise exec -- bun install --frozen-lockfile
 
       - name: SDK tests
         run: mise exec -- task sdk:test

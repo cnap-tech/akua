@@ -57,7 +57,10 @@ pub fn render(args: NapiRenderArgs) -> Result<serde_json::Value> {
         strict: args.strict.unwrap_or(false),
         offline: args.offline.unwrap_or(false),
     };
-    invoke_verb(|ctx, stdout| verbs::render::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
+    invoke_verb(|ctx, stdout| {
+        verbs::render::run(ctx, &verb_args, stdout)
+            .map_err(|e| into_napi(e.to_structured(), e.exit_code()))
+    })
 }
 
 /// Render a Package and return the multi-document YAML directly,
@@ -86,7 +89,8 @@ pub fn render_to_yaml(args: NapiRenderArgs) -> Result<String> {
     verbs::render::run(&ctx, &verb_args, &mut out)
         .map_err(|e| into_napi(e.to_structured(), e.exit_code()))?;
     let bytes = out.into_inner();
-    String::from_utf8(bytes).map_err(|e| Error::from_reason(format!("render output not utf-8: {e}")))
+    String::from_utf8(bytes)
+        .map_err(|e| Error::from_reason(format!("render output not utf-8: {e}")))
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +106,10 @@ pub struct NapiPackageArgs {
 pub fn lint(args: NapiPackageArgs) -> Result<serde_json::Value> {
     let path = Path::new(&args.package);
     let verb_args = verbs::lint::LintArgs { package_path: path };
-    invoke_verb(|ctx, stdout| verbs::lint::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
+    invoke_verb(|ctx, stdout| {
+        verbs::lint::run(ctx, &verb_args, stdout)
+            .map_err(|e| into_napi(e.to_structured(), e.exit_code()))
+    })
 }
 
 #[napi(object)]
@@ -122,7 +129,10 @@ pub fn fmt(args: NapiFmtArgs) -> Result<serde_json::Value> {
         check: args.check.unwrap_or(false),
         stdout_mode: args.stdout.unwrap_or(false),
     };
-    invoke_verb(|ctx, stdout| verbs::fmt::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
+    invoke_verb(|ctx, stdout| {
+        verbs::fmt::run(ctx, &verb_args, stdout)
+            .map_err(|e| into_napi(e.to_structured(), e.exit_code()))
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -153,7 +163,10 @@ pub fn check(args: NapiCheckArgs) -> Result<serde_json::Value> {
         workspace,
         package_path,
     };
-    invoke_verb(|ctx, stdout| verbs::check::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
+    invoke_verb(|ctx, stdout| {
+        verbs::check::run(ctx, &verb_args, stdout)
+            .map_err(|e| into_napi(e.to_structured(), e.exit_code()))
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -169,7 +182,10 @@ pub struct NapiWorkspaceArgs {
 pub fn tree(args: NapiWorkspaceArgs) -> Result<serde_json::Value> {
     let workspace = Path::new(&args.workspace);
     let verb_args = verbs::tree::TreeArgs { workspace };
-    invoke_verb(|ctx, stdout| verbs::tree::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
+    invoke_verb(|ctx, stdout| {
+        verbs::tree::run(ctx, &verb_args, stdout)
+            .map_err(|e| into_napi(e.to_structured(), e.exit_code()))
+    })
 }
 
 #[napi(object)]
@@ -183,7 +199,10 @@ pub fn diff(args: NapiDiffArgs) -> Result<serde_json::Value> {
     let before = Path::new(&args.before);
     let after = Path::new(&args.after);
     let verb_args = verbs::diff::DiffArgs { before, after };
-    invoke_verb(|ctx, stdout| verbs::diff::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
+    invoke_verb(|ctx, stdout| {
+        verbs::diff::run(ctx, &verb_args, stdout)
+            .map_err(|e| into_napi(e.to_structured(), e.exit_code()))
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +245,10 @@ pub fn export(args: NapiExportArgs) -> Result<serde_json::Value> {
         format,
         out,
     };
-    invoke_verb(|ctx, stdout| verbs::export::run(ctx, &verb_args, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
+    invoke_verb(|ctx, stdout| {
+        verbs::export::run(ctx, &verb_args, stdout)
+            .map_err(|e| into_napi(e.to_structured(), e.exit_code()))
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -273,7 +295,10 @@ pub fn inspect(args: NapiInspectArgs) -> Result<serde_json::Value> {
 #[napi]
 pub fn verify(args: NapiWorkspaceArgs) -> Result<serde_json::Value> {
     let workspace = Path::new(&args.workspace);
-    invoke_verb(|ctx, stdout| verbs::verify::run(ctx, workspace, stdout).map_err(|e| into_napi(e.to_structured(), e.exit_code())))
+    invoke_verb(|ctx, stdout| {
+        verbs::verify::run(ctx, workspace, stdout)
+            .map_err(|e| into_napi(e.to_structured(), e.exit_code()))
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -328,10 +353,7 @@ fn into_napi(structured: StructuredError, exit_code: ExitCode) -> Error {
         Err(_) => return Error::from_reason(structured.message),
     };
     if let Some(obj) = body.as_object_mut() {
-        obj.insert(
-            "exit_code".to_string(),
-            serde_json::json!(exit_code as i32),
-        );
+        obj.insert("exit_code".to_string(), serde_json::json!(exit_code as i32));
     }
     Error::from_reason(body.to_string())
 }

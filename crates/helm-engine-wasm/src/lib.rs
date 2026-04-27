@@ -24,11 +24,9 @@ use serde::{Deserialize, Serialize};
 /// latency). `IS_PRECOMPILED` tags which API path on
 /// [`engine_host_wasm::Session`] to take.
 #[cfg(feature = "precompile")]
-const HELM_ENGINE_BYTES: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.cwasm"));
+const HELM_ENGINE_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.cwasm"));
 #[cfg(not(feature = "precompile"))]
-const HELM_ENGINE_BYTES: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.wasm"));
+const HELM_ENGINE_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.wasm"));
 const IS_PRECOMPILED: bool = cfg!(feature = "precompile");
 
 const SPEC: EngineSpec = EngineSpec {
@@ -142,8 +140,14 @@ thread_local! {
 
 fn call_guest(input: &[u8]) -> Result<Vec<u8>, HelmEngineError> {
     SESSION.with(|slot| {
-        engine_host_wasm::thread_local_call_with(slot, HELM_ENGINE_BYTES, SPEC, input, IS_PRECOMPILED)
-            .map_err(HelmEngineError::from)
+        engine_host_wasm::thread_local_call_with(
+            slot,
+            HELM_ENGINE_BYTES,
+            SPEC,
+            input,
+            IS_PRECOMPILED,
+        )
+        .map_err(HelmEngineError::from)
     })
 }
 

@@ -40,11 +40,9 @@ use wasmtime_wasi::WasiCtxBuilder;
 /// wasn't available at build time — see
 /// [`WorkerError::SandboxUnavailable`].
 #[cfg(feature = "precompile-engines")]
-const WORKER_BYTES: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/akua-render-worker.cwasm"));
+const WORKER_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/akua-render-worker.cwasm"));
 #[cfg(not(feature = "precompile-engines"))]
-const WORKER_BYTES: &[u8] =
-    include_bytes!(concat!(env!("OUT_DIR"), "/akua-render-worker.wasm"));
+const WORKER_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/akua-render-worker.wasm"));
 const WORKER_PRECOMPILED: bool = cfg!(feature = "precompile-engines");
 
 /// Per-render resource caps. Defaults documented in
