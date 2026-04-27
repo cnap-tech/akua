@@ -84,21 +84,27 @@ jobs:
         working-directory: crates/akua-napi
         run: bun install --frozen-lockfile
 
-      - name: Install cross-rs (cross-compile only)
+      - uses: mlugg/setup-zig@v2
         if: matrix.cross == true
-        # cross-rs ships Docker images with toolchains for every target
-        # plus the right CFLAGS for ring's ARM ASM. napi-cross fails on
-        # ring (missing __ARM_ARCH define) and lacks any musl toolchain
-        # at all — cross-rs handles both cleanly.
-        run: cargo install cross --git https://github.com/cross-rs/cross --locked
+        with:
+          version: 0.14.1
+
+      - uses: taiki-e/install-action@v2
+        if: matrix.cross == true
+        with:
+          tool: cargo-zigbuild
 
       - name: Build native (release)
         working-directory: crates/akua-napi
         shell: bash
+        # `-x` tells napi to use cargo-zigbuild for cross-compile.
+        # zigbuild knows how to set ARM ASM defines for ring and ships
+        # its own musl toolchain — fixes both the napi-cross __ARM_ARCH
+        # failure and the missing-musl-gcc problem in one step.
         run: |
           set -eu
           if [ "${{ matrix.cross }}" = "true" ]; then
-            bunx napi build --platform --release --target ${{ matrix.target }} --use-cross
+            bunx napi build --platform --release --target ${{ matrix.target }} -x
           else
             bunx napi build --platform --release --target ${{ matrix.target }}
           fi
