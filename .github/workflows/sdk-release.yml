@@ -35,7 +35,7 @@ jobs:
           install: true
           cache: true
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         # Node 24 for npm 11+ (OIDC trusted-publishing support);
         # see native-release.yml for the full rationale.
         with:
