@@ -90,6 +90,24 @@ tasks:
       - task: lint
       - task: test
 
+  release:validate:
+    desc: Pre-tag smoke — render every green example and diff against committed goldens
+    deps:
+      - build:engines
+      - build:render-worker
+    cmds:
+      # Each green example commits its rendered/ output. The integration
+      # tests already byte-diff every render against the golden, so this
+      # task is the canonical pre-tag confidence check: if it's green,
+      # render output is byte-identical to what shipped on main.
+      - cargo test -p akua-cli --features cosign-verify,dev-watch
+          --test examples_helm_hello
+          --test examples_hello_webapp
+          --test examples_pkg_compose
+          --test examples_kustomize_hello
+          --test examples_kcl_ecosystem
+          --test examples_export
+
   # ---- Release builds ------------------------------------------------------
 
   release:local:

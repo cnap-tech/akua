@@ -15,6 +15,20 @@ export function check(manifest?: string | null, lock?: string | null, package_fi
 export function diff(before_json: string, after_json: string): string;
 
 /**
+ * Emit OpenAPI 3.1 wrapping the Package's `Input` schema under
+ * `components.schemas.Input`. Same shape `akua export
+ * --format=openapi` writes.
+ */
+export function export_input_openapi(filename: string, source: string): string;
+
+/**
+ * Emit JSON Schema 2020-12 for the Package's `Input` schema.
+ * Returns the schema as a JSON string — same shape `akua export
+ * --format=json-schema` writes to stdout.
+ */
+export function export_input_schema(filename: string, source: string): string;
+
+/**
  * Format a KCL source buffer. `check_mode=true` is read-only and
  * reports `changed` per file; `check_mode=false` returns the
  * formatted text in the `formatted` field (JS writes back to disk).

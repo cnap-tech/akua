@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Public inputs for the hello-webapp Package.",
+  "properties": {
+    "name": {
+      "default": "hello",
+      "description": "Internal name used as a resource-name prefix. Lowercase, hyphen-separated.",
+      "type": "string",
+      "x-ui": {
+        "group": "Identity",
+        "order": 10
+      }
+    },
+    "replicas": {
+      "default": 2,
+      "description": "Replica count for the Deployment.",
+      "type": "integer",
+      "x-ui": {
+        "max": 20,
+        "min": 1,
+        "order": 20,
+        "widget": "slider"
+      }
+    }
+  },
+  "required": [
+    "name",
+    "replicas"
+  ],
+  "title": "Input",
+  "type": "object"
+}

@@ -341,7 +341,7 @@ fn run_parse_program(
 /// so Packages that import the akua stdlib fail to parse there. The
 /// in-process SDK consumers get a clear diagnostic naming the missing
 /// stdlib module — same shape `lint` already produces today.
-fn akua_external_pkgs() -> Vec<kcl_lang::ExternalPkg> {
+pub(crate) fn akua_external_pkgs() -> Vec<kcl_lang::ExternalPkg> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         vec![kcl_lang::ExternalPkg {
@@ -514,6 +514,124 @@ pub fn eval_source_full(
     eval_kcl(path, source, &json, charts_pkg_dir, kcl_pkgs)
 }
 
+/// Strip akua-extension decorators (`@ui(...)`) from KCL source
+/// before handing it to the resolver. KCL's resolver only knows
+/// `@deprecated` / `@info`; any other decorator name surfaces as
+/// `UnKnown decorator …` and aborts compilation. `akua export`
+/// extracts these directly from the parsed AST, so render doesn't
+/// need them — strip and continue.
+///
+/// Strips any line whose first non-whitespace token is `@ui(` and
+/// continues consuming until the parenthesis balance returns to
+/// zero, so multi-line decorator forms are also removed. The blank
+/// line is left in place to preserve KCL line numbers in diagnostics.
+fn strip_akua_decorators(source: &str) -> String {
+    const PREFIXES: &[&str] = &["@ui("];
+    // Fast-path: most Packages don't carry `@ui(...)`. Skip the
+    // line-by-line scan unless the substring actually appears.
+    if !PREFIXES.iter().any(|p| source.contains(p)) {
+        return source.to_string();
+    }
+    let mut out = String::with_capacity(source.len());
+    let mut lines = source.lines();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim_start();
+        if !PREFIXES.iter().any(|p| trimmed.starts_with(p)) {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        // Consume until paren balance returns to zero, tracking
+        // string-literal context so `@ui(label="(foo)")` works.
+        // Replaced lines become blank to preserve KCL line numbers
+        // in diagnostics.
+        let mut depth: i32 = 0;
+        let mut current = line;
+        loop {
+            depth += paren_balance(current);
+            out.push('\n');
+            if depth <= 0 {
+                break;
+            }
+            match lines.next() {
+                Some(next) => current = next,
+                None => break,
+            }
+        }
+    }
+    out
+}
+
+/// Net paren balance of `line`, treating characters inside `"..."` /
+/// `'...'` / `"""..."""` / `'''...'''` string literals as inert.
+/// Backslash-escaped quotes inside a single/double quoted string are
+/// honoured; KCL doesn't allow escapes inside triple-quoted strings.
+fn paren_balance(line: &str) -> i32 {
+    #[derive(PartialEq, Eq)]
+    enum S {
+        Code,
+        Str1,
+        Str2,
+        Str1x3,
+        Str2x3,
+    }
+    let bytes = line.as_bytes();
+    let mut state = S::Code;
+    let mut depth: i32 = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        match state {
+            S::Code => {
+                if i + 2 < bytes.len() && &bytes[i..i + 3] == b"\"\"\"" {
+                    state = S::Str2x3;
+                    i += 3;
+                    continue;
+                }
+                if i + 2 < bytes.len() && &bytes[i..i + 3] == b"'''" {
+                    state = S::Str1x3;
+                    i += 3;
+                    continue;
+                }
+                match b {
+                    b'"' => state = S::Str2,
+                    b'\'' => state = S::Str1,
+                    b'(' => depth += 1,
+                    b')' => depth -= 1,
+                    b'#' => break, // line-comment runs to EOL
+                    _ => {}
+                }
+            }
+            S::Str1 => match b {
+                b'\\' => i += 1, // skip escaped char
+                b'\'' => state = S::Code,
+                _ => {}
+            },
+            S::Str2 => match b {
+                b'\\' => i += 1,
+                b'"' => state = S::Code,
+                _ => {}
+            },
+            S::Str1x3 => {
+                if i + 2 < bytes.len() && &bytes[i..i + 3] == b"'''" {
+                    state = S::Code;
+                    i += 3;
+                    continue;
+                }
+            }
+            S::Str2x3 => {
+                if i + 2 < bytes.len() && &bytes[i..i + 3] == b"\"\"\"" {
+                    state = S::Code;
+                    i += 3;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    depth
+}
+
 fn eval_kcl(
     path: &Path,
     code: &str,
@@ -563,9 +681,10 @@ fn eval_kcl(
             pkg_path: guest_path.to_string_lossy().into_owned(),
         });
     }
+    let stripped = strip_akua_decorators(code);
     let args = ExecProgramArgs {
         k_filename_list: vec![path.to_string_lossy().into_owned()],
-        k_code_list: vec![code.to_string()],
+        k_code_list: vec![stripped],
         args: vec![Argument {
             name: INPUT_OPTION_KEY.to_string(),
             value: option_json.to_string(),
@@ -595,6 +714,39 @@ fn eval_kcl(
 mod tests {
     use super::*;
     use serde_yaml::Mapping;
+
+    #[test]
+    fn strip_decorators_removes_single_line_at_ui() {
+        let src = "schema Input:\n    @ui(order=10)\n    name: str\n";
+        let stripped = strip_akua_decorators(src);
+        assert_eq!(stripped, "schema Input:\n\n    name: str\n");
+    }
+
+    #[test]
+    fn strip_decorators_preserves_line_numbers_for_multiline() {
+        let src = "schema Input:\n    @ui(\n        order=10,\n        group=\"x\",\n    )\n    name: str\n";
+        let stripped = strip_akua_decorators(src);
+        // Four blank lines for the four-line `@ui(...)` invocation —
+        // line numbers in KCL diagnostics still match the original.
+        assert_eq!(stripped, "schema Input:\n\n\n\n\n    name: str\n");
+    }
+
+    #[test]
+    fn strip_decorators_handles_quoted_parens() {
+        let src = "schema Input:\n    @ui(label=\"foo()bar\")\n    name: str\n";
+        let stripped = strip_akua_decorators(src);
+        // Without string-aware paren counting, the `)` inside the
+        // string literal would close the decorator early and leak the
+        // trailing `\")` onto the next line.
+        assert_eq!(stripped, "schema Input:\n\n    name: str\n");
+    }
+
+    #[test]
+    fn strip_decorators_fast_paths_when_no_at_ui() {
+        let src = "schema Input:\n    name: str\n";
+        // Fast-path: returns input string unchanged.
+        assert_eq!(strip_akua_decorators(src), src);
+    }
 
     /// Pure-KCL fixture: no engine imports, no external charts. Emits
     /// one ConfigMap whose `data.count` reflects `input.replicas`. Uses

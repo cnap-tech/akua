@@ -13,11 +13,11 @@ use akua_cli::contract::{emit_error, Context, UniversalArgs};
 use akua_cli::verbs::dev as dev_verb;
 use akua_cli::verbs::{
     add as add_verb, auth as auth_verb, cache as cache_verb, check as check_verb,
-    diff as diff_verb, fmt as fmt_verb, init as init_verb, inspect as inspect_verb,
-    lint as lint_verb, lock as lock_verb, pack as pack_verb, publish as publish_verb,
-    pull as pull_verb, push as push_verb, remove as remove_verb, render as render_verb,
-    repl as repl_verb, test as test_verb, tree as tree_verb, update as update_verb,
-    verify as verify_verb, version as version_verb, whoami as whoami_verb,
+    diff as diff_verb, export as export_verb, fmt as fmt_verb, init as init_verb,
+    inspect as inspect_verb, lint as lint_verb, lock as lock_verb, pack as pack_verb,
+    publish as publish_verb, pull as pull_verb, push as push_verb, remove as remove_verb,
+    render as render_verb, repl as repl_verb, test as test_verb, tree as tree_verb,
+    update as update_verb, verify as verify_verb, version as version_verb, whoami as whoami_verb,
 };
 #[cfg(feature = "cosign-verify")]
 use akua_cli::verbs::{sign as sign_verb, verify_tarball as verify_tarball_verb};
@@ -463,6 +463,27 @@ enum Commands {
         tarball: Option<PathBuf>,
     },
 
+    /// Emit the Package's `Input` schema as JSON Schema 2020-12 or
+    /// OpenAPI 3.1. Powers UI form renderers, API doc generators,
+    /// and admission-webhook schema validators.
+    Export {
+        #[command(flatten)]
+        args: UniversalArgs,
+
+        /// Path to the `package.k` file.
+        #[arg(long, default_value = "./package.k")]
+        package: PathBuf,
+
+        /// Output format. JSON Schema 2020-12 (raw) or OpenAPI 3.1
+        /// (Input wrapped under `components.schemas`).
+        #[arg(long, value_enum, default_value_t = export_verb::ExportFormat::JsonSchema)]
+        format: export_verb::ExportFormat,
+
+        /// Write output to this path instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
+
     /// Parse-only check of a `package.k` (KCL syntax + imports).
     Lint {
         #[command(flatten)]
@@ -668,6 +689,12 @@ fn dispatch(command: Commands) -> ExitCode {
             package,
             tarball,
         } => run_inspect(&args, &package, tarball.as_deref()),
+        Commands::Export {
+            args,
+            package,
+            format,
+            out,
+        } => run_export(&args, &package, format, out.as_deref()),
         Commands::Lint { args, package } => run_lint(&args, &package),
         Commands::Check {
             args,
@@ -1166,6 +1193,25 @@ fn run_inspect(
     let verb_args = inspect_verb::InspectArgs { target };
     let mut stdout = io::stdout().lock();
     match inspect_verb::run(&ctx, &verb_args, &mut stdout) {
+        Ok(code) => code,
+        Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
+    }
+}
+
+fn run_export(
+    args: &UniversalArgs,
+    package: &std::path::Path,
+    format: export_verb::ExportFormat,
+    out: Option<&std::path::Path>,
+) -> ExitCode {
+    let ctx = resolve_ctx(args);
+    let verb_args = export_verb::ExportArgs {
+        package_path: package,
+        format,
+        out,
+    };
+    let mut stdout = io::stdout().lock();
+    match export_verb::run(&ctx, &verb_args, &mut stdout) {
         Ok(code) => code,
         Err(e) => emit_structured(&ctx, &e.to_structured(), e.exit_code()),
     }

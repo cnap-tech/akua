@@ -63,6 +63,8 @@ pub mod cosign_sidecar;
 pub mod dev;
 #[cfg(feature = "engine-kcl")]
 pub mod dir_diff;
+#[cfg(feature = "engine-kcl")]
+pub mod export;
 #[cfg(feature = "git-fetch")]
 pub mod git_fetcher;
 #[cfg(all(feature = "engine-kcl", feature = "engine-helm"))]

@@ -45,4 +45,40 @@ describe('Akua CI-gate verbs', () => {
 		expect(out.files.length).toBe(1);
 		expect(typeof out.files[0].changed).toBe('boolean');
 	});
+
+	test('export emits JSON Schema 2020-12 with @ui decorators projected to x-ui', async () => {
+		const PKG_WITH_UI = `
+schema Input:
+    """Public inputs."""
+
+    @ui(order=10, group="Identity")
+    name: str = "hello"
+
+    replicas: int = 2
+
+resources = []
+`;
+		using pkg = scratchPackageWith(PKG_WITH_UI, 'akua-sdk-export-');
+		const akua = new Akua();
+		const schema = await akua.export({ package: join(pkg.dir, 'package.k') });
+		expect(schema.$schema).toBe('https://json-schema.org/draft/2020-12/schema');
+		const props = schema.properties as Record<string, Record<string, unknown>>;
+		expect(props.name.type).toBe('string');
+		const xUi = props.name['x-ui'] as Record<string, unknown>;
+		expect(xUi.order).toBe(10);
+		expect(xUi.group).toBe('Identity');
+	});
+
+	test('export with format=openapi wraps Input under components.schemas', async () => {
+		using pkg = scratchPackageWith(MINIMAL_PACKAGE_K, 'akua-sdk-export-openapi-');
+		const akua = new Akua();
+		const doc = await akua.export({
+			package: join(pkg.dir, 'package.k'),
+			format: 'openapi',
+		});
+		expect(doc.openapi).toBe('3.1.0');
+		const components = doc.components as Record<string, Record<string, unknown>>;
+		expect(typeof components.schemas).toBe('object');
+		expect(components.schemas.Input).toBeDefined();
+	});
 });

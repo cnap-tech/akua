@@ -23,7 +23,29 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
+  # Belt-and-braces gate: render every green example through the
+  # tagged commit and byte-diff against the committed `rendered/`
+  # goldens before any binaries ship. `task ci` already runs this on
+  # every push to main, but a stale-golden between merge and tag
+  # would silently produce a release with non-deterministic output.
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: jdx/mise-action@v4
+        with:
+          install: true
+          cache: true
+      - uses: rui314/setup-mold@v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: validate
+          cache-on-failure: true
+      - name: task release:validate
+        run: mise exec -- task release:validate
+
   build:
+    needs: validate
     strategy:
       matrix:
         include:

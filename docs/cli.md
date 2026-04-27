@@ -6,8 +6,8 @@ For the universal contract every verb honors (JSON output, exit codes, idempoten
 
 > **Status marker.** Sections marked ✅ describe verbs available in the shipping binary. Sections marked 🚧 describe verbs from the target surface that aren't wired yet. If a verb isn't marked, assume 🚧.
 >
-> **Shipped today (25 verbs):**
-> `init` · `whoami` · `version` · `verify` · `render` · `add` · `dev` · `test` · `tree` · `pull` · `publish` · `sign` · `update` · `lock` · `push` · `repl` · `pack` · `remove` · `diff` · `check` · `inspect` · `lint` · `fmt` · `cache` · `auth`
+> **Shipped today (26 verbs):**
+> `init` · `whoami` · `version` · `verify` · `render` · `add` · `dev` · `test` · `tree` · `pull` · `publish` · `sign` · `update` · `lock` · `push` · `repl` · `pack` · `remove` · `diff` · `check` · `inspect` · `lint` · `fmt` · `cache` · `auth` · `export`
 >
 > Run `akua --help` at the command line for the authoritative live list.
 
@@ -478,60 +478,81 @@ kcl_lang's `list_options` only reads a type arg passed directly to
 
 ---
 
-## `akua export` 🚧
+## `akua export` ✅
 
-**Convert a canonical artifact to a format view.** The canonical form stays KCL (or Rego, for policies); `akua export` emits JSON Schema, OpenAPI, YAML, or other standard formats for consumers that expect them.
+**Convert a Package's `Input` schema to a standard interchange format.** Emits JSON Schema 2020-12 (raw) or OpenAPI 3.1 (Input wrapped under `components.schemas`). Backed by KCL's resolver + AST walk; field docstrings become `description`, `@ui(...)` decorators become `x-ui` extensions.
 
 ```
-akua export [target] --format=<format> [flags]
+akua export --package <path> [--format=<json-schema|openapi>] [--out=<file>]
 ```
 
-> **Not the same as `akua render`.** `export` is format translation — it doesn't invoke Helm / kro / Kustomize and doesn't need customer inputs. It answers *"how do I describe this artifact in a format other tools understand?"* Use `render` when you want deploy-ready manifests; use `export` when you want a schema, a YAML view of a KCL document, a Rego bundle, or API docs. See [`akua render`](#akua-render) above.
+> **Not the same as `akua render`.** `export` is format translation — it doesn't invoke Helm / kro / Kustomize and doesn't need customer inputs. It answers *"how do I describe this Package's inputs in a format other tools understand?"* Use `render` when you want deploy-ready manifests; use `export` when you want a schema for a UI form renderer or API doc generator. See [`akua render`](#akua-render) above.
 
 ### Supported formats
 
-| format | input | output | for |
-|---|---|---|---|
-| `json-schema` | Package `Input` schema | JSON Schema Draft 2020-12 | install UIs, form renderers (rjsf, JSONForms) |
-| `openapi` | Package `Input` schema | OpenAPI 3.1 | API docs, client SDK generation, admission webhook schemas |
-| `yaml` | any KCL document (user-defined App, Environment, …) | YAML view | interchange with non-KCL tooling |
-| `json` | any KCL document | JSON | scripting, jq pipelines |
-| `rego-bundle` | Policy set | OPA bundle tarball | uploading to Gatekeeper, Styra DAS, other OPA runtimes |
+| format | output | for |
+|---|---|---|
+| `json-schema` (default) | JSON Schema Draft 2020-12 for the `Input` schema | install UIs, form renderers (rjsf, JSONForms) |
+| `openapi` | OpenAPI 3.1 with `Input` under `components.schemas` | API docs (Swagger UI, Redoc), client SDK generation, admission-webhook validators |
 
 ### Flags
 
 | flag | description |
 |---|---|
-| `--format=<fmt>` | output format (required) |
+| `--package=<path>` | path to `package.k` (default `./package.k`) |
+| `--format=<fmt>` | `json-schema` (default) or `openapi` |
 | `--out=<file>` | write to file (default: stdout) |
-| `--pretty` | human-readable formatting (JSON: indented; YAML: commented) |
-| `--include=<path>` | glob of paths to include (for workspace exports) |
+
+### `@ui(...)` decorators → `x-ui` extension
+
+`@ui(...)` keyword arguments on schema attributes are projected onto the JSON Schema property as the OpenAPI-3.1-compliant `x-ui` extension. Renderers that recognise it (rjsf, custom form UIs) consume the hints; renderers that don't, ignore them.
+
+```kcl
+schema Input:
+    @ui(order=10, group="Identity")
+    name: str = "hello"
+
+    @ui(order=20, widget="slider", min=1, max=20)
+    replicas: int = 2
+```
+
+```json
+{
+  "properties": {
+    "name": {
+      "type": "string",
+      "default": "hello",
+      "x-ui": {"order": 10, "group": "Identity"}
+    },
+    "replicas": {
+      "type": "integer",
+      "default": 2,
+      "x-ui": {"order": 20, "widget": "slider", "min": 1, "max": 20}
+    }
+  }
+}
+```
 
 ### Examples
 
 ```sh
-# Export a Package's input schema as JSON Schema for a web form
-akua export --format=json-schema > inputs.schema.json
+# JSON Schema for a web form
+akua export --package package.k > inputs.schema.json
 
-# Export as OpenAPI 3.1 for API docs
-akua export --format=openapi > package.openapi.json
+# OpenAPI 3.1 for API docs
+akua export --package package.k --format=openapi > package.openapi.json
 
-# Export any KCL document as YAML view (useful for docs or non-KCL pipelines)
-akua export app checkout --format=yaml > app.yaml
-
-# Export a policy set as OPA bundle
-akua export --policy tier/production --format=rego-bundle --out=production.tar.gz
+# Write to file directly
+akua export --package package.k --out=exported/inputs.schema.json
 ```
-
-The export is a one-way projection; re-importing a YAML view back into the KCL workspace is done via `akua apply -f <file>.yaml`, which round-trips losslessly for documents whose schema the workspace declares.
 
 ### Exit codes
 
-0 success, 1 on invalid format or canonical source.
+0 success; 1 if `package.k` lacks an `Input` schema or has KCL syntax errors; 5 on filesystem errors.
 
 ---
 
-## `akua dev` 🚧
+## `akua dev` ✅
 
 Start the hot-reload development loop.
 
@@ -1120,7 +1141,7 @@ Equivalent to `akua test --coverage` but produces a standalone report. Useful fo
 
 ---
 
-## `akua repl` 🚧
+## `akua repl` ✅
 
 Interactive REPL for exploring policies and packages.
 

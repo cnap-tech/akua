@@ -138,6 +138,26 @@ pub fn tree(manifest: &str, lock: Option<String>) -> Result<String, JsError> {
     serde_json::to_string(&out).map_err(|e| JsError::new(&e.to_string()))
 }
 
+/// Emit JSON Schema 2020-12 for the Package's `Input` schema.
+/// Returns the schema as a JSON string — same shape `akua export
+/// --format=json-schema` writes to stdout.
+#[wasm_bindgen]
+pub fn export_input_schema(filename: &str, source: &str) -> Result<String, JsError> {
+    let schema = akua_core::export::export_input_schema(filename, source)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    serde_json::to_string(&schema).map_err(|e| JsError::new(&e.to_string()))
+}
+
+/// Emit OpenAPI 3.1 wrapping the Package's `Input` schema under
+/// `components.schemas.Input`. Same shape `akua export
+/// --format=openapi` writes.
+#[wasm_bindgen]
+pub fn export_input_openapi(filename: &str, source: &str) -> Result<String, JsError> {
+    let doc = akua_core::export::export_input_openapi(filename, source)
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    serde_json::to_string(&doc).map_err(|e| JsError::new(&e.to_string()))
+}
+
 /// Diff two `{ "path": "sha256-hex" }` maps passed as JSON strings.
 /// Returns the `DirDiff` JSON shape `akua diff --json` emits.
 #[wasm_bindgen]

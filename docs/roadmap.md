@@ -27,7 +27,7 @@ The roadmap is ordered by implementation phase, but releases cut across phases. 
 
 **Shipped on `main` today (all load-bearing for v0.1.0):**
 
-- CLI contract + ~25 verbs (`init`, `render`, `check`, `lint`, `fmt`, `test`, `dev`, `repl`, `add`, `remove`, `tree`, `lock`, `update`, `verify`, `diff`, `inspect`, `pack`, `push`, `sign`, `pull`, `publish`, `cache`, `auth`, `whoami`, `version`)
+- CLI contract + ~26 verbs (`init`, `render`, `check`, `lint`, `fmt`, `test`, `dev`, `repl`, `add`, `remove`, `tree`, `lock`, `update`, `verify`, `diff`, `inspect`, `pack`, `push`, `sign`, `pull`, `publish`, `cache`, `auth`, `whoami`, `version`, `export`)
 - Deterministic raw-YAML render writer + per-output sha256
 - `Package.k` loader via `kcl_lang::API` + the `akua.*` KCL stdlib
 - Helm + Kustomize WASM engines

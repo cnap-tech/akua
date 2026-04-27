@@ -40,6 +40,8 @@ type WasmBinding = {
 	) => string;
 	tree: (manifest: string, lock: string | null) => string;
 	diff: (beforeJson: string, afterJson: string) => string;
+	export_input_schema: (filename: string, source: string) => string;
+	export_input_openapi: (filename: string, source: string) => string;
 };
 let wasmPromise: Promise<WasmBinding> | undefined;
 function loadWasm(): Promise<WasmBinding> {
@@ -159,6 +161,17 @@ export interface CheckOptions {
 export interface LintOptions {
 	/** Path to the `package.k` file. Default: `./package.k`. */
 	package?: string;
+}
+
+export interface ExportOptions {
+	/** Path to the `package.k` file. Default: `./package.k`. */
+	package?: string;
+	/**
+	 * Output format. `json-schema` (default) emits raw JSON Schema 2020-12;
+	 * `openapi` wraps it as an OpenAPI 3.1 doc with the `Input` schema
+	 * under `components.schemas.Input`.
+	 */
+	format?: 'json-schema' | 'openapi';
 }
 
 export interface FmtOptions {
@@ -286,6 +299,28 @@ export class Akua {
 		const source = await readFile(pkg, 'utf8');
 		const wasm = await loadWasm();
 		return validateAs<LintOutput>('LintOutput', JSON.parse(wasm.lint(pkg, source)));
+	}
+
+	/**
+	 * Emit the Package's `Input` schema as JSON Schema 2020-12 (default)
+	 * or OpenAPI 3.1. In-process via WASM — no binary required. Returns
+	 * the parsed schema document; consumers feed it to UI form renderers
+	 * (rjsf, JSONForms), API doc tools, or admission-webhook validators.
+	 *
+	 * Field-level docstrings become `description`; `@ui(...)` decorators
+	 * become OpenAPI-3.1-compliant `x-ui` extensions. See
+	 * [`docs/cli.md`](https://github.com/cnap-tech/akua/blob/main/docs/cli.md#akua-export)
+	 * for the full schema contract.
+	 */
+	async export(opts: ExportOptions = {}): Promise<Record<string, unknown>> {
+		const pkg = opts.package ?? './package.k';
+		const source = await readFile(pkg, 'utf8');
+		const wasm = await loadWasm();
+		const raw =
+			opts.format === 'openapi'
+				? wasm.export_input_openapi(pkg, source)
+				: wasm.export_input_schema(pkg, source);
+		return JSON.parse(raw) as Record<string, unknown>;
 	}
 
 	/**

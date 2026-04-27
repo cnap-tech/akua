@@ -12,9 +12,11 @@ import charts.nginx as nginx    # Phase 2a: resolved from akua.toml
 schema Input:
     """Public inputs for the hello-webapp Package."""
 
+    @ui(order=10, group="Identity")
     name: str = "hello"
     """Internal name used as a resource-name prefix. Lowercase, hyphen-separated."""
 
+    @ui(order=20, widget="slider", min=1, max=20)
     replicas: int = 2
     """Replica count for the Deployment."""
 

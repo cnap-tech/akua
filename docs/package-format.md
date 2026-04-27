@@ -132,13 +132,11 @@ schema HostInput:
     priority: int = 0
 ```
 
-### UI hints (optional) 🚧 v0.2.0
+### UI hints (optional) ✅
 
-When a Package is consumed through a UI (merchant install form, Package Studio, generated Swagger form), renderers benefit from hints about field ordering, labels, placeholders, grouping. The shape below is the target authoring surface; consumption ships with `akua export` (see [docs/cli.md `akua export` 🚧](cli.md#akua-export-)). v0.1.0 has neither the export verb nor the decorator parser — both are tracked under [docs/roadmap.md](roadmap.md) Phase 5+.
+When a Package is consumed through a UI (merchant install form, Package Studio, generated Swagger form), renderers benefit from hints about field ordering, labels, placeholders, grouping. akua reads UI hints from two sources, both projected into the JSON Schema / OpenAPI output of [`akua export`](cli.md#akua-export).
 
-akua plans to read UI hints from two sources:
-
-**KCL docstrings** — the field's `"""…"""` docstring becomes the UI label and description:
+**KCL docstrings** — the field's `"""…"""` docstring becomes the schema property's `description`:
 
 ```python
 schema Input:
@@ -154,12 +152,9 @@ schema Input:
     """Number of replicas. Minimum 1 in production."""
 ```
 
-Docstrings are valid KCL today — the compiler accepts them and they survive `akua fmt` round-trips — they just aren't consumed by any UI-rendering verb yet.
-
-**KCL schema decorators** — optional, for ordering / grouping / widget hints docstrings can't carry. Decorators are aspirational v0.2.0 syntax — KCL itself doesn't yet implement schema-attribute decorators of this shape, so concrete invocations are illustrative only:
+**`@ui(...)` decorators** — for ordering / grouping / widget hints docstrings can't carry. The decorator's keyword arguments are projected onto the JSON Schema property as the OpenAPI-3.1-compliant `x-ui` extension; renderers that recognise it (rjsf, custom form UIs) consume the hints, renderers that don't, ignore them.
 
 ```python
-# Planned shape — not parseable in v0.1.0.
 schema Input:
     @ui(order=10, group="Identity")
     appName: str
@@ -171,26 +166,27 @@ schema Input:
     replicas: int = 3
 ```
 
-### Exporting a view vs rendering 🚧 v0.2.0
+`@ui(...)` is an akua-specific authoring hint, not a registered KCL decorator — `akua render` strips it before handing the source to KCL's resolver, while `akua export` extracts it from the parsed AST.
 
-The canonical Package is KCL. v0.2.0 plans two different verbs producing different outputs from it; v0.1.0 ships only `akua render`.
+### Exporting a view vs rendering ✅
 
-| verb | purpose | needs inputs? | output | status |
-|---|---|---|---|---|
-| `akua export` | convert the Package's schema / metadata to a standard format for external tools | no | JSON Schema / OpenAPI / YAML / Rego bundle | 🚧 planned |
-| `akua render` | execute the Package's full pipeline and produce deploy-ready Kubernetes manifests | yes | rendered YAML the reconciler applies | ✅ ships v0.1.0 |
+The canonical Package is KCL. akua ships two different verbs producing different outputs from it:
 
-For install UIs, API docs, rjsf / JSONForms, admission webhook schemas, and client SDK generators — `akua export` (planned) will skip engine invocation and customer inputs:
+| verb | purpose | needs inputs? | output |
+|---|---|---|---|
+| `akua export` | convert the Package's `Input` schema to a standard interchange format | no | JSON Schema 2020-12 or OpenAPI 3.1 |
+| `akua render` | execute the Package's full pipeline and produce deploy-ready Kubernetes manifests | yes | rendered YAML the reconciler applies |
+
+For install UIs, API docs, rjsf / JSONForms, admission webhook schemas, and client SDK generators — `akua export` skips engine invocation and customer inputs:
 
 ```sh
-# Planned — not available in v0.1.0.
-akua export --format=json-schema > inputs.schema.json     # for UI form rendering
-akua export --format=openapi > inputs.openapi.json        # for API docs / codegen
+akua export --package package.k > inputs.schema.json              # JSON Schema 2020-12
+akua export --package package.k --format=openapi > package.openapi.json
 ```
 
-For actual deployment rendering today — use `akua render` with customer inputs (covered in §9).
+For actual deployment rendering — use `akua render` with customer inputs (covered in §9).
 
-When `akua export` ships, its output will be pure, spec-compliant JSON Schema / OpenAPI 3.1 — no akua-specific extensions. Docstrings will become `description`; decorators will become `x-ui` metadata (which conforming renderers may use; others ignore). Consumers that speak these standards — including every JSON Schema tool in the ecosystem — work unchanged.
+`akua export` output is pure, spec-compliant JSON Schema 2020-12 / OpenAPI 3.1. Docstrings become `description`; `@ui(...)` decorators become `x-ui` metadata. Consumers that speak these standards — including every JSON Schema tool in the ecosystem — work unchanged.
 
 **No `x-user-input` or `x-input` markers.** Previous versions of akua layered custom extensions on JSON Schema to mark user-configurable fields and embed transforms. With KCL as the authoring substrate, both are redundant: the `Input` schema IS the customer-configurable contract by definition, and transforms live as KCL code in the package body. The eventual exported JSON Schema is standards-pure; UI renderers in the broader ecosystem don't need to learn akua-specific vocabulary.
 

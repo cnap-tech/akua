@@ -154,37 +154,87 @@ Initial published SDK.
 - Node (`@akua/sdk`) + browser (`@akua/sdk/browser`) entries.
 - Published to JSR via GitHub Actions OIDC.
 
-## CLI — [Unreleased]
+## CLI — [0.1.0] — 2026-04-27
 
-### Added (since last release)
+First tagged release of the `akua` binary. Substrate-shape only — no
+curated catalog, no cluster control plane. Ten green examples render
+deterministically; 26 verbs implement the universal CLI contract.
 
-- **`akua diff <before> <after>`** — structural chart comparison.
-  Each argument accepts either a local chart directory or an
-  `oci://` reference. Output covers `Chart.yaml` metadata shifts,
-  dependency adds/removes/updates (keyed on alias-or-name),
-  `values.yaml` default-value deltas (dot-path flattened), and
-  schema input-field changes (required↔optional, type, default,
-  `x-input` CEL transforms). Non-zero exit code when there are
-  changes, `diff(1)`-style, so CI can gate on "no unintended
-  delta". `--format json` for piping to `jq`.
+### Added
 
-  Why: `helm diff` renders templates (needs values + a cluster).
-  Nothing in the ecosystem shows the *shape* of what customers will
-  be asked to configure differently between versions. Closes the
-  3am-pager gap.
-- `akua init` — scaffolds `package.yaml` + `values.schema.json` +
-  `README.md`.
-- `akua inspect --oci` — output now includes `ociManifestDigest`
-  (single HEAD request for upstream-change detection).
-- Stable `phase` field on all top-level log events in JSON format.
+**Authoring + render**
+- KCL-typed Packages: `package.k` with `import` + `schema` +
+  `resources` regions, published as signed OCI artifacts.
+- `akua render` — wasmtime-sandboxed evaluation. Engines (Helm v4,
+  Kustomize) compiled to `wasm32-wasip1` and hosted inside akua's own
+  wasmtime — no `$PATH`, no shell-out, no ambient filesystem.
+- `akua export` — emit the Package's `Input` schema as JSON Schema
+  2020-12 or OpenAPI 3.1. Field docstrings become `description`;
+  `@ui(...)` decorators become `x-ui` extensions for form renderers
+  (rjsf, JSONForms) and admission-webhook validators.
+- `@ui(...)` schema decorators on `Input` attributes (`order`,
+  `group`, `widget`, `min`, `max`, `placeholder`, …). Decorator
+  arguments project losslessly into the exported schema; render
+  strips them before handing source to KCL's resolver.
+- Determinism invariant: same inputs + same `akua.lock` + same akua
+  version → byte-identical output. No `now()`, no `random()`, no env
+  reads in the render pipeline.
+
+**Dependency + lockfile shape**
+- `akua.toml` + `akua.lock` — human intent + digest-pinned ledger.
+  Three source kinds: `oci`, `git`, `path`. `[replace]` sections for
+  vendor + path overrides.
+- KCL ecosystem support — pull `oci://ghcr.io/kcl-lang/*` packages
+  alongside Helm charts. `import k8s.api.apps.v1` resolves against
+  the upstream KCL bundle inside the sandbox.
+
+**Verbs (26 shipped)** —
+`init` · `whoami` · `version` · `verify` · `render` · `add` · `dev` ·
+`test` · `tree` · `pull` · `publish` · `sign` · `update` · `lock` ·
+`push` · `repl` · `pack` · `remove` · `diff` · `check` · `inspect` ·
+`lint` · `fmt` · `cache` · `auth` · `export`. Universal contract:
+every verb supports `--json`, `--plan`, `--timeout`,
+`--idempotency-key`; typed exit codes 0–6; structured-error stderr.
+
+**Agent-first surface**
+- Auto-detection of Claude Code, Cursor, Codex, Gemini CLI, Goose,
+  Amp, OpenCode, Cline, and 25+ other agents. Detected sessions
+  auto-enable `--json`, `--no-color`, `--no-progress`,
+  `--no-interactive`.
+- Skill manifests under `skills/` conforming to the [Agent Skills
+  Specification](https://agentskills.io).
+
+**Signing + attestation**
+- `akua publish` emits cosign signatures (ECDSA P-256 keyed) and
+  SLSA v1 predicates by default; consumers verify on pull. Air-gap
+  flow: `akua pack` → `akua sign` → `akua verify --tarball`.
+
+**SDK**
+- `@akua/sdk` (`packages/sdk`) — in-process WASM via `akua-wasm`
+  crate, `wasm32-unknown-unknown` target. Verbs callable without
+  spawning the binary: `version`, `whoami`, `render`, `renderSource`,
+  `check`, `lint`, `fmt`, `inspect`, `tree`, `verify`, `diff`,
+  `export`. Same shapes the CLI emits — typed via `ts-rs`-generated
+  TypeScript types and `schemars`-emitted JSON Schemas.
 
 ### Security
 
-- See 0.3.0 entry above — every Rust-side hardening applies to the
-  CLI too.
+- Wasmtime sandbox is structural — no `--unsafe-host` escape hatch,
+  no shell-out fallback. Memory / epoch / wall-clock caps enforced
+  per render; capability-model preopens scope filesystem access.
+- Adversarial test suite: zip-bomb resistance, path traversal,
+  symlink escape, `PATH=/nonexistent` invariance, fork-bomb caps —
+  all green.
+- Every Rust-side hardening from the SDK 0.3.0 entry applies to the
+  CLI: tar-extraction symlink rejection, SSRF guard, OCI media-type
+  strictness, Content-Length preflight, `engine-helmfile` opt-in,
+  `helm-cli` opted out of `helm dependency update`.
 
 ## Status
 
-Pre-alpha. `@akua/sdk` has a published API surface frozen for
-`v1alpha1`. Rust workspace is still on `0.0.0` internally; binary
-releases pending (see [roadmap.md](docs/roadmap.md)).
+Alpha. v0.1.0 is the first tagged release. Stable contracts: the
+26-verb CLI surface, the universal flag/exit-code contract, the
+WASM-backed SDK methods, the wasmtime sandbox invariant. Anything in
+[`docs/roadmap.md`](docs/roadmap.md) under Phase 5+ may change before
+v0.2.0. Safe for CI and agent workflows today; pin akua versions for
+production rollouts.
