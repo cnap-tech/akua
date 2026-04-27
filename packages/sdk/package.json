@@ -3,6 +3,11 @@
   "version": "0.6.0",
   "description": "TypeScript SDK for akua — render Kubernetes Packages in-process. Helm + Kustomize engines, OCI fetch, cosign verify, JSON Schema export. No `akua` binary required.",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cnap-tech/akua.git"
+  },
+  "homepage": "https://github.com/cnap-tech/akua#readme",
   "type": "module",
   "main": "./dist/mod.js",
   "types": "./dist/mod.d.ts",
