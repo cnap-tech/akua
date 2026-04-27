@@ -1,7 +1,7 @@
 {
 	"name": "@akua/sdk",
-	"version": "0.0.0",
-	"description": "TypeScript SDK for akua — render Packages in-process via WASM; shell out to the akua CLI for the verbs not yet WASM-backed.",
+	"version": "0.6.0",
+	"description": "TypeScript SDK for akua — render Kubernetes Packages in-process. Helm + Kustomize engines, OCI fetch, cosign verify, JSON Schema export. No `akua` binary required.",
 	"license": "Apache-2.0",
 	"exports": "./src/mod.ts",
 	"publish": {

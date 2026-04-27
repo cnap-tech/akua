@@ -1,7 +1,7 @@
 {
   "name": "@akua/sdk",
-  "version": "0.0.0-spike",
-  "description": "TypeScript SDK for akua — shells out to the `akua` binary, returns typed results generated from the same serde types the CLI emits.",
+  "version": "0.6.0",
+  "description": "TypeScript SDK for akua — render Kubernetes Packages in-process. Helm + Kustomize engines, OCI fetch, cosign verify, JSON Schema export. No `akua` binary required.",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {

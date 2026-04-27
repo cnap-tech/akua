@@ -8,6 +8,58 @@ once v1 ships. Until then, `@akua/sdk` versions bump independently of the
 Rust workspace; breaking changes to `v1alpha1` data shapes trigger a
 minor bump in the SDK.
 
+## @akua/sdk — [0.6.0] — 2026-04-27
+
+The SDK pivots from the chart-tooling shape (`pullChart`,
+`packChart`, `pullChartStream`, `inspectChartBytes` — last shipped
+as 0.5.0) to a CLI-mirror shape: an `Akua` class whose methods map
+1:1 to the binary's verbs. Same `--json` envelopes, same typed
+errors, all in-process.
+
+### Added
+
+- `Akua` class — every shipping CLI verb is a method:
+  - **Read-only:** `version`, `whoami`, `lint`, `fmt`, `check`,
+    `tree`, `diff`, `export`, `verify`.
+  - **Render:** `render({ package, inputs, out, dryRun, strict,
+    offline })` returns the same `RenderSummary` envelope the CLI
+    emits, byte-for-byte. `renderSource({ source | package,
+    inputs })` returns rendered YAML directly for source-string
+    consumers.
+- Full feature parity with the binary in-process — Helm + Kustomize
+  engines, OCI fetch, cosign verify, JSON Schema / OpenAPI export.
+  No `akua` binary on `$PATH`, no shell-out. Native addon (`@akua/
+  native`, per-platform via Node-API / napi-rs) for the
+  feature-rich path; the existing `akua-wasm` bundle stays for the
+  pure-KCL fast path and browser targets.
+- `renderSource({ source, package, packageFilename, packageDir,
+  inputs })` — accepts raw KCL source or an on-disk Package; engine
+  callouts (`helm.template`, `kustomize.build`) work transparently
+  when a `packageDir` is provided.
+- Typed-error routing across the napi boundary: thrown errors
+  preserve the `code` (`E_PACKAGE_MISSING`, `E_RENDER_KCL`, …) so
+  `instanceof AkuaUserError` / `AkuaSystemError` etc. continues to
+  work.
+
+### Removed
+
+- The chart-tooling surface (`pullChart`, `pullChartStream`,
+  `pullChartCached`, `packChart`, `packChartStream`,
+  `inspectChartBytes`, `streamTgzEntries`, `unpackTgz`,
+  `@akua/sdk/cache`, `SsrfError`). Subsumed by `Akua.render`'s
+  in-process resolver, which ships the same OCI fetch + digest
+  verify + cosign check as the CLI uses.
+- `new Akua({ binary: '...' })` — the binary path option is gone
+  (no shell-out anymore). `new Akua()` is the only valid
+  construction.
+
+### Migration from 0.5.0
+
+The two surfaces don't overlap; consumers of the chart-tooling
+APIs need to rewrite. The 0.5.0 line stays installable on JSR for
+legacy callers; new code should use `0.6.0` and the `Akua`-class
+shape.
+
 ## @akua/sdk — [0.4.0] — 2026-04-18
 
 ### Changed
