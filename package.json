@@ -1,0 +1,8 @@
+{
+  "name": "akua-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "crates/akua-napi"
+  ]
+}

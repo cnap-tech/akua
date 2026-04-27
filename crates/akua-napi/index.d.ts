@@ -8,6 +8,8 @@ export declare function export(args: NapiExportArgs): any
 
 export declare function fmt(args: NapiFmtArgs): any
 
+export declare function inspect(args: NapiInspectArgs): any
+
 export declare function lint(args: NapiPackageArgs): any
 
 export interface NapiCheckArgs {
@@ -38,6 +40,19 @@ export interface NapiFmtArgs {
   check?: boolean
   /** `--stdout`: print the formatted source instead of writing it. */
   stdout?: boolean
+}
+
+export interface NapiInspectArgs {
+  /**
+   * On-disk Package directory or `package.k`. Mutually exclusive
+   * with `tarball`.
+   */
+  package?: string
+  /**
+   * `.tar.gz` Package artifact (e.g. from `akua pack`). Mutually
+   * exclusive with `package`.
+   */
+  tarball?: string
 }
 
 export interface NapiPackageArgs {

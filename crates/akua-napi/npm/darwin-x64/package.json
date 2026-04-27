@@ -1,0 +1,32 @@
+{
+  "name": "@akua-dev/native-darwin-x64",
+  "version": "0.6.0",
+  "cpu": [
+    "x64"
+  ],
+  "main": "akua.darwin-x64.node",
+  "files": [
+    "akua.darwin-x64.node"
+  ],
+  "description": "Native Node.js + Bun + Deno addon for akua-core. Loaded by @akua-dev/sdk; not a public surface.",
+  "keywords": [
+    "akua",
+    "napi-rs",
+    "NAPI",
+    "node-addon",
+    "helm",
+    "kustomize",
+    "kcl"
+  ],
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cnap-tech/akua.git"
+  },
+  "os": [
+    "darwin"
+  ]
+}

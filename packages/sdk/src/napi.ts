@@ -1,7 +1,8 @@
 // Loader stub for the `akua-napi` native addon. Resolves the
-// `@akua/native` per-platform binary that ships alongside `@akua/sdk`,
-// or — in the workspace dev build — the auto-generated `index.js`
-// emitted by `napi build` at `crates/akua-napi/index.js`.
+// `@akua-dev/native` per-platform binary that ships alongside
+// `@akua-dev/sdk`, or — in the workspace dev build — the auto-
+// generated `index.js` emitted by `napi build` at
+// `crates/akua-napi/index.js`.
 //
 // The native addon is the SDK's transport for every verb that touches
 // engines, OCI fetch, or cosign — same wasmtime + akua-core that
@@ -53,6 +54,7 @@ export interface NapiAddon {
 	}): unknown;
 	verify(args: { workspace: string }): unknown;
 	whoami(): unknown;
+	inspect(args: { package?: string; tarball?: string }): unknown;
 }
 
 // Cache both successful loads AND failures. Without the failure
@@ -76,10 +78,10 @@ export function loadNapi(): NapiAddon {
 	const require_ = createRequire(import.meta.url);
 
 	try {
-		cached = require_('@akua/native') as NapiAddon;
+		cached = require_('@akua-dev/native') as NapiAddon;
 		return cached;
 	} catch (err) {
-		errors.push(`@akua/native: ${(err as Error).message}`);
+		errors.push(`@akua-dev/native: ${(err as Error).message}`);
 	}
 
 	const here = dirname(fileURLToPath(import.meta.url));
@@ -91,8 +93,8 @@ export function loadNapi(): NapiAddon {
 	errors.push(`workspace dev build: not at ${dev}`);
 
 	cachedError = new Error(
-		`@akua/sdk: native addon not loadable. Tried:\n  - ${errors.join('\n  - ')}\n` +
-			`Install via \`bun add jsr:@akua/sdk\` (pulls the per-platform binary), ` +
+		`@akua-dev/sdk: native addon not loadable. Tried:\n  - ${errors.join('\n  - ')}\n` +
+			`Install via \`bun add @akua-dev/sdk\` (pulls the per-platform binary via optionalDependencies), ` +
 			`or build locally with \`cd crates/akua-napi && bun run build\`.`,
 	);
 	throw cachedError;

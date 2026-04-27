@@ -118,7 +118,8 @@ export type {
 	WhoamiOutput,
 };
 export type { ExitCode } from './types/ExitCode.ts';
-export type { StructuredError, Level } from './types/StructuredError.ts';
+export type { StructuredError } from './types/StructuredError.ts';
+export type { Level } from './types/Level.ts';
 export type { AgentContext } from './types/AgentContext.ts';
 export type { AgentSource } from './types/AgentSource.ts';
 
@@ -458,16 +459,23 @@ export class Akua {
 	}
 
 	/**
-	 * Introspect a Package or a packed tarball — surface the option
-	 * set, etc. Package mode runs in-process via WASM; tarball mode
-	 * is not yet available in the WASM bundle (deferred to v0.2.0
-	 * along with engine bundling) and currently throws.
+	 * Introspect a Package or a packed tarball — surfaces the option
+	 * set, dependency tree, signing metadata. Pass `{ package }` for
+	 * an on-disk Package or `{ tarball }` for a `.tar.gz` artifact
+	 * (e.g. from `akua pack`).
 	 */
 	async inspect(opts: InspectOptions = {}): Promise<InspectOutput> {
+		if (opts.package && opts.tarball) {
+			throw new Error('inspect: pass either `package` or `tarball`, not both');
+		}
+		// Tarball mode requires the napi addon (tar reader + cosign +
+		// OCI manifest parsing). Package mode is pure-KCL and stays on
+		// the akua-wasm fast path so it works on browsers + Bun
+		// without the native binary loaded.
 		if (opts.tarball) {
-			throw new Error(
-				'Akua.inspect({ tarball }) is not yet available in the WASM bundle — use the akua CLI for tarball introspection.',
-			);
+			const napi = loadNapi();
+			const result = callNapi<unknown>(() => napi.inspect({ tarball: opts.tarball }));
+			return validateAs<InspectOutput>('InspectOutput', result);
 		}
 		const pkg = opts.package ?? './package.k';
 		const source = await readFile(pkg, 'utf8');

@@ -230,6 +230,43 @@ pub fn export(args: NapiExportArgs) -> Result<serde_json::Value> {
 }
 
 // ---------------------------------------------------------------------------
+// inspect — Package or tarball introspection
+// ---------------------------------------------------------------------------
+
+#[napi(object)]
+pub struct NapiInspectArgs {
+    /// On-disk Package directory or `package.k`. Mutually exclusive
+    /// with `tarball`.
+    pub package: Option<String>,
+    /// `.tar.gz` Package artifact (e.g. from `akua pack`). Mutually
+    /// exclusive with `package`.
+    pub tarball: Option<String>,
+}
+
+#[napi]
+pub fn inspect(args: NapiInspectArgs) -> Result<serde_json::Value> {
+    let target = match (args.package.as_deref(), args.tarball.as_deref()) {
+        (Some(_), Some(_)) => {
+            return Err(Error::from_reason(
+                "inspect: pass either `package` or `tarball`, not both",
+            ));
+        }
+        (None, None) => {
+            return Err(Error::from_reason(
+                "inspect: pass either `package` or `tarball`",
+            ));
+        }
+        (Some(p), None) => verbs::inspect::InspectTarget::Package(Path::new(p)),
+        (None, Some(t)) => verbs::inspect::InspectTarget::Tarball(Path::new(t)),
+    };
+    let verb_args = verbs::inspect::InspectArgs { target };
+    invoke_verb(|ctx, stdout| {
+        verbs::inspect::run(ctx, &verb_args, stdout)
+            .map_err(|e| into_napi(e.to_structured(), e.exit_code()))
+    })
+}
+
+// ---------------------------------------------------------------------------
 // verify — workspace lockfile ↔ manifest integrity
 // ---------------------------------------------------------------------------
 

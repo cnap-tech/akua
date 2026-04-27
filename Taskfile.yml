@@ -245,13 +245,27 @@ tasks:
       - git diff --exit-code -- packages/sdk/src/types packages/sdk/src/schemas
 
   sdk:install:
-    desc: Install @akua/sdk deps (bun)
+    desc: Install @akua-dev/sdk deps (bun)
     dir: packages/sdk
     cmds:
       - bun install --frozen-lockfile
 
+  sdk:build:
+    desc: Build @akua-dev/sdk for npm — bundle JS via bun, emit .d.ts via tsc
+    deps: [sdk:install]
+    dir: packages/sdk
+    cmds:
+      - rm -rf dist
+      # Single ESM bundle for `dist/mod.js`. node target keeps `node:*`
+      # external; --packages=external keeps every npm dep external so
+      # @akua-dev/native, ajv, yaml etc. remain runtime deps.
+      - bun build src/mod.ts --target node --format esm --outdir dist --sourcemap=linked --packages=external
+      # Per-source `.d.ts` tree alongside the bundle; tsc resolves
+      # cross-file declaration imports without needing the per-file JS.
+      - bunx tsc --emitDeclarationOnly
+
   sdk:test:
-    desc: Run @akua/sdk TS unit tests (bun + Node — engine-bridge tests gate on Node WASI)
+    desc: Run @akua-dev/sdk TS unit tests (bun + Node — engine-bridge tests gate on Node WASI)
     deps: [sdk:install, build:render-worker, build:engines]
     dir: packages/sdk
     cmds:
@@ -272,11 +286,122 @@ tasks:
       - cd packages/sdk && AKUA_E2E=1 bun test
 
   sdk:publish:check:
-    desc: Dry-run `jsr publish` — catches manifest + slow-type issues before tag push
-    deps: [sdk:install]
+    desc: Dry-run `npm publish` — catches package manifest issues before tag push
+    deps: [sdk:build]
     dir: packages/sdk
     cmds:
-      - bunx jsr publish --dry-run --allow-dirty
+      # `npm pack --dry-run` reports the tarball contents + size without
+      # writing or publishing. Catches missing files, wrong main/types
+      # paths, accidental dist/ omission.
+      - npm pack --dry-run
+
+  native:install:
+    desc: Install @akua-dev/native deps (bun)
+    dir: crates/akua-napi
+    cmds:
+      - bun install --frozen-lockfile
+
+  native:build:
+    desc: Build the napi addon for the host platform (release)
+    deps: [native:install]
+    dir: crates/akua-napi
+    cmds:
+      - bunx napi build --platform --release
+
+  native:publish:check:
+    desc: Dry-run `npm pack` for the meta + per-platform native packages
+    deps: [native:build]
+    dir: crates/akua-napi
+    cmds:
+      # Stage the per-platform npm/<target>/ directories the way the
+      # release workflow does, then pack each + the meta. Dry-run only.
+      - bunx napi create-npm-dirs
+      - bunx napi artifacts || true  # no-op when only host artifact exists
+      - |
+        set -eu
+        for dir in npm/*/; do
+          echo "--- packing ${dir} ---"
+          (cd "$dir" && npm pack --dry-run)
+        done
+        echo "--- packing meta @akua-dev/native ---"
+        npm pack --dry-run
+
+  npm:bootstrap:
+    desc: One-time local publish of 9 stub packages at 0.0.0-bootstrap.0 to claim names on npmjs.com. Run `npm login` first; afterwards configure trusted publishers per package and let CI handle real releases.
+    vars:
+      BOOTSTRAP_VERSION: 0.0.0-bootstrap.0
+    cmds:
+      # Sanity guards. Bootstrap mutates package.json files in-place
+      # then restores them via the trap below; abort if the worktree
+      # is dirty so a failure can't silently lose user changes.
+      - |
+        if ! npm whoami >/dev/null 2>&1; then
+          echo "ERROR: not logged in to npm. Run \`npm login\` first." >&2
+          exit 1
+        fi
+        if ! git diff --quiet HEAD -- crates/akua-napi/package.json packages/sdk/package.json; then
+          echo "ERROR: crates/akua-napi/package.json or packages/sdk/package.json has uncommitted changes." >&2
+          echo "Commit or stash before running npm:bootstrap (it rewrites these files temporarily)." >&2
+          exit 1
+        fi
+        echo "Publishing as: $(npm whoami)"
+        echo "Bootstrap version: {{.BOOTSTRAP_VERSION}}"
+        echo "Press Ctrl-C in 5s to abort..."
+        sleep 5
+      # Patch versions to the bootstrap tag, generate per-platform npm
+      # dirs, publish all 9 packages, then restore the originals via
+      # `git checkout` regardless of whether publish succeeded.
+      - |
+        set -eu
+        trap 'git checkout -- crates/akua-napi/package.json packages/sdk/package.json 2>/dev/null || true' EXIT
+
+        v={{.BOOTSTRAP_VERSION}}
+        jq --arg v "$v" '.version = $v' \
+          crates/akua-napi/package.json > crates/akua-napi/package.json.tmp
+        mv crates/akua-napi/package.json.tmp crates/akua-napi/package.json
+        jq --arg v "$v" \
+          '.version = $v | .dependencies["@akua-dev/native"] = $v' \
+          packages/sdk/package.json > packages/sdk/package.json.tmp
+        mv packages/sdk/package.json.tmp packages/sdk/package.json
+
+        (cd crates/akua-napi && bunx napi create-npm-dirs)
+
+        # Per-platform stubs first (no .node binary needed; we're just
+        # claiming the name).
+        for dir in crates/akua-napi/npm/*/; do
+          echo "--- publishing ${dir} ---"
+          (cd "$dir" && npm publish --access public)
+        done
+
+        # Meta package — declares optionalDependencies on the per-
+        # platform stubs we just published.
+        echo "--- publishing meta @akua-dev/native ---"
+        (cd crates/akua-napi && npm publish --access public)
+
+        # SDK — depends on the meta. Build dist/ first so the tarball
+        # has the same shape as a real release (lets us validate the
+        # full publish manifest end-to-end).
+        echo "--- building + publishing @akua-dev/sdk ---"
+        task sdk:build
+        (cd packages/sdk && npm publish --access public)
+
+        echo
+        echo "Bootstrap complete. Next:"
+        echo "  1. https://www.npmjs.com/settings/akua-dev/packages — verify all 9 packages appear"
+        echo "  2. For each package: Settings → Trusted Publishers → add GitHub Actions"
+        echo "     org=cnap-tech  repo=akua  workflow=native-release.yml (or sdk-release.yml for the SDK)"
+        echo "  3. Tag native-v0.6.0 then sdk-v0.6.0 — CI takes over."
+
+  release:dry-run:
+    desc: Run the full pre-release pipeline locally (gen + check + build + pack)
+    cmds:
+      # Mirrors the GitHub Actions release workflows — every step here
+      # is what CI does, minus the actual `npm publish` (which needs
+      # GitHub OIDC and can only run from Actions).
+      - task: sdk:gen
+      - task: sdk:check
+      - task: native:publish:check
+      - task: sdk:publish:check
 
   test:akua-wasm:
     desc: Smoke test — call akua-wasm `render()` from Node, assert YAML output

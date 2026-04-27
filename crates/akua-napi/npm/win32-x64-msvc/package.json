@@ -1,0 +1,32 @@
+{
+  "name": "@akua-dev/native-win32-x64-msvc",
+  "version": "0.6.0",
+  "cpu": [
+    "x64"
+  ],
+  "main": "akua.win32-x64-msvc.node",
+  "files": [
+    "akua.win32-x64-msvc.node"
+  ],
+  "description": "Native Node.js + Bun + Deno addon for akua-core. Loaded by @akua-dev/sdk; not a public surface.",
+  "keywords": [
+    "akua",
+    "napi-rs",
+    "NAPI",
+    "node-addon",
+    "helm",
+    "kustomize",
+    "kcl"
+  ],
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cnap-tech/akua.git"
+  },
+  "os": [
+    "win32"
+  ]
+}

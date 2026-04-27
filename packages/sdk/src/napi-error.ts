@@ -15,7 +15,7 @@ import {
 } from './errors.ts';
 import type { StructuredError } from './types/StructuredError.ts';
 
-interface NapiErrorEnvelope extends StructuredError {
+export interface NapiStructuredError extends StructuredError {
 	exit_code?: number;
 }
 
@@ -42,7 +42,7 @@ export function parseNapiError(err: unknown): AkuaError | undefined {
 	return new AkuaError(envelope.message, init);
 }
 
-function decodeEnvelope(raw: string): NapiErrorEnvelope | undefined {
+function decodeEnvelope(raw: string): NapiStructuredError | undefined {
 	const trimmed = raw.trim();
 	if (!trimmed.startsWith('{')) return undefined;
 	let parsed: unknown;
@@ -52,5 +52,5 @@ function decodeEnvelope(raw: string): NapiErrorEnvelope | undefined {
 		return undefined;
 	}
 	if (!isStructuredErrorShape(parsed)) return undefined;
-	return parsed as NapiErrorEnvelope;
+	return parsed as NapiStructuredError;
 }

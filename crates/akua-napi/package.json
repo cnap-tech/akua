@@ -1,7 +1,7 @@
 {
-	"name": "@akua/native",
-	"version": "0.1.0",
-	"description": "Native Node.js + Bun + Deno addon for akua-core. Loaded by @akua/sdk; not a public surface.",
+	"name": "@akua-dev/native",
+	"version": "0.6.0",
+	"description": "Native Node.js + Bun + Deno addon for akua-core. Loaded by @akua-dev/sdk; not a public surface.",
 	"main": "index.js",
 	"types": "index.d.ts",
 	"license": "Apache-2.0",
@@ -27,7 +27,7 @@
 	],
 	"napi": {
 		"binaryName": "akua",
-		"packageName": "@akua/native",
+		"packageName": "@akua-dev/native",
 		"targets": [
 			"x86_64-apple-darwin",
 			"aarch64-apple-darwin",

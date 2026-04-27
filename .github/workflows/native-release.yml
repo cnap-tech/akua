@@ -1,0 +1,172 @@
+name: native-release
+
+# Cross-platform build + npm publish of the napi addon.
+# Triggered by `native-v<semver>` tag pushes.
+#
+# Layout:
+#   `@akua-dev/native`                       — meta package; declares
+#                                              optionalDependencies on
+#                                              every per-platform pkg
+#   `@akua-dev/native-{darwin,linux,win32}-*` — per-platform .node binary
+#
+# The SDK release workflow pins `@akua-dev/native@<same-version>` in
+# its dependencies, so this must publish first.
+
+on:
+  push:
+    tags:
+      - 'native-v*'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Skip the actual publish (build + pack only)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write  # npm provenance
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: macos-14
+            target: aarch64-apple-darwin
+          - host: macos-13
+            target: x86_64-apple-darwin
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            cross: true
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            cross: true
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            cross: true
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: native-${{ matrix.target }}
+          cache-on-failure: true
+
+      - name: Bump package.json version from the tag
+        shell: bash
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#native-v}"
+          echo "Building @akua-dev/native@${version}"
+          jq --arg v "$version" '.version = $v' \
+            crates/akua-napi/package.json > crates/akua-napi/package.json.tmp
+          mv crates/akua-napi/package.json.tmp crates/akua-napi/package.json
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install napi deps
+        working-directory: crates/akua-napi
+        run: bun install --frozen-lockfile
+
+      - name: Build native (release)
+        working-directory: crates/akua-napi
+        shell: bash
+        run: |
+          set -eu
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            bunx napi build --platform --release --target ${{ matrix.target }} --use-napi-cross
+          else
+            bunx napi build --platform --release --target ${{ matrix.target }}
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.target }}
+          path: crates/akua-napi/*.node
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Bump package.json version from the tag
+        run: |
+          set -eu
+          version="${GITHUB_REF_NAME#native-v}"
+          jq --arg v "$version" '.version = $v' \
+            crates/akua-napi/package.json > crates/akua-napi/package.json.tmp
+          mv crates/akua-napi/package.json.tmp crates/akua-napi/package.json
+
+      - name: Install napi deps
+        working-directory: crates/akua-napi
+        run: bun install --frozen-lockfile
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: crates/akua-napi/artifacts
+
+      - name: Generate per-platform npm dirs
+        working-directory: crates/akua-napi
+        run: bunx napi create-npm-dirs
+
+      - name: Move artifacts into the per-platform npm dirs
+        working-directory: crates/akua-napi
+        run: bunx napi artifacts
+
+      - name: List staged packages
+        working-directory: crates/akua-napi
+        run: ls -R npm
+
+      - name: Publish all packages
+        # Auth via npm trusted publishing (OIDC). Each per-platform
+        # package + the meta package on npmjs.com has GitHub Actions
+        # configured as a trusted publisher pointing at this repo +
+        # workflow. Per-platform packages first (each contains one
+        # `.node` binary + a slim package.json), then the meta which
+        # declares optionalDependencies on all of them.
+        if: github.event_name == 'push' || inputs.dry-run == false
+        working-directory: crates/akua-napi
+        run: |
+          set -eu
+          for dir in npm/*/; do
+            echo "Publishing ${dir}"
+            (cd "$dir" && npm publish --access public --provenance)
+          done
+          echo "Publishing meta @akua-dev/native"
+          npm publish --access public --provenance
+
+      - name: Pack only (dry-run)
+        if: github.event_name == 'workflow_dispatch' && inputs.dry-run == true
+        working-directory: crates/akua-napi
+        run: |
+          set -eu
+          for dir in npm/*/; do
+            (cd "$dir" && npm pack --dry-run)
+          done
+          npm pack --dry-run
