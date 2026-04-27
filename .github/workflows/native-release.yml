@@ -57,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
 
@@ -125,7 +125,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         # Node 24 ships npm 11.x which has OIDC trusted-publishing
         # support. Node 22 ships npm 10.x (no trust support) and
         # `npm install -g npm@latest` from there hits a known
