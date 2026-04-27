@@ -18,7 +18,18 @@ use std::path::Path;
 use engine_host_wasm::{EngineSpec, SessionSlot};
 use serde::{Deserialize, Serialize};
 
-const HELM_ENGINE_CWASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.cwasm"));
+/// Embedded engine bytes — AOT-compiled `.cwasm` (default) or source
+/// `.wasm` (with `precompile` feature OFF, for the `@akua/sdk` npm
+/// distribution where binary size matters more than cold-start
+/// latency). `IS_PRECOMPILED` tags which API path on
+/// [`engine_host_wasm::Session`] to take.
+#[cfg(feature = "precompile")]
+const HELM_ENGINE_BYTES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.cwasm"));
+#[cfg(not(feature = "precompile"))]
+const HELM_ENGINE_BYTES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.wasm"));
+const IS_PRECOMPILED: bool = cfg!(feature = "precompile");
 
 const SPEC: EngineSpec = EngineSpec {
     name: "helm-engine",
@@ -131,7 +142,7 @@ thread_local! {
 
 fn call_guest(input: &[u8]) -> Result<Vec<u8>, HelmEngineError> {
     SESSION.with(|slot| {
-        engine_host_wasm::thread_local_call(slot, HELM_ENGINE_CWASM, SPEC, input)
+        engine_host_wasm::thread_local_call_with(slot, HELM_ENGINE_BYTES, SPEC, input, IS_PRECOMPILED)
             .map_err(HelmEngineError::from)
     })
 }
@@ -141,15 +152,15 @@ mod tests {
     use super::*;
 
     fn engine_is_built() -> bool {
-        HELM_ENGINE_CWASM.len() > 1_000_000
+        HELM_ENGINE_BYTES.len() > 1_000_000
     }
 
     #[test]
     fn embedded_cwasm_bytes_present_or_placeholder() {
         assert!(
-            HELM_ENGINE_CWASM.is_empty() || HELM_ENGINE_CWASM.len() > 1_000_000,
+            HELM_ENGINE_BYTES.is_empty() || HELM_ENGINE_BYTES.len() > 1_000_000,
             "helm-engine.cwasm has suspicious size: {} bytes",
-            HELM_ENGINE_CWASM.len()
+            HELM_ENGINE_BYTES.len()
         );
     }
 

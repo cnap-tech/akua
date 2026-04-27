@@ -8,7 +8,15 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-default = ["engine-kcl", "engine-helm", "engine-kustomize", "oci-fetch", "git-fetch", "cosign-verify", "dev-watch"]
+default = ["engine-kcl", "engine-helm", "engine-kustomize", "oci-fetch", "git-fetch", "cosign-verify", "dev-watch", "precompile-engines"]
+# `precompile-engines` (default on): forwards to the engine shim
+# crates' `precompile` features. With it OFF, helm/kustomize embed
+# source `.wasm` and JIT at first call — see #472 for the napi
+# distribution that uses this mode.
+precompile-engines = [
+    "helm-engine-wasm?/precompile",
+    "kustomize-engine-wasm?/precompile",
+]
 # SDK type emission — off by default. `ts-export` makes the CLI
 # contract types `derive(ts_rs::TS)` so they can be exported as TS
 # sources for `@akua/sdk`. `schema-export` does the same for
@@ -78,8 +86,8 @@ schemars = { version = "1", optional = true }
 #   - reqwest/gix need TCP which wasip1 doesn't have.
 #   - cosign crypto + dev-watch filesystem notifiers are host-level.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-helm-engine-wasm = { path = "../helm-engine-wasm", optional = true }
-kustomize-engine-wasm = { path = "../kustomize-engine-wasm", optional = true }
+helm-engine-wasm = { path = "../helm-engine-wasm", optional = true, default-features = false }
+kustomize-engine-wasm = { path = "../kustomize-engine-wasm", optional = true, default-features = false }
 
 # OCI chart fetch. `rustls-tls` avoids the openssl dep chain.
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }

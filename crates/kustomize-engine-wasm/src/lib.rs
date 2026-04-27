@@ -11,8 +11,16 @@ use std::path::Path;
 use engine_host_wasm::{EngineSpec, SessionSlot};
 use serde::{Deserialize, Serialize};
 
-const KUSTOMIZE_ENGINE_CWASM: &[u8] =
+/// Embedded engine bytes — AOT `.cwasm` (default) or source `.wasm`
+/// (with `precompile` feature OFF, for `@akua/sdk`'s npm
+/// distribution). See helm-engine-wasm for the same pattern.
+#[cfg(feature = "precompile")]
+const KUSTOMIZE_ENGINE_BYTES: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/kustomize-engine.cwasm"));
+#[cfg(not(feature = "precompile"))]
+const KUSTOMIZE_ENGINE_BYTES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/kustomize-engine.wasm"));
+const IS_PRECOMPILED: bool = cfg!(feature = "precompile");
 
 const SPEC: EngineSpec = EngineSpec {
     name: "kustomize-engine",
@@ -112,7 +120,7 @@ thread_local! {
 
 fn call_guest(input: &[u8]) -> Result<Vec<u8>, KustomizeEngineError> {
     SESSION.with(|slot| {
-        engine_host_wasm::thread_local_call(slot, KUSTOMIZE_ENGINE_CWASM, SPEC, input)
+        engine_host_wasm::thread_local_call_with(slot, KUSTOMIZE_ENGINE_BYTES, SPEC, input, IS_PRECOMPILED)
             .map_err(KustomizeEngineError::from)
     })
 }
@@ -122,15 +130,15 @@ mod tests {
     use super::*;
 
     fn engine_is_built() -> bool {
-        KUSTOMIZE_ENGINE_CWASM.len() > 1_000_000
+        KUSTOMIZE_ENGINE_BYTES.len() > 1_000_000
     }
 
     #[test]
     fn embedded_cwasm_bytes_present_or_placeholder() {
         assert!(
-            KUSTOMIZE_ENGINE_CWASM.is_empty() || KUSTOMIZE_ENGINE_CWASM.len() > 1_000_000,
+            KUSTOMIZE_ENGINE_BYTES.is_empty() || KUSTOMIZE_ENGINE_BYTES.len() > 1_000_000,
             "kustomize-engine.cwasm has suspicious size: {} bytes",
-            KUSTOMIZE_ENGINE_CWASM.len()
+            KUSTOMIZE_ENGINE_BYTES.len()
         );
     }
 

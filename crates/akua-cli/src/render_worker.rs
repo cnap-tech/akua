@@ -35,10 +35,19 @@ use wasmtime_wasi::p1::WasiP1Ctx;
 use wasmtime_wasi::p2::pipe::{MemoryInputPipe, MemoryOutputPipe};
 use wasmtime_wasi::WasiCtxBuilder;
 
-/// Embedded AOT-compiled worker module. Produced by akua-cli's
-/// `build.rs`. Zero-length when the .wasm source wasn't available at
-/// build time — see [`WorkerError::SandboxUnavailable`].
-const WORKER_CWASM: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/akua-render-worker.cwasm"));
+/// Embedded worker module. AOT `.cwasm` when `precompile-engines`
+/// is on (default), source `.wasm` otherwise — wasmtime JIT-compiles
+/// the second form at first call. The smaller-binary mode is used
+/// by the napi distribution (#472). Zero-length when the source
+/// `.wasm` wasn't available at build time — see
+/// [`WorkerError::SandboxUnavailable`].
+#[cfg(feature = "precompile-engines")]
+const WORKER_BYTES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/akua-render-worker.cwasm"));
+#[cfg(not(feature = "precompile-engines"))]
+const WORKER_BYTES: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/akua-render-worker.wasm"));
+const WORKER_PRECOMPILED: bool = cfg!(feature = "precompile-engines");
 
 /// Per-render resource caps. Defaults documented in
 /// [docs/security-model.md](../../../../docs/security-model.md) under
@@ -215,7 +224,7 @@ impl RenderHost {
     }
 
     pub fn new() -> Result<Self, WorkerError> {
-        if WORKER_CWASM.is_empty() {
+        if WORKER_BYTES.is_empty() {
             return Err(WorkerError::SandboxUnavailable);
         }
         // Install the host-side plugin handlers so bridge callouts
@@ -231,15 +240,26 @@ impl RenderHost {
         akua_core::kcl_plugin::install_builtin_plugins();
 
         let engine = engine_host_wasm::shared_engine();
-        // SAFETY: WORKER_CWASM was produced by the same wasmtime
+        // SAFETY: WORKER_BYTES was produced by the same wasmtime
         // version + `engine_host_wasm::shared_config()` shape in
         // build.rs; deserialize is the fast path (memcpy + fixup),
         // no Cranelift pass. Config-hash drift between build + run
         // is the only failure mode and is caught by
         // `Module::deserialize`.
-        let module = unsafe {
-            Module::deserialize(engine, WORKER_CWASM)
-                .map_err(|e| WorkerError::Wasmtime(format!("init: Module::deserialize: {e}")))?
+        // SAFETY (precompiled path): WORKER_BYTES is a `.cwasm`
+        // produced by build.rs against the same `shared_config()`
+        // shape, embedded at compile time. Tampering requires
+        // tampering with the akua binary itself.
+        let module = if WORKER_PRECOMPILED {
+            unsafe {
+                Module::deserialize(engine, WORKER_BYTES)
+                    .map_err(|e| WorkerError::Wasmtime(format!("init: Module::deserialize: {e}")))?
+            }
+        } else {
+            // JIT path — wasmtime compiles at first call. ~5–10s on
+            // the worker .wasm; subsequent renders share the Module.
+            Module::new(engine, WORKER_BYTES)
+                .map_err(|e| WorkerError::Wasmtime(format!("init: Module::new (JIT): {e}")))?
         };
         spawn_epoch_ticker(engine.clone());
         Ok(Self { engine, module })

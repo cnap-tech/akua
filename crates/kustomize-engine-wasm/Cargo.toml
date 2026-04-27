@@ -7,6 +7,13 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+# `precompile` (default on): AOT-compile to `.cwasm`. With it OFF,
+# the source `.wasm` is embedded and JIT'd at first call — used by
+# `akua-napi`'s npm distribution to keep binary size manageable.
+[features]
+default = ["precompile"]
+precompile = []
+
 [build-dependencies]
 engine-host-wasm = { path = "../engine-host-wasm" }
 

@@ -29,8 +29,8 @@ fn main() {
     let worker_wasm = workspace_root().join("target/wasm32-wasip1/release/akua-render-worker.wasm");
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"));
     let cwasm_out = out_dir.join("akua-render-worker.cwasm");
+    let wasm_out = out_dir.join("akua-render-worker.wasm");
 
-    // Invalidate on .wasm content change; no other inputs feed this.
     println!("cargo:rerun-if-changed={}", worker_wasm.display());
     println!("cargo:rerun-if-changed=build.rs");
 
@@ -39,25 +39,37 @@ fn main() {
             "cargo:warning=akua-render-worker.wasm not found at {} — run `task build:render-worker` first. Emitting empty sandbox module (runtime will surface E_SANDBOX_UNAVAILABLE).",
             worker_wasm.display()
         );
-        // Zero-length marker — render_worker.rs checks for this and
-        // returns a typed error on first invocation.
         std::fs::write(&cwasm_out, []).expect("write empty cwasm marker");
+        std::fs::write(&wasm_out, []).expect("write empty wasm marker");
         return;
     }
 
     let wasm = std::fs::read(&worker_wasm)
         .unwrap_or_else(|e| panic!("read worker wasm from {}: {e}", worker_wasm.display()));
-    let engine =
-        wasmtime::Engine::new(&worker_config()).expect("wasmtime::Engine::new(worker_config)");
-    let cwasm = engine
-        .precompile_module(&wasm)
-        .expect("precompile_module failed");
-    std::fs::write(&cwasm_out, cwasm).expect("write cwasm");
-    println!(
-        "cargo:warning=akua-render-worker.cwasm: {} bytes (AOT from {})",
-        std::fs::metadata(&cwasm_out).map(|m| m.len()).unwrap_or(0),
-        worker_wasm.display()
-    );
+    // Stage the source `.wasm` regardless; lib.rs picks one of the
+    // two via cfg(feature = "precompile-engines").
+    std::fs::write(&wasm_out, &wasm).expect("stage worker wasm");
+
+    let precompile = std::env::var_os("CARGO_FEATURE_PRECOMPILE_ENGINES").is_some();
+    if precompile {
+        let engine =
+            wasmtime::Engine::new(&worker_config()).expect("wasmtime::Engine::new(worker_config)");
+        let cwasm = engine
+            .precompile_module(&wasm)
+            .expect("precompile_module failed");
+        std::fs::write(&cwasm_out, cwasm).expect("write cwasm");
+        println!(
+            "cargo:warning=akua-render-worker.cwasm: {} bytes (AOT from {})",
+            std::fs::metadata(&cwasm_out).map(|m| m.len()).unwrap_or(0),
+            worker_wasm.display()
+        );
+    } else {
+        std::fs::write(&cwasm_out, []).expect("write empty cwasm slot");
+        println!(
+            "cargo:warning=precompile-engines OFF — embedding source akua-render-worker.wasm ({} bytes), JIT at first render",
+            wasm.len()
+        );
+    }
 }
 
 /// akua-cli's build.rs runs with CWD = crates/akua-cli. The workspace

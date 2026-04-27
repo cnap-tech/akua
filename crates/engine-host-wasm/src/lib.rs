@@ -111,6 +111,70 @@ pub fn precompile(wasm: &[u8]) -> Result<Vec<u8>, String> {
     engine.precompile_module(wasm).map_err(|e| e.to_string())
 }
 
+/// Standard `build.rs` entry for an engine shim crate. Reads
+/// `assets/<name>-engine.wasm` from the calling crate's
+/// `CARGO_MANIFEST_DIR`, stages both the source `.wasm` and (when
+/// the calling crate's `precompile` feature is on) the AOT-compiled
+/// `.cwasm` into `OUT_DIR` so the crate's `lib.rs` can pick one via
+/// `cfg(feature = "precompile")`.
+///
+/// Mirrors what the helm + kustomize shim crates each had as ~30
+/// LoC of duplicated `build.rs` boilerplate before #472.
+pub fn build_engine_wasm(name: &str) {
+    use std::path::PathBuf;
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .expect("CARGO_MANIFEST_DIR not set in build.rs");
+    let wasm_path = PathBuf::from(&manifest_dir)
+        .join("assets")
+        .join(format!("{name}.wasm"));
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"));
+    let cwasm_dest = out_dir.join(format!("{name}.cwasm"));
+    let wasm_dest = out_dir.join(format!("{name}.wasm"));
+
+    println!("cargo:rerun-if-changed={}", wasm_path.display());
+    println!("cargo:rerun-if-changed=build.rs");
+
+    if !wasm_path.is_file() {
+        println!(
+            "cargo:warning={name}.wasm missing at {} — crate builds with a 0-byte placeholder. Run `task build:{name}-wasm` to produce the real artifact.",
+            wasm_path.display()
+        );
+        std::fs::write(&cwasm_dest, []).expect("write empty cwasm placeholder");
+        std::fs::write(&wasm_dest, []).expect("write empty wasm placeholder");
+        return;
+    }
+
+    let wasm = std::fs::read(&wasm_path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", wasm_path.display()));
+    // Stage source `.wasm` regardless of feature — `lib.rs` picks
+    // the right path via `cfg(feature = "precompile")` but the
+    // unused `include_bytes!` slot still has to exist (cargo
+    // doesn't propagate cfg to `include_bytes!` source-existence
+    // checks).
+    std::fs::write(&wasm_dest, &wasm).expect("stage source wasm");
+
+    // Build-script cfgs work via `CARGO_FEATURE_<NAME>` env vars, not
+    // `cfg!()` (build.rs is a separate compilation unit with its own
+    // feature set). The shared helper is invoked from each engine's
+    // `build.rs`, so the calling crate's `precompile` feature
+    // controls behavior here.
+    if std::env::var_os("CARGO_FEATURE_PRECOMPILE").is_some() {
+        let cwasm = precompile(&wasm).unwrap_or_else(|e| panic!("precompile {name}: {e}"));
+        std::fs::write(&cwasm_dest, &cwasm).expect("write cwasm");
+        println!(
+            "cargo:warning=precompiled {name}.wasm ({} MB) -> {} MB cwasm",
+            wasm.len() / 1_048_576,
+            cwasm.len() / 1_048_576
+        );
+    } else {
+        std::fs::write(&cwasm_dest, []).expect("write empty cwasm slot");
+        println!(
+            "cargo:warning=precompile feature OFF — embedding source {name}.wasm ({} MB); wasmtime JIT-compiles at first call",
+            wasm.len() / 1_048_576
+        );
+    }
+}
+
 // --- Engine spec -----------------------------------------------------------
 
 /// Engine identity: the symbol prefix its wasip1 module exports its
@@ -150,7 +214,25 @@ impl Session {
     /// being empty is the "artifact wasn't built" signal — returns
     /// [`EngineHostError::Engine`] with a pointer to the Taskfile target.
     pub fn init(cwasm: &[u8], spec: EngineSpec) -> Result<Self, EngineHostError> {
-        if cwasm.is_empty() {
+        Self::init_with(cwasm, spec, true)
+    }
+
+    /// Instantiate the engine from a source `.wasm` slice — wasmtime
+    /// JIT-compiles at first call. Used by build modes that ship the
+    /// 3x-smaller source `.wasm` instead of the AOT'd `.cwasm` (e.g.
+    /// `@akua/sdk`'s npm distribution). Cold init pays the compile
+    /// cost (~5–10s for helm-engine); subsequent renders are
+    /// engine-call latency only.
+    pub fn init_from_wasm(wasm: &[u8], spec: EngineSpec) -> Result<Self, EngineHostError> {
+        Self::init_with(wasm, spec, false)
+    }
+
+    fn init_with(
+        bytes: &[u8],
+        spec: EngineSpec,
+        precompiled: bool,
+    ) -> Result<Self, EngineHostError> {
+        if bytes.is_empty() {
             return Err(EngineHostError::Engine(format!(
                 "{}.wasm not built. Run `task build:{}-wasm` to produce the Go→wasip1 artifact, then rebuild.",
                 spec.name, spec.name
@@ -161,10 +243,15 @@ impl Session {
         // worker and every future engine share it. See `shared_engine`
         // doc for the why.
         let engine = shared_engine();
-        // SAFETY: `cwasm` was produced by `precompile()` against the
-        // same `shared_config()` shape. Embedded at compile time, so
-        // tampering requires tampering with the akua binary itself.
-        let module = unsafe { Module::deserialize(engine, cwasm) }.map_err(wasm_err)?;
+        // SAFETY (precompiled path): `cwasm` was produced by
+        // `precompile()` against the same `shared_config()` shape and
+        // embedded at compile time. Tampering requires tampering with
+        // the akua binary itself.
+        let module = if precompiled {
+            unsafe { Module::deserialize(engine, bytes) }.map_err(wasm_err)?
+        } else {
+            Module::new(engine, bytes).map_err(wasm_err)?
+        };
 
         let wasi = WasiCtxBuilder::new().arg(spec.name).build_p1();
         let mut store = Store::new(engine, wasi);
@@ -258,9 +345,27 @@ pub fn thread_local_call(
     spec: EngineSpec,
     input: &[u8],
 ) -> Result<Vec<u8>, EngineHostError> {
+    thread_local_call_with(slot, cwasm, spec, input, true)
+}
+
+/// `thread_local_call` variant that picks the JIT or AOT init path
+/// based on `precompiled`. Allows engine shim crates to ship source
+/// `.wasm` (smaller binary, JIT at first call) or AOT `.cwasm`
+/// (larger binary, instant load) without parallel call sites.
+pub fn thread_local_call_with(
+    slot: &SessionSlot,
+    bytes: &[u8],
+    spec: EngineSpec,
+    input: &[u8],
+    precompiled: bool,
+) -> Result<Vec<u8>, EngineHostError> {
     let mut borrow = slot.borrow_mut();
     if borrow.is_none() {
-        *borrow = Some(Session::init(cwasm, spec)?);
+        *borrow = Some(if precompiled {
+            Session::init(bytes, spec)?
+        } else {
+            Session::init_from_wasm(bytes, spec)?
+        });
     }
     borrow.as_mut().expect("just initialized").call(input)
 }

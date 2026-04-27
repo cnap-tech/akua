@@ -26,8 +26,14 @@ crate-type = ["cdylib"]
 # Reuse the CLI verb impls verbatim — every Akua.* method on the JS
 # side maps 1:1 to a CLI verb, so depending on `akua-cli`'s lib gives
 # us identical envelopes + identical behavior, no logic at the napi
-# boundary. The wasmtime-hosted render worker, chart resolver, OCI
-# fetcher, cosign verifier all flow through this single dep.
+# boundary.
+#
+# `precompile-engines` is intentionally OFF — the .node binary
+# embeds source `.wasm` (helm 73 MB + kustomize 20 MB + worker 8 MB
+# = 101 MB) instead of AOT-compiled `.cwasm` (207 + 59 + 32 = 298 MB).
+# wasmtime JIT-compiles on first render (~5–10 s cold). Trade pays
+# for itself: shrinks the published per-platform npm package by 3x,
+# meets npm size limits. See #472.
 akua-cli = { path = "../akua-cli", default-features = false, features = [
     "oci-fetch",
     "cosign-verify",
