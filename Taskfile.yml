@@ -266,7 +266,7 @@ tasks:
 
   sdk:test:
     desc: Run @akua-dev/sdk TS unit tests (bun + Node — engine-bridge tests gate on Node WASI)
-    deps: [sdk:install, build:render-worker, build:engines]
+    deps: [sdk:install, native:build, build:render-worker, build:engines]
     dir: packages/sdk
     cmds:
       # Bun runs the cross-runtime suite; the WASI worker tests skip
