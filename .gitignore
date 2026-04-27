@@ -56,6 +56,13 @@ crates/kustomize-engine-wasm/assets/kustomize-engine.wasm
 crates/kustomize-engine-wasm/go-src/go.sum
 crates/kustomize-engine-wasm/go-src/crates/
 
+# napi-rs build artifacts. The .node binary is platform-specific +
+# huge (~340MB locally with embedded engine .cwasm). Built per-
+# platform in CI; never checked in. The generated index.js +
+# index.d.ts ARE checked in — they're the public loader surface,
+# stable across platforms.
+crates/akua-napi/*.node
+
 # Coverage
 coverage/
 *.lcov

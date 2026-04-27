@@ -1,0 +1,51 @@
+{
+	"name": "@akua/native",
+	"version": "0.1.0",
+	"description": "Native Node.js + Bun + Deno addon for akua-core. Loaded by @akua/sdk; not a public surface.",
+	"main": "index.js",
+	"types": "index.d.ts",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/cnap-tech/akua.git"
+	},
+	"engines": {
+		"node": ">= 22"
+	},
+	"files": [
+		"index.d.ts",
+		"index.js"
+	],
+	"keywords": [
+		"akua",
+		"napi-rs",
+		"NAPI",
+		"node-addon",
+		"helm",
+		"kustomize",
+		"kcl"
+	],
+	"napi": {
+		"binaryName": "akua",
+		"packageName": "@akua/native",
+		"targets": [
+			"x86_64-apple-darwin",
+			"aarch64-apple-darwin",
+			"x86_64-unknown-linux-gnu",
+			"aarch64-unknown-linux-gnu",
+			"x86_64-unknown-linux-musl",
+			"aarch64-unknown-linux-musl",
+			"x86_64-pc-windows-msvc"
+		]
+	},
+	"scripts": {
+		"build": "napi build --platform --release",
+		"build:debug": "napi build --platform",
+		"prepublishOnly": "napi prepublish -t npm",
+		"artifacts": "napi artifacts",
+		"version": "napi version"
+	},
+	"devDependencies": {
+		"@napi-rs/cli": "^3.2.0"
+	}
+}
