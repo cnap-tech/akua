@@ -207,9 +207,7 @@ pub fn check(workspace: &Path) -> Result<VerifyOutput, VerifyError> {
         for pkg in &lock.packages {
             // Path-sourced deps are local files (not registry-fetched),
             // so there's nothing to sign against — exempt from strict
-            // signing. Phase 6 may revisit (provenance for locally-
-            // vendored charts via `akua publish` attestation), but
-            // until then a missing sig on a path dep is correct.
+            // signing. A missing sig on a path dep is correct.
             if pkg.is_path() {
                 continue;
             }
@@ -825,7 +823,7 @@ signature = "cosign:sigstore:cloudnative-pg"
     }
 
     // ---------------------------------------------------------------
-    // Path-dep drift detection (Phase 2b slice C)
+    // Path-dep drift detection
     // ---------------------------------------------------------------
 
     /// Write a minimal chart tree under `root` for use in path-dep
@@ -966,7 +964,7 @@ digest  = "{real_digest}"
     }
 
     // ---------------------------------------------------------------
-    // Attestation chain walk (Phase 7 C) — in-memory tests over the
+    // Attestation chain walk — in-memory tests over the
     // `verify_attestation` helper so no registry is needed.
     // ---------------------------------------------------------------
 

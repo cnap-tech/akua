@@ -18,7 +18,7 @@
 //!
 //! ## Scope
 //!
-//! Phase 2b slice C gets the common shapes: objects, primitives,
+//! gets the common shapes: objects, primitives,
 //! arrays, enums. Deferred:
 //!
 //! - `$ref` (needs a two-pass resolver)

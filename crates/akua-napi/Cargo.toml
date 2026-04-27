@@ -31,9 +31,9 @@ crate-type = ["cdylib"]
 # `precompile-engines` is intentionally OFF — the .node binary
 # embeds source `.wasm` (helm 73 MB + kustomize 20 MB + worker 8 MB
 # = 101 MB) instead of AOT-compiled `.cwasm` (207 + 59 + 32 = 298 MB).
-# wasmtime JIT-compiles on first render (~5–10 s cold). Trade pays
-# for itself: shrinks the published per-platform npm package by 3x,
-# meets npm size limits. See #472.
+# wasmtime JIT-compiles on first render (~5–10 s cold). Shrinks the
+# published per-platform npm package by 3x; warm renders amortize
+# the JIT cost across the process lifetime.
 akua-cli = { path = "../akua-cli", default-features = false, features = [
     "oci-fetch",
     "cosign-verify",

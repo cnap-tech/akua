@@ -12,10 +12,10 @@
 //! `nginx` dep in `akua.toml` resolves to. That path + a content-addressed
 //! digest of the chart tree is exactly what this module computes.
 //!
-//! Phase 2a resolved local-path deps. Phase 2b adds `replace` directives
+//! Local-path deps + `replace` directives
 //! and OCI/git remote fetches. Remote resolution without a `replace`
 //! override still returns [`ChartResolveError::UnsupportedSource`] until
-//! the OCI pull path lands (tracked in docs/roadmap.md Phase 2b slice B).
+//! the OCI pull path lands.
 
 // `ChartResolveError` wraps the OCI/git fetcher errors by value so callers
 // can pattern-match without a `Box::deref`. The enum sits at ~128 bytes,
@@ -233,7 +233,7 @@ pub enum ChartResolveError {
         name: String,
         kind: DependencySource,
         /// Context for the user: which gate blocked resolution
-        /// (offline mode, Phase 2b slice C git support, etc).
+        /// (offline modeb slice C git support, etc).
         reason: &'static str,
     },
 
@@ -320,9 +320,9 @@ pub fn resolve(
     )
 }
 
-/// Full resolver — handles path, replace, and OCI (Phase 2b slice B).
+/// Full resolver — handles path, replace, and OCI.
 /// Git deps still return [`ChartResolveError::UnsupportedSource`] —
-/// Phase 2b slice C.
+/// slice C.
 pub fn resolve_with_options(
     manifest: &AkuaManifest,
     workspace_root: &Path,

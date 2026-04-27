@@ -24,11 +24,9 @@
 //! The render worker wants full WASI (preopens + stdio pipes) and
 //! per-render Stores. Same wasmtime version (43), different posture.
 //!
-//! Both host modules DO share an `Engine` today — matching the Phase 4B
-//! plan where a single wasmtime Engine can host the render worker +
-//! delegate plugin callouts to the engine shims via imported host
-//! functions. Crossing that bridge is Phase 4 step 2 (#410 follow-up),
-//! not this scaffold commit.
+//! Both host modules DO share an `Engine` today: a single wasmtime
+//! Engine can host the render worker and delegate plugin callouts
+//! to the engine shims via imported host functions.
 
 use wasmtime::{AsContext, Engine, Linker, Module, Store};
 use wasmtime_wasi::p1::WasiP1Ctx;
@@ -38,8 +36,8 @@ use wasmtime_wasi::WasiCtxBuilder;
 /// Embedded worker module. AOT `.cwasm` when `precompile-engines`
 /// is on (default), source `.wasm` otherwise — wasmtime JIT-compiles
 /// the second form at first call. The smaller-binary mode is used
-/// by the napi distribution (#472). Zero-length when the source
-/// `.wasm` wasn't available at build time — see
+/// by the napi distribution. Zero-length when the source `.wasm`
+/// wasn't available at build time — see
 /// [`WorkerError::SandboxUnavailable`].
 #[cfg(feature = "precompile-engines")]
 const WORKER_BYTES: &[u8] =
@@ -167,10 +165,10 @@ pub enum WorkerError {
     )]
     SandboxUnavailable,
 
-    /// Any wasmtime-side setup or instantiation failure. Phase is
-    /// embedded in the string (e.g. `"init: Module::deserialize: ..."`
-    /// or `"instantiate: _start lookup: ..."`). Programmer-side bugs;
-    /// consumers don't match on the specific phase.
+    /// Any wasmtime-side setup or instantiation failure. The stage
+    /// is embedded in the string (e.g. `"init: Module::deserialize:
+    /// ..."` or `"instantiate: _start lookup: ..."`). Programmer-side
+    /// bugs; consumers don't match on the specific stage.
     #[error("wasmtime {0}")]
     Wasmtime(String),
 
@@ -463,12 +461,12 @@ struct HostState {
 
 /// KCL declares `extern "C-unwind" fn kcl_plugin_invoke_json_wasm(...)`
 /// on wasm32 — the host must provide it or `linker.instantiate` fails
-/// with an unresolved-import error. This is Phase 4's plugin bridge:
-/// host function reads three C-strings (method, args JSON, kwargs
-/// JSON) from guest memory, dispatches through akua_core's plugin
-/// registry, allocates guest memory for the response via the worker's
-/// exported `akua_bridge_alloc`, copies the response in, returns the
-/// guest pointer to KCL.
+/// with an unresolved-import error. The plugin bridge: host function
+/// reads three C-strings (method, args JSON, kwargs JSON) from guest
+/// memory, dispatches through akua_core's plugin registry, allocates
+/// guest memory for the response via the worker's exported
+/// `akua_bridge_alloc`, copies the response in, returns the guest
+/// pointer to KCL.
 ///
 /// The worker-side engine bridges (helm/kustomize) live as
 /// host-registered plugin handlers in akua-cli; the render worker

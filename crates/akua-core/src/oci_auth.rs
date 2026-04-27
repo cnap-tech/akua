@@ -11,7 +11,7 @@
 //!    dev machines.
 //!
 //! First match wins. Both files are optional — absent files degrade
-//! to anonymous pulls, which is what Phase 2b slice B already shipped.
+//! to anonymous pulls, which is what already shipped.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};

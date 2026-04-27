@@ -6,7 +6,7 @@
 //! uses platform-native inotify/kqueue/FSEvents, so idle CPU cost
 //! is ~zero.
 //!
-//! Scope (Phase 8 slice):
+//! Scope (slice):
 //!
 //! - Watch the workspace recursively.
 //! - Debounce rapid bursts (editors save in multiple steps: .swp,

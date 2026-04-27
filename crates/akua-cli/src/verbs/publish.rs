@@ -1,7 +1,7 @@
 //! `akua publish` — tarball the workspace + push it to an OCI registry.
 //!
-//! Phase 7 slice. The reciprocal of `akua add`: where add consumes
-//! a registry-hosted chart, publish *produces* one. Shape:
+//! The reciprocal of `akua add`: where add consumes a registry-hosted
+//! chart, publish *produces* one. Shape:
 //!
 //! ```text
 //! akua publish --ref oci://ghcr.io/acme/my-pkg [--tag 0.2.0]
@@ -202,8 +202,7 @@ pub fn run<W: Write>(
     // SLSA attestation auto-pairs with signing: if we just signed
     // the manifest, push an attestation signed by the same key
     // unless --no-attest. Skipping attestation when the artifact
-    // *is* signed would leak a weaker supply-chain story than
-    // the Phase 7 B headline commits to.
+    // *is* signed would weaken the supply-chain story unnecessarily.
     let attestation_tag = if let Some(pem) = &private_pem {
         if args.no_attest {
             None

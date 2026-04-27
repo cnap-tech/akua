@@ -3,11 +3,11 @@
 // or — in the workspace dev build — the auto-generated `index.js`
 // emitted by `napi build` at `crates/akua-napi/index.js`.
 //
-// The native addon is what subsumes every shell-out the SDK used to
-// do (`render`, `verify`, `whoami`) plus the `node:wasi`-hosted
-// engine bridge introduced in #459 (now redundant: the same engines
-// run inside the napi binary's wasmtime). All in-process, all
-// feature-complete.
+// The native addon is the SDK's transport for every verb that touches
+// engines, OCI fetch, or cosign — same wasmtime + akua-core that
+// `akua` (the binary) uses, in-process via Node-API. The wasm32-
+// unknown-unknown bundle (`akua-wasm`) stays for browser use cases
+// and the pure-KCL fast path.
 
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';

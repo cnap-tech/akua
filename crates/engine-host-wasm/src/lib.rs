@@ -118,8 +118,6 @@ pub fn precompile(wasm: &[u8]) -> Result<Vec<u8>, String> {
 /// `.cwasm` into `OUT_DIR` so the crate's `lib.rs` can pick one via
 /// `cfg(feature = "precompile")`.
 ///
-/// Mirrors what the helm + kustomize shim crates each had as ~30
-/// LoC of duplicated `build.rs` boilerplate before #472.
 pub fn build_engine_wasm(name: &str) {
     use std::path::PathBuf;
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")

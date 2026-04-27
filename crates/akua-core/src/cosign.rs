@@ -1,7 +1,7 @@
 //! Keyed [cosign](https://docs.sigstore.dev/cosign/overview/)
 //! signature verification for OCI-fetched charts.
 //!
-//! Phase 6 slice A — the minimum-viable supply-chain gate that works
+//! — the minimum-viable supply-chain gate that works
 //! offline (no rekor, no fulcio). Users wire a public key into
 //! `akua.toml`:
 //!
@@ -17,9 +17,9 @@
 //! makes signatures UX theater.
 //!
 //! Keyless verification (Fulcio cert chain + Rekor transparency log)
-//! is deferred to Phase 6 slice B. Most fleets ship keyed first —
+//! is deferred to  Most fleets ship keyed first —
 //! it runs offline, has no Sigstore dependency, and pairs cleanly
-//! with the content-addressed cache Phase 2b B already set up.
+//! with the content-addressed cache already set up.
 
 use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
 use p256::pkcs8::DecodePublicKey;
@@ -69,7 +69,7 @@ pub enum CosignError {
     DigestMismatch { claimed: String, actual: String },
 }
 
-// --- Signing primitive (Phase 7) -------------------------------------------
+// --- Signing primitive -------------------------------------------
 
 /// Cosign simple-signing payload produced for an artifact. Output of
 /// [`build_simple_signing_payload`]; bytes are what [`sign_keyed`]

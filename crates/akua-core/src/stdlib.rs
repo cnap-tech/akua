@@ -56,8 +56,6 @@ const KCL_MOD: &str = "[package]\nname = \"akua\"\nedition = \"0.0.1\"\nversion 
 /// helm.template(helm.Template { chart = nginx.path, ... })
 /// ```
 ///
-/// Richer typed `Chart` / `Values` schemas (and the `helm.Template.chart: str | Chart`
-/// union that consumes them) ship in Phase 2b.
 /// `Some(tempdir)` when `resolved` has entries; `None` otherwise.
 /// Saves every caller the "if .is_empty() { None } else { Some(...) }"
 /// guard around [`materialize_charts`]. Skips if there are no Helm
@@ -114,7 +112,7 @@ fn build_chart_module(
 ) -> String {
     let mut body = format!(
         "# Auto-generated per-render from akua.toml dep `{dep_name}`.\n\
-         # Phase 2b slice C: exposes `path`, `sha256`, `Values`, and a\n\
+         # slice C: exposes `path`, `sha256`, `Values`, and a\n\
          # pre-filled `template` callable. Regenerated every render.\n\
          \n\
          import akua.helm as _helm\n\

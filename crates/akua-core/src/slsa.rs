@@ -1,17 +1,17 @@
 //! SLSA v1 provenance predicate + in-toto v1 statement builder.
 //!
-//! Phase 7 B. When `akua publish` signs an artifact, it also produces
+//!  When `akua publish` signs an artifact, it also produces
 //! an attestation describing *how* the artifact was built: which
 //! `akua` version invoked the build, what the invocation shape was,
 //! which source materials (resolved chart deps) went in. The
-//! attestation is wrapped in a DSSE envelope (Phase 7 B cosign
+//! attestation is wrapped in a DSSE envelope (cosign
 //! addition) and pushed as an `.att` sidecar.
 //!
-//! Scope (Phase 7 B slice 1):
+//! Scope:
 //!
 //! - **SLSA v1.0** provenance, `build type = https://akua.dev/slsa/publish/v1`.
 //! - Materials come from `akua.lock`'s resolved digests.
-//! - No builder identity proofs (Phase 6 B sigstore/fulcio).
+//! - No builder identity proofs (sigstore/fulcio).
 //! - No recursive chain walk on pull-verify (slice 2).
 //!
 //! Spec references:

@@ -8,7 +8,7 @@
 //! [`crate::lock_file`] (`akua.lock`).
 //!
 //! This module is **pure parsing and serialization**. No network, no fs
-//! walks, no resolution. Digest resolution lives elsewhere (Phase A.6).
+//! walks, no resolution. Digest resolution lives elsewhere.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -24,7 +24,7 @@ pub struct AkuaManifest {
     /// Supply-chain signing policy. When `[signing].cosign_public_key`
     /// is set, every OCI dep must pull with a matching cosign
     /// signature or the resolver fails. Absent section → cosign
-    /// verification is off (Phase 2b B behavior preserved).
+    /// verification is off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signing: Option<SigningSection>,
 
@@ -35,7 +35,7 @@ pub struct AkuaManifest {
     pub dependencies: BTreeMap<String, Dependency>,
 }
 
-/// `[signing]` table. Phase 6 slice A exposes keyed cosign verification
+/// `[signing]` table. exposes keyed cosign verification
 /// only. Keyless (fulcio + rekor) will land a sibling field.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SigningSection {

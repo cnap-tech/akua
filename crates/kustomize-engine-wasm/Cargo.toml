@@ -9,7 +9,7 @@ authors.workspace = true
 
 # `precompile` (default on): AOT-compile to `.cwasm`. With it OFF,
 # the source `.wasm` is embedded and JIT'd at first call — used by
-# `akua-napi`'s npm distribution to keep binary size manageable.
+# the `akua-napi` npm distribution to keep binary size manageable.
 [features]
 default = ["precompile"]
 precompile = []

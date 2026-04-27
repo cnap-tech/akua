@@ -1,6 +1,6 @@
 //! Pull an akua Package from an OCI registry.
 //!
-//! Phase 7 inverse of [`crate::oci_pusher`]. Fetches the manifest at
+//! inverse of [`crate::oci_pusher`]. Fetches the manifest at
 //! `oci://<registry>/<repo>:<tag>`, selects the single akua-typed
 //! layer, pulls its blob bytes, and hands them back. Caller (the
 //! `akua pull` verb) unpacks to the target workspace via

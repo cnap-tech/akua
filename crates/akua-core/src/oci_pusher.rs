@@ -1,6 +1,6 @@
 //! Push an akua Package to an OCI registry.
 //!
-//! Phase 7 — the inverse of [`crate::oci_fetcher`]. Where the fetcher
+//! — the inverse of [`crate::oci_fetcher`]. Where the fetcher
 //! pulls a manifest + blob and unpacks, the pusher takes a tarball,
 //! uploads it as a blob, and publishes a manifest at a tag.
 //!

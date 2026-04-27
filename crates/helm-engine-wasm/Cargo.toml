@@ -10,10 +10,9 @@ authors.workspace = true
 # `precompile` (default on): build.rs AOT-compiles helm-engine.wasm
 # to a `.cwasm` deserialized at runtime. Instant cold start, ~3x
 # binary size. With it OFF, the source `.wasm` is embedded and
-# wasmtime JIT-compiles at first call — meaningful npm size win
-# (see #472), tradeoff is ~5–10s first-render cost. Used by
-# `akua-napi` for the npm distribution; left ON for `akua-cli`'s
-# single-binary release.
+# wasmtime JIT-compiles at first call — meaningful binary-size win
+# at the cost of ~5–10 s first-render. Off for the `akua-napi` npm
+# distribution; on for `akua-cli`'s single-binary release.
 [features]
 default = ["precompile"]
 precompile = []

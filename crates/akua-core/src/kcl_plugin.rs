@@ -109,9 +109,9 @@ pub fn unregister(method: &str) -> bool {
 ///
 /// - `pkg.render` — pure Rust, always available.
 /// - `helm.template` — typed-error stub until `helm-engine-wasm` lands
-///   (see docs/roadmap.md Phase 1). Returns `E_ENGINE_NOT_AVAILABLE`.
+///   . Returns `E_ENGINE_NOT_AVAILABLE`.
 /// - `kustomize.build` — typed-error stub until `kustomize-engine-wasm`
-///   lands (see docs/roadmap.md Phase 3).
+///   lands .
 ///
 /// Per CLAUDE.md, these will never be served by a shell-out to an
 /// external binary. The only supported backend is a wasmtime-hosted
@@ -123,11 +123,11 @@ pub fn install_builtin_plugins() {
         #[cfg(feature = "engine-helm")]
         crate::helm::install();
         #[cfg(not(feature = "engine-helm"))]
-        register_engine_stub("helm.template", "helm-engine-wasm (Phase 1)");
+        register_engine_stub("helm.template", "helm-engine-wasm");
         #[cfg(feature = "engine-kustomize")]
         crate::kustomize::install();
         #[cfg(not(feature = "engine-kustomize"))]
-        register_engine_stub("kustomize.build", "kustomize-engine-wasm (Phase 3)");
+        register_engine_stub("kustomize.build", "kustomize-engine-wasm");
     });
 }
 
@@ -478,7 +478,7 @@ pub fn extract_panic_info(response: &str) -> Option<String> {
     v.get(PANIC_INFO_KEY)?.as_str().map(str::to_owned)
 }
 
-/// Wasmtime-host entry for the Phase 4 plugin bridge. Host function
+/// Wasmtime-host entry for the plugin bridge. Host function
 /// receives the three already-decoded strings (method, args JSON,
 /// kwargs JSON) — what the wasm32 `kcl_plugin_invoke_json_wasm`
 /// extern would send via C-string pointers — and returns the

@@ -11,8 +11,8 @@ authors.workspace = true
 default = ["engine-kcl", "engine-helm", "engine-kustomize", "oci-fetch", "git-fetch", "cosign-verify", "dev-watch", "precompile-engines"]
 # `precompile-engines` (default on): forwards to the engine shim
 # crates' `precompile` features. With it OFF, helm/kustomize embed
-# source `.wasm` and JIT at first call — see #472 for the napi
-# distribution that uses this mode.
+# source `.wasm` and JIT at first call — used by the napi
+# distribution to keep binary size manageable.
 precompile-engines = [
     "helm-engine-wasm?/precompile",
     "kustomize-engine-wasm?/precompile",

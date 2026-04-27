@@ -500,7 +500,7 @@ export class Akua {
 	async verify(opts: VerifyOptions = {}): Promise<VerifyOutput> {
 		if (opts.tarball) {
 			throw new Error(
-				'verify({ tarball }) — tarball verify lands in #462; pass `workspace` for now.',
+				'verify({ tarball }) is not yet implemented in the SDK — pass `workspace` instead, or use the CLI for tarball verification.',
 			);
 		}
 		const napi = loadNapi();

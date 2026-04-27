@@ -32,9 +32,8 @@ cosign-verify = ["akua-core/cosign-verify"]
 dev-watch = ["akua-core/dev-watch", "dep:ctrlc"]
 # `precompile-engines` (default on): AOT-compile the render-worker
 # .wasm to a .cwasm + flow `precompile` into the engine shim crates
-# via akua-core. Disable for the `akua-napi` npm distribution where
-# binary size matters more than ~5-10s cold first-render. Tradeoff
-# documented in #472.
+# via akua-core. Disable for the napi npm distribution where binary
+# size matters more than the ~5-10s cold first-render cost.
 precompile-engines = ["akua-core/precompile-engines"]
 # SDK type emission — off by default. `ts-export` turns on ts-rs
 # derives so the CLI contract + verb response types can be emitted

@@ -8,7 +8,7 @@
 //!
 //! This module is **pure parsing and serialization**. No network, no digest
 //! computation, no signature verification. Those live in the digest/attest
-//! paths (Phase A.6) and consume the parsed structure here.
+//! paths and consume the parsed structure here.
 
 use serde::{Deserialize, Serialize};
 
