@@ -87,6 +87,41 @@ jobs:
         working-directory: crates/akua-napi
         run: bun install --frozen-lockfile
 
+      - uses: jdx/mise-action@v4
+        with:
+          install: true
+          cache: true
+
+      - name: Build engine wasm (Go → wasip1)
+        # Per-platform `.node` ships without engines (embed-engines
+        # OFF — see #482). The bytes load at runtime from
+        # `@akua-dev/native-engines`, but we still need the wasm
+        # files on disk during the matrix build because the engine
+        # crates' build.rs stages them into OUT_DIR even when
+        # include_bytes! is gated off (the placeholder logic
+        # tolerates a missing wasm file but the staged wasm is
+        # uploaded as part of the engines artifact below).
+        run: mise exec -- task build:engines
+
+      - name: Upload engine wasm artifact (linux runners — redundant)
+        # Both linux-gnu runners upload the artifact with `overwrite:
+        # true` so a single failed runner doesn't take down the
+        # publish job. Go → wasip1 is deterministic — every runner
+        # produces byte-identical output, so the overwrite races
+        # benignly. Limited to linux jobs because that's where the
+        # Go toolchain is available + fast; the windows / mac runners
+        # in the matrix don't run `task build:engines`.
+        if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-unknown-linux-gnu'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-engines-wasm
+          path: |
+            crates/helm-engine-wasm/assets/helm-engine.wasm
+            crates/kustomize-engine-wasm/assets/kustomize-engine.wasm
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
       - uses: mlugg/setup-zig@v2
         if: matrix.cross == true
         with:
@@ -166,30 +201,48 @@ jobs:
         working-directory: crates/akua-napi
         run: ls -R npm
 
-      - name: Publish all packages
-        # Auth via npm trusted publishing (OIDC). Each per-platform
-        # package + the meta package on npmjs.com has GitHub Actions
-        # configured as a trusted publisher pointing at this repo +
-        # workflow. Per-platform packages first (each contains one
-        # `.node` binary + a slim package.json), then the meta which
-        # declares optionalDependencies on all of them.
-        if: github.event_name == 'push' || inputs.dry-run == false
-        working-directory: crates/akua-napi
+      - name: Stage engines into the npm package dir
+        # Bump version + copy the wasm bytes (downloaded above as the
+        # `native-engines-wasm` artifact) into the engines package
+        # source layout so `npm publish` finds them.
         run: |
           set -eu
-          for dir in npm/*/; do
+          version="${GITHUB_REF_NAME#native-v}"
+          cp crates/akua-napi/artifacts/native-engines-wasm/helm-engine-wasm/assets/helm-engine.wasm \
+             crates/akua-native-engines-npm/helm-engine.wasm
+          cp crates/akua-napi/artifacts/native-engines-wasm/kustomize-engine-wasm/assets/kustomize-engine.wasm \
+             crates/akua-native-engines-npm/kustomize-engine.wasm
+          jq --arg v "$version" '.version = $v' \
+            crates/akua-native-engines-npm/package.json \
+            > crates/akua-native-engines-npm/package.json.tmp
+          mv crates/akua-native-engines-npm/package.json.tmp \
+             crates/akua-native-engines-npm/package.json
+
+      - name: Publish all packages
+        # Auth via npm trusted publishing (OIDC). Order is load-
+        # bearing: engines first (per-platform packages don't depend
+        # on it but the meta `@akua-dev/native` does), then per-
+        # platform `.node` packages, then the meta which declares
+        # optionalDependencies on all of them + a regular dep on
+        # engines.
+        if: github.event_name == 'push' || inputs.dry-run == false
+        run: |
+          set -eu
+          echo "Publishing @akua-dev/native-engines"
+          (cd crates/akua-native-engines-npm && npm publish --access public --provenance)
+          for dir in crates/akua-napi/npm/*/; do
             echo "Publishing ${dir}"
             (cd "$dir" && npm publish --access public --provenance)
           done
           echo "Publishing meta @akua-dev/native"
-          npm publish --access public --provenance
+          (cd crates/akua-napi && npm publish --access public --provenance)
 
       - name: Pack only (dry-run)
         if: github.event_name == 'workflow_dispatch' && inputs.dry-run == true
-        working-directory: crates/akua-napi
         run: |
           set -eu
-          for dir in npm/*/; do
+          (cd crates/akua-native-engines-npm && npm pack --dry-run)
+          for dir in crates/akua-napi/npm/*/; do
             (cd "$dir" && npm pack --dry-run)
           done
-          npm pack --dry-run
+          (cd crates/akua-napi && npm pack --dry-run)

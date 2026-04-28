@@ -1,0 +1,23 @@
+{
+	"name": "@akua-dev/native-engines",
+	"version": "0.6.0",
+	"description": "Embedded helm + kustomize wasm engines for @akua-dev/native. Platform-agnostic; one copy shared across every per-platform native addon.",
+	"license": "Apache-2.0",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/cnap-tech/akua.git"
+	},
+	"main": "index.js",
+	"files": [
+		"index.js",
+		"helm-engine.wasm",
+		"kustomize-engine.wasm"
+	],
+	"keywords": [
+		"akua",
+		"helm",
+		"kustomize",
+		"wasm",
+		"sandbox"
+	]
+}

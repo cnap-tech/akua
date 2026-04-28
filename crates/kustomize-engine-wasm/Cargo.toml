@@ -10,9 +10,16 @@ authors.workspace = true
 # `precompile` (default on): AOT-compile to `.cwasm`. With it OFF,
 # the source `.wasm` is embedded and JIT'd at first call — used by
 # the `akua-napi` npm distribution to keep binary size manageable.
+#
+# `embed-engines` (default on): include_bytes!() the engine wasm
+# directly. With OFF, the binary carries no bytes; consumer points
+# `AKUA_NATIVE_ENGINES_DIR` at a directory containing the
+# kustomize-engine.{cwasm|wasm} file. Mirrors helm-engine-wasm.
+# See cnap-tech/akua#482.
 [features]
-default = ["precompile"]
+default = ["precompile", "embed-engines"]
 precompile = []
+embed-engines = []
 
 [build-dependencies]
 engine-host-wasm = { path = "../engine-host-wasm" }

@@ -26,7 +26,7 @@ build = "build.rs"
 # tree `#[cfg(feature = "cosign-verify")]` their own bits (e.g. the
 # attestation chain walker in `akua verify`) rather than leaking the
 # toggle through the core-only feature.
-default = ["oci-fetch", "cosign-verify", "dev-watch", "precompile-engines"]
+default = ["oci-fetch", "cosign-verify", "dev-watch", "precompile-engines", "embed-engines"]
 oci-fetch = ["akua-core/oci-fetch"]
 cosign-verify = ["akua-core/cosign-verify"]
 dev-watch = ["akua-core/dev-watch", "dep:ctrlc"]
@@ -35,6 +35,11 @@ dev-watch = ["akua-core/dev-watch", "dep:ctrlc"]
 # via akua-core. Disable for the napi npm distribution where binary
 # size matters more than the ~5-10s cold first-render cost.
 precompile-engines = ["akua-core/precompile-engines"]
+# `embed-engines` (default on): include_bytes!() the helm + kustomize
+# engine wasm into the binary. Disable for the napi npm distribution
+# where the engines ship via `@akua-dev/native-engines` and the
+# loader points at them via AKUA_NATIVE_ENGINES_DIR. See cnap-tech/akua#482.
+embed-engines = ["akua-core/embed-engines"]
 # SDK type emission — off by default. `ts-export` turns on ts-rs
 # derives so the CLI contract + verb response types can be emitted
 # as TypeScript sources. `schema-export` does the same for

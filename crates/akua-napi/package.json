@@ -2,7 +2,7 @@
 	"name": "@akua-dev/native",
 	"version": "0.6.0",
 	"description": "Native Node.js + Bun + Deno addon for akua-core. Loaded by @akua-dev/sdk; not a public surface.",
-	"main": "index.js",
+	"main": "loader.js",
 	"types": "index.d.ts",
 	"license": "Apache-2.0",
 	"repository": {
@@ -14,7 +14,8 @@
 	},
 	"files": [
 		"index.d.ts",
-		"index.js"
+		"index.js",
+		"loader.js"
 	],
 	"keywords": [
 		"akua",
@@ -44,6 +45,9 @@
 		"prepublishOnly": "napi prepublish -t npm",
 		"artifacts": "napi artifacts",
 		"version": "napi version"
+	},
+	"dependencies": {
+		"@akua-dev/native-engines": "0.6.0"
 	},
 	"devDependencies": {
 		"@napi-rs/cli": "^3.2.0"

@@ -13,9 +13,19 @@ authors.workspace = true
 # wasmtime JIT-compiles at first call — meaningful binary-size win
 # at the cost of ~5–10 s first-render. Off for the `akua-napi` npm
 # distribution; on for `akua-cli`'s single-binary release.
+#
+# `embed-engines` (default on): include_bytes!() the engine wasm
+# directly into the crate. With it OFF, the per-platform binary
+# carries no engine bytes — the consumer must point
+# `AKUA_NATIVE_ENGINES_DIR` at a directory containing the
+# helm-engine.{cwasm|wasm} file. Set OFF on the napi-rs build so the
+# 7 per-platform `@akua-dev/native-*` packages don't each duplicate
+# the 73 MB helm wasm; the bytes ship once via
+# `@akua-dev/native-engines`. See cnap-tech/akua#482.
 [features]
-default = ["precompile"]
+default = ["precompile", "embed-engines"]
 precompile = []
+embed-engines = []
 
 [build-dependencies]
 engine-host-wasm = { path = "../engine-host-wasm" }

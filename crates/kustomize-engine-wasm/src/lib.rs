@@ -14,12 +14,16 @@ use serde::{Deserialize, Serialize};
 /// Embedded engine bytes — AOT `.cwasm` (default) or source `.wasm`
 /// (with `precompile` feature OFF, for `@akua-dev/sdk`'s npm
 /// distribution). See helm-engine-wasm for the same pattern.
-#[cfg(feature = "precompile")]
+/// With `embed-engines` OFF, the embedded slot is empty — see
+/// helm-engine-wasm for the migration plan (#482).
+#[cfg(all(feature = "precompile", feature = "embed-engines"))]
 const KUSTOMIZE_ENGINE_BYTES_EMBEDDED: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/kustomize-engine.cwasm"));
-#[cfg(not(feature = "precompile"))]
+#[cfg(all(not(feature = "precompile"), feature = "embed-engines"))]
 const KUSTOMIZE_ENGINE_BYTES_EMBEDDED: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/kustomize-engine.wasm"));
+#[cfg(not(feature = "embed-engines"))]
+const KUSTOMIZE_ENGINE_BYTES_EMBEDDED: &[u8] = &[];
 const IS_PRECOMPILED: bool = cfg!(feature = "precompile");
 
 /// Filename the engine bytes live under when loaded from
@@ -168,6 +172,33 @@ mod tests {
             engine_bytes().is_empty() || engine_bytes().len() > 1_000_000,
             "kustomize-engine.cwasm has suspicious size: {} bytes",
             engine_bytes().len()
+        );
+    }
+
+    /// With `embed-engines` OFF, the embedded slot must be empty so
+    /// the per-platform npm binary doesn't carry the wasm. Pins the
+    /// load-bearing assumption behind #482's storage savings.
+    #[test]
+    #[cfg(not(feature = "embed-engines"))]
+    fn embed_off_means_zero_embedded_bytes() {
+        assert!(
+            KUSTOMIZE_ENGINE_BYTES_EMBEDDED.is_empty(),
+            "embed-engines OFF must produce an empty embed slot, got {} bytes",
+            KUSTOMIZE_ENGINE_BYTES_EMBEDDED.len()
+        );
+    }
+
+    /// With `embed-engines` ON (the default), the embed slot must
+    /// be populated unless the build skipped engine compilation
+    /// (the `0-byte placeholder` branch in build.rs).
+    #[test]
+    #[cfg(feature = "embed-engines")]
+    fn embed_on_means_nonempty_embedded_bytes() {
+        assert!(
+            KUSTOMIZE_ENGINE_BYTES_EMBEDDED.is_empty()
+                || KUSTOMIZE_ENGINE_BYTES_EMBEDDED.len() > 1_000_000,
+            "embed-engines ON should produce empty placeholder OR a real artifact (>1MB), got {} bytes",
+            KUSTOMIZE_ENGINE_BYTES_EMBEDDED.len()
         );
     }
 
