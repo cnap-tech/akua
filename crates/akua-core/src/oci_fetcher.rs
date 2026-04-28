@@ -498,18 +498,25 @@ fn cache_dir_for(root: &Path, digest: &str) -> PathBuf {
     root.join("sha256").join(hex)
 }
 
-/// Return the directory inside `cache_dir` that holds the
-/// kind-appropriate marker (`Chart.yaml` for Helm; `kcl.mod` for KCL).
+/// Return the directory inside `cache_dir` that holds a
+/// kind-appropriate marker. Helm packages carry `Chart.yaml`. KCL
+/// packages carry either `kcl.mod` (kpm-published) or `package.k`
+/// (Akua-published) — both shapes share `PackageKind::KclModule`
+/// and either marker is a valid root.
+///
 /// Handles both tar layouts: marker at root *or* in a single
 /// `<name>/` wrapper subdirectory. Fails with [`OciFetchError::Extract`]
-/// when the cached tree is missing the expected marker entirely —
-/// usually means the cache slot was clobbered by a different artifact.
+/// when the cached tree is missing every expected marker — usually
+/// means the cache slot was clobbered by a different artifact.
 fn find_package_root(cache_dir: &Path, kind: PackageKind) -> Result<PathBuf, OciFetchError> {
-    let marker = match kind {
-        PackageKind::HelmChart => "Chart.yaml",
-        PackageKind::KclModule => "kcl.mod",
+    let markers: &[&str] = match kind {
+        PackageKind::HelmChart => &["Chart.yaml"],
+        PackageKind::KclModule => &["kcl.mod", "package.k"],
     };
-    if cache_dir.join(marker).is_file() {
+    let has_marker =
+        |dir: &Path| -> bool { markers.iter().any(|m| dir.join(m).is_file()) };
+
+    if has_marker(cache_dir) {
         return Ok(cache_dir.to_path_buf());
     }
     let rd = std::fs::read_dir(cache_dir).map_err(|source| OciFetchError::Io {
@@ -518,12 +525,13 @@ fn find_package_root(cache_dir: &Path, kind: PackageKind) -> Result<PathBuf, Oci
     })?;
     for entry in rd.flatten() {
         let p = entry.path();
-        if p.is_dir() && p.join(marker).is_file() {
+        if p.is_dir() && has_marker(&p) {
             return Ok(p);
         }
     }
     Err(OciFetchError::Extract(format!(
-        "no {marker} found under {}",
+        "no {} found under {}",
+        markers.join(" or "),
         cache_dir.display()
     )))
 }
@@ -925,6 +933,45 @@ mod tests {
         assert!(dest.join("k8s/kcl.mod").is_file());
         let root = find_package_root(&dest, PackageKind::KclModule).unwrap();
         assert!(root.ends_with("k8s"));
+        assert_eq!(detect_kind(&dest), Some(PackageKind::KclModule));
+    }
+
+    /// An Akua-published OCI artifact carries `akua.toml + package.k`
+    /// instead of `kcl.mod`. `find_package_root` must descend into the
+    /// wrapping `<pkg>/` directory using `package.k` as the marker;
+    /// `detect_kind` recognizes the pair as `KclModule`.
+    #[test]
+    fn extract_blob_unpacks_akua_published_plain_tar() {
+        let mut buf = Vec::new();
+        {
+            let mut tar_b = tar::Builder::new(&mut buf);
+            let mut hdr = tar::Header::new_gnu();
+
+            let toml_body = b"[package]\nname = \"webapp\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n";
+            hdr.set_size(toml_body.len() as u64);
+            hdr.set_mode(0o644);
+            hdr.set_cksum();
+            tar_b
+                .append_data(&mut hdr.clone(), "webapp/akua.toml", &toml_body[..])
+                .unwrap();
+
+            let kcl_body = b"resources = [{apiVersion = \"v1\", kind = \"ConfigMap\", metadata.name = \"x\"}]\n";
+            hdr.set_size(kcl_body.len() as u64);
+            hdr.set_cksum();
+            tar_b
+                .append_data(&mut hdr, "webapp/package.k", &kcl_body[..])
+                .unwrap();
+
+            tar_b.finish().unwrap();
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("sha256").join("akua01");
+        extract_blob(&buf, &dest, ArchiveFormat::PlainTar).unwrap();
+        assert!(dest.join("webapp/akua.toml").is_file());
+        assert!(dest.join("webapp/package.k").is_file());
+        let root = find_package_root(&dest, PackageKind::KclModule).unwrap();
+        assert!(root.ends_with("webapp"), "got root {:?}", root);
         assert_eq!(detect_kind(&dest), Some(PackageKind::KclModule));
     }
 
