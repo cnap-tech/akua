@@ -24,10 +24,49 @@ use serde::{Deserialize, Serialize};
 /// latency). `IS_PRECOMPILED` tags which API path on
 /// [`engine_host_wasm::Session`] to take.
 #[cfg(feature = "precompile")]
-const HELM_ENGINE_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.cwasm"));
+const HELM_ENGINE_BYTES_EMBEDDED: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.cwasm"));
 #[cfg(not(feature = "precompile"))]
-const HELM_ENGINE_BYTES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.wasm"));
+const HELM_ENGINE_BYTES_EMBEDDED: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.wasm"));
 const IS_PRECOMPILED: bool = cfg!(feature = "precompile");
+
+/// Filename the engine bytes live under when loaded from
+/// [`AKUA_NATIVE_ENGINES_DIR`].
+const ENGINE_FILENAME: &str = if cfg!(feature = "precompile") {
+    "helm-engine.cwasm"
+} else {
+    "helm-engine.wasm"
+};
+
+/// Resolve the engine bytes once per process. With the env var set,
+/// `<dir>/helm-engine.{cwasm|wasm}` is read at first call and cached;
+/// otherwise the embedded bytes serve. Lets the `@akua-dev/native`
+/// loader hand the napi addon a path into `@akua-dev/native-engines`
+/// (tracked at #473) without changing the API.
+fn engine_bytes() -> &'static [u8] {
+    use std::sync::OnceLock;
+    static OVERRIDE: OnceLock<Option<Vec<u8>>> = OnceLock::new();
+    let slot = OVERRIDE.get_or_init(|| {
+        let dir = std::env::var_os(ENV_NATIVE_ENGINES_DIR)?;
+        let path = std::path::Path::new(&dir).join(ENGINE_FILENAME);
+        match std::fs::read(&path) {
+            Ok(bytes) if !bytes.is_empty() => Some(bytes),
+            // Empty file or read failure → fall back to embedded so
+            // a misconfigured env var doesn't take down rendering.
+            // Loud warning would be nicer; library code can't print
+            // without leaking through to user output.
+            _ => None,
+        }
+    });
+    slot.as_deref().unwrap_or(HELM_ENGINE_BYTES_EMBEDDED)
+}
+
+/// Env var the napi loader writes when `@akua-dev/native-engines` is
+/// installed alongside the per-platform addon, pointing at that
+/// package's directory. Public so tests + the loader can set it
+/// without copy-pasting the literal.
+pub const ENV_NATIVE_ENGINES_DIR: &str = "AKUA_NATIVE_ENGINES_DIR";
 
 const SPEC: EngineSpec = EngineSpec {
     name: "helm-engine",
@@ -140,14 +179,8 @@ thread_local! {
 
 fn call_guest(input: &[u8]) -> Result<Vec<u8>, HelmEngineError> {
     SESSION.with(|slot| {
-        engine_host_wasm::thread_local_call_with(
-            slot,
-            HELM_ENGINE_BYTES,
-            SPEC,
-            input,
-            IS_PRECOMPILED,
-        )
-        .map_err(HelmEngineError::from)
+        engine_host_wasm::thread_local_call_with(slot, engine_bytes(), SPEC, input, IS_PRECOMPILED)
+            .map_err(HelmEngineError::from)
     })
 }
 
@@ -156,16 +189,37 @@ mod tests {
     use super::*;
 
     fn engine_is_built() -> bool {
-        HELM_ENGINE_BYTES.len() > 1_000_000
+        engine_bytes().len() > 1_000_000
     }
 
     #[test]
     fn embedded_cwasm_bytes_present_or_placeholder() {
         assert!(
-            HELM_ENGINE_BYTES.is_empty() || HELM_ENGINE_BYTES.len() > 1_000_000,
+            engine_bytes().is_empty() || engine_bytes().len() > 1_000_000,
             "helm-engine.cwasm has suspicious size: {} bytes",
-            HELM_ENGINE_BYTES.len()
+            engine_bytes().len()
         );
+    }
+
+    #[test]
+    fn engine_filename_matches_precompile_feature() {
+        // Pinning the on-disk filename so the napi loader (which writes
+        // these names into the @akua-dev/native-engines package) can
+        // hardcode the same string. If precompile is on, we look for
+        // `<dir>/helm-engine.cwasm`; if off, `<dir>/helm-engine.wasm`.
+        if cfg!(feature = "precompile") {
+            assert_eq!(ENGINE_FILENAME, "helm-engine.cwasm");
+        } else {
+            assert_eq!(ENGINE_FILENAME, "helm-engine.wasm");
+        }
+    }
+
+    #[test]
+    fn env_var_name_is_stable_contract() {
+        // Loader writes this env var; engine reads it. Pinned so the
+        // two halves can't drift. Renaming requires updating the
+        // napi loader at the same time — see #473.
+        assert_eq!(ENV_NATIVE_ENGINES_DIR, "AKUA_NATIVE_ENGINES_DIR");
     }
 
     #[test]
