@@ -606,6 +606,7 @@ resources = [{
             stdout_mode: false,
             strict: false,
             offline: false,
+            debug: false,
         }
     }
 
