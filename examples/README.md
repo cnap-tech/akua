@@ -19,6 +19,7 @@ Every green row in the table below renders through the shipped `akua` binary and
 | 08 | [08-pkg-compose/](08-pkg-compose/) | pure-KCL Package-of-Packages composition via local `pkg.render("./shared", …)` | ✅ renders |
 | 09 | [09-kustomize-hello/](09-kustomize-hello/) | smallest `kustomize.build` example — overlay adds namePrefix + labels | ✅ renders |
 | 10 | [10-kcl-ecosystem/](10-kcl-ecosystem/) | pull `oci://ghcr.io/kcl-lang/k8s` (a kpm-published KCL package) and author a typed `Deployment` against it | ✅ renders |
+| 11 | [11-install-as-package/](11-install-as-package/) | install-as-Package shape — `pkg.render` an upstream, overlay tenant label, filter out a kind, append extras | ✅ renders |
 
 **Legend:**
 

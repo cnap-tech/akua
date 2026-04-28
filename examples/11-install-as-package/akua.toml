@@ -1,0 +1,10 @@
+[package]
+name    = "11-install-as-package"
+version = "0.1.0"
+edition = "akua.dev/v1alpha1"
+
+[dependencies]
+# Path-dep on the upstream Akua package. Declares the composition
+# relationship for `akua tree` + lock-time validation. `pkg.render`
+# accepts the same path inline below.
+upstream = { path = "./upstream" }

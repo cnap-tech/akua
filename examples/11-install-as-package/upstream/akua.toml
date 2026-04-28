@@ -1,0 +1,6 @@
+[package]
+name    = "upstream"
+version = "0.1.0"
+edition = "akua.dev/v1alpha1"
+
+[dependencies]

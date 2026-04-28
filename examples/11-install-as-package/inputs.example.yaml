@@ -1,0 +1,3 @@
+tenant: acme
+app: webapp
+replicas: 3
