@@ -3,8 +3,8 @@ module kustomize-engine-wasm
 go 1.25.0
 
 require (
-	sigs.k8s.io/kustomize/api v0.21.0
-	sigs.k8s.io/kustomize/kyaml v0.21.0
+	sigs.k8s.io/kustomize/api v0.21.1
+	sigs.k8s.io/kustomize/kyaml v0.21.1
 )
 
 require (

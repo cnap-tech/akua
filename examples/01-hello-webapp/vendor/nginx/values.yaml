@@ -2,7 +2,7 @@ replicaCount: 1
 
 image:
   repository: nginx
-  tag: "1.27"
+  tag: "1.30"
 
 service:
   type: ClusterIP
