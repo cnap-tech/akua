@@ -88,7 +88,7 @@ That's it. akua does **not** specify `App`, `Environment`, `Cluster`, `Secret`, 
 - `docs/cli.md` section, verb-count bump (grep for the current count across docs/README), 🚧 → ✅
 - `CHANGELOG.md` entry; `task release:validate` still green
 
-**Touching `eval_kcl` or anything called from it:** `cargo build` does NOT rebuild `akua-render-worker.cwasm`. Run `task build:render-worker --force` first. Symptom of forgetting: binary + unit tests green, but `akua render` reproduces old behavior.
+**Touching `eval_kcl` or anything called from it:** `cargo build` doesn't rebuild `akua-render-worker.cwasm` (the worker is compiled separately to `wasm32-wasip1` by `task build:render-worker`). `crates/akua-cli/build.rs` watches `crates/akua-render-worker/src` and `crates/akua-core/src` and emits a `cargo:warning=` when sources are newer than the staged `.wasm` — heed it and run `task build:render-worker` before re-running `cargo build`.
 
 ## What we refuse
 

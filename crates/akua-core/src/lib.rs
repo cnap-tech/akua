@@ -118,8 +118,8 @@ pub use lock_file::{
     AkuaLock, LockError, LockLoadError, LockedPackage, Replaced, CURRENT_VERSION as LOCK_VERSION,
 };
 pub use mod_file::{
-    AkuaManifest, DependencySource, ManifestError, ManifestLoadError, PackageSection, Replace,
-    WorkspaceSection,
+    is_valid_package_name, AkuaManifest, DependencySource, ManifestError, ManifestLoadError,
+    PackageSection, Replace, WorkspaceSection,
 };
 #[cfg(feature = "engine-kcl")]
 pub use package_k::{
