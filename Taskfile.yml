@@ -278,6 +278,12 @@ tasks:
       - cargo build -p akua-cli
       - cd packages/sdk && AKUA_E2E=1 bun test
 
+  sdk:bench:
+    desc: Render-throughput baseline for @akua-dev/sdk (cold + p50/p95/p99 warm). `task sdk:bench -- --check` enforces budgets.
+    deps: [sdk:install]
+    cmds:
+      - cd packages/sdk && bun run bench/render-source.bench.ts {{.CLI_ARGS}}
+
   sdk:publish:check:
     desc: Dry-run `npm publish` — catches package manifest issues before tag push
     deps: [sdk:build]
