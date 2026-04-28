@@ -1,20 +1,40 @@
-<p align="center">
-  <img alt="akua" height="180" src="assets/logo.png" />
-</p>
+<div align="center">
+  <!-- Large Hero Image -->
+  <img src="assets/logo.png" height="300" alt="akua" />
+  
+  <h1>akua</h1>
 
-<h1 align="center">akua</h1>
+  <!-- Airy Technical Description -->
+  <p>
+    <samp>
+      Cloud-native packaging in one binary &bull; Typed packages<br>
+      Sandboxed renders &bull; Signed by default
+    </samp>
+  </p>
 
-<p align="center">
-  <em>Cloud-native packaging in one binary. Typed packages. Sandboxed renders. Signed by default.</em>
-</p>
+  <br>
+  
+  <!-- Badges -->
+  <p>
+    <a href="https://github.com/cnap-tech/akua/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/cnap-tech/akua?label=release&style=flat-square"></a>
+    <a href="https://www.npmjs.com/package/@akua-dev/sdk"><img alt="npm" src="https://img.shields.io/npm/v/%40akua-dev%2Fsdk?style=flat-square&label=%40akua-dev%2Fsdk"></a>
+    <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square"></a>
+  </p>
+  
+  <br>
 
-> Innovative teams eventually notice how much more sense cloud-native makes once they replace the bureaucratic mass of drifting YAML with high-energy, deterministic contracts.
+  <!-- High-Energy Quote -->
+  <p>
+    <font size="4">
+      <strong><em>
+        "Innovative teams eventually notice how much more sense cloud-native makes once they replace the bureaucratic mass of drifting YAML with high-energy, deterministic contracts."
+      </em></strong>
+    </font>
+  </p>
+</div>
 
-<p align="center">
-  <a href="https://github.com/cnap-tech/akua/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/cnap-tech/akua?label=release&style=flat-square"></a>
-  <a href="https://www.npmjs.com/package/@akua-dev/sdk"><img alt="npm" src="https://img.shields.io/npm/v/%40akua-dev%2Fsdk?style=flat-square&label=%40akua-dev%2Fsdk"></a>
-  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square"></a>
-</p>
+
+  <br>
 
 <p align="center">
   <img alt="akua demo" src="docs/hero.gif" />
