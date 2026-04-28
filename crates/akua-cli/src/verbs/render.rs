@@ -27,12 +27,6 @@ const STRICT_MARKER: &str = "strict mode requires every chart";
 /// variant here — only the in-process render path keeps that typing.
 const ESCAPE_MARKER: &str = "escapes the Package directory";
 
-/// Substring of the `PkgRenderPatchUnsupported` Display, sniffed
-/// from the same string-typed envelope. Same rationale as the other
-/// markers — sandboxed renders lose the typed variant on the way
-/// back through the worker boundary.
-const PKG_RENDER_PATCH_MARKER: &str = "pkg.render result has extra sibling keys";
-
 /// User-facing remediation for `E_PATH_ESCAPE`. Emitted as the
 /// `suggestion` field on the structured error so agents have a
 /// machine-readable next-action without parsing the `docs/errors/`
@@ -161,35 +155,12 @@ impl RenderError {
                     StructuredError::new(codes::E_PATH_ESCAPE, msg.clone())
                         .with_suggestion(PATH_ESCAPE_SUGGESTION)
                         .with_default_docs()
-                } else if msg.contains(PKG_RENDER_PATCH_MARKER) {
-                    StructuredError::new(codes::E_PKG_RENDER_PATCH_UNSUPPORTED, msg.clone())
-                        .with_suggestion(
-                            "Apply patches inline in the inner Package's `resources` (the upstream gets to do the merge), \
-                             or wait for the engine-style pkg.render plugin (cnap-tech/akua#479) which lets list-comprehension \
-                             patches + filters work naturally.",
-                        )
-                        .with_default_docs()
                 } else {
                     StructuredError::new(codes::E_RENDER_KCL, msg.clone()).with_default_docs()
                 }
             }
             RenderError::PackageK(PackageKError::InputJson(e)) => {
                 StructuredError::new(codes::E_INPUTS_PARSE, e.to_string()).with_default_docs()
-            }
-            RenderError::PackageK(PackageKError::PkgRenderPatchUnsupported { keys }) => {
-                StructuredError::new(
-                    codes::E_PKG_RENDER_PATCH_UNSUPPORTED,
-                    format!(
-                        "pkg.render result has extra sibling keys ({}) that would be lost at sentinel expansion",
-                        keys.join(", ")
-                    ),
-                )
-                .with_suggestion(
-                    "Apply patches inline in the inner Package's `resources` (the upstream gets to do the merge), \
-                     or wait for the engine-style pkg.render plugin (cnap-tech/akua#479) which lets list-comprehension \
-                     patches + filters work naturally.",
-                )
-                .with_default_docs()
             }
             RenderError::PackageK(PackageKError::PathEscape(
                 inner @ akua_core::kcl_plugin::PathError::StrictRequiresTypedImport(_),
@@ -488,9 +459,12 @@ pub fn render_in_worker(
         .map_err(|msg| RenderError::PackageK(PackageKError::KclEval(msg)))?;
 
     let parsed = akua_core::parse_rendered_yaml(&yaml)?;
-    let resources = akua_core::pkg_render::expand_sentinels(parsed.resources)
-        .map_err(|e| RenderError::PackageK(PackageKError::KclEval(e.to_string())))?;
-    Ok(akua_core::RenderedPackage { resources })
+    // pkg.render is now a synchronous engine plugin (#479): the
+    // worker resolves nested renders inline before returning, so
+    // `parsed.resources` is already final.
+    Ok(akua_core::RenderedPackage {
+        resources: parsed.resources,
+    })
 }
 
 fn worker_to_render_err(e: crate::render_worker::WorkerError) -> RenderError {
@@ -587,7 +561,6 @@ mod tests {
         let markers = [
             ("STRICT_MARKER", STRICT_MARKER),
             ("ESCAPE_MARKER", ESCAPE_MARKER),
-            ("PKG_RENDER_PATCH_MARKER", PKG_RENDER_PATCH_MARKER),
         ];
         for (i, (a_name, a)) in markers.iter().enumerate() {
             for (b_name, b) in markers.iter().skip(i + 1) {

@@ -338,7 +338,7 @@ Violation of any of these is a compile error with a clear message.
 2. Loads `input` from inputs file (YAML or KCL). Validates against the `Input` schema.
 3. Resolves dependencies via `akua.toml` / `akua.lock`. Pulls and verifies signed artifacts.
 4. Evaluates the KCL program. Every engine call happens here (in-process, sandboxed).
-5. Collects the `resources` list — expanding any post-eval sentinels (`pkg.render`).
+5. Collects the `resources` list — `pkg.render` calls have already resolved inline.
 6. Writes each resource as its own YAML file under `--out`.
 7. (Future) Writes `attestation.json` (SLSA v1 predicate) alongside the manifests.
 

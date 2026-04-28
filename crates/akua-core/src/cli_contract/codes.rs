@@ -40,15 +40,6 @@ pub const E_ENGINE_NOT_AVAILABLE: &str = "E_ENGINE_NOT_AVAILABLE";
 /// the Package directory (traversal / symlink escape).
 pub const E_PATH_ESCAPE: &str = "E_PATH_ESCAPE";
 
-/// `pkg.render(opts)` returned a sentinel that the user then patched
-/// via sibling fields (e.g. `r | {metadata.labels: {...}} for r in
-/// pkg.render(...)`). The expander would wholesale-replace the sentinel
-/// with the inner Package's resources — any sibling field silently
-/// disappears. Surfaced loud instead. Filter / select operations on
-/// the sentinel hit the same case. Full engine-style synchronous
-/// `pkg.render` (which would let patches + filters apply naturally)
-/// is tracked at #479.
-pub const E_PKG_RENDER_PATCH_UNSUPPORTED: &str = "E_PKG_RENDER_PATCH_UNSUPPORTED";
 /// `charts.*` dep in `akua.toml` failed to resolve (missing path,
 /// not-a-directory, OCI/git Phase-2b gate). See chart_resolver.
 pub const E_CHART_RESOLVE: &str = "E_CHART_RESOLVE";

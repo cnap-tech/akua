@@ -94,22 +94,6 @@ pub enum PackageKError {
 
     #[error("plugin path escape: {0}")]
     PathEscape(#[from] crate::kcl_plugin::PathError),
-
-    /// A `pkg.render(...)` result was patched via sibling fields
-    /// (e.g. `_up | {metadata.labels: {...}}` or list-comprehension
-    /// patches). The post-eval expander wholesale-replaces the
-    /// sentinel with the inner Package's resources, so the patch
-    /// silently disappears. Surfacing this as an error keeps
-    /// "patches don't apply" from being a silent semantic drop.
-    /// Filter / select operations on the sentinel hit the same case.
-    /// Full engine-style synchronous rendering (which would let
-    /// patches + filters apply naturally) is tracked at #479.
-    #[error(
-        "pkg.render result has extra sibling keys ({keys:?}) that would be lost at sentinel expansion. \
-         Apply patches inline in the inner Package's `resources` instead, or wait for the engine-style \
-         pkg.render plugin (tracked at cnap-tech/akua#479)."
-    )]
-    PkgRenderPatchUnsupported { keys: Vec<String> },
 }
 
 impl PackageK {
@@ -218,11 +202,11 @@ impl PackageK {
         )?;
         let parsed = parse_rendered(&yaml)?;
 
-        // Expand pkg.render sentinels now that eval_kcl has
-        // returned — see `pkg_render` module docs for why this is
-        // post-eval rather than inline.
-        let resources = crate::pkg_render::expand_sentinels(parsed.resources)?;
-        Ok(RenderedPackage { resources })
+        // `pkg.render` resolves inline inside its plugin handler, so
+        // every nested call is already part of `parsed.resources`.
+        Ok(RenderedPackage {
+            resources: parsed.resources,
+        })
     }
 }
 

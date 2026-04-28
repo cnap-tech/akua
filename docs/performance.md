@@ -66,7 +66,7 @@ Three fixtures:
 
 ## 2. Plugin dispatch overhead
 
-What it measures: cost of a `kcl_plugin.<module>.<fn>` call from a Package body. The `pkg.render` handler is the cheapest possible plugin — its Rust handler emits a single sentinel dict and returns. So differences vs pure-KCL baseline isolate **JSON-in / JSON-out FFI cost**, not engine work.
+What it measures: cost of a `kcl_plugin.<module>.<fn>` call from a Package body. The fixtures here use `pkg.render` against a one-resource inner Package, so differences vs pure-KCL baseline isolate **JSON-in / JSON-out FFI cost + nested KCL eval**, not engine work.
 
 Native only (WASI plugins are stubbed — benchmarking stubs is meaningless).
 
@@ -76,32 +76,18 @@ Native only (WASI plugins are stubbed — benchmarking stubs is meaningless).
 | 1× `pkg.render` | 0.3 ms | ≈ 0 ms |
 | 10× `pkg.render` | 0.5 ms | +0.2 ms |
 
-**Takeaway:** plugin dispatch is ~**20 µs per call** (amortized from the 10× column). It's not a bottleneck for any realistic Package. The ABI is JSON-in / JSON-out via a function pointer, leaked `CString` return — no locking, no allocations beyond the payload.
+**Takeaway:** plugin dispatch is ~**20 µs per call** amortized. Not a bottleneck for realistic Packages. The ABI is JSON-in / JSON-out via a function pointer, leaked `CString` return — no locking, no allocations beyond the payload.
 
 ---
 
-## 3. Plugin dispatch overhead
-
-What it measures: cost of a `kcl_plugin.<module>.<fn>` call from a Package body. The `pkg.render` handler is the cheapest possible plugin — its Rust handler emits a single sentinel dict and returns. So differences vs pure-KCL baseline isolate **JSON-in / JSON-out FFI cost**, not engine work.
-
-| Fixture | Warm median | Δ vs pure-KCL tiny |
-|---|---:|---:|
-| tiny (pure KCL, 1 resource) | 0.3 ms | baseline |
-| 1× `pkg.render` | 0.3 ms | ≈ 0 ms |
-| 10× `pkg.render` | 0.5 ms | +0.2 ms |
-
-**Takeaway:** plugin dispatch is ~**20 µs per call** amortized. Not a bottleneck.
-
----
-
-## 4. End-to-end `akua render` CLI latency (embedded WASM engines)
+## 3. End-to-end `akua render` CLI latency (embedded WASM engines)
 
 What it measures: full user-visible time — binary startup + arg parse + Package load + KCL eval + any plugin work + WASM engine instantiation + render. Measured via [`hyperfine`](https://github.com/sharkdp/hyperfine) with 3 warmup runs and ≥10 timed runs, `--dry-run` so filesystem writes don't vary the sample.
 
 | Fixture | Mean | Plugin work? |
 |---|---:|---|
 | `examples/08-pkg-compose/shared/` (pure KCL, 1 resource) | **7.8 ms** | — |
-| `examples/08-pkg-compose/` (outer + `pkg.render` composition) | **10.8 ms** | 2× `pkg.render` sentinels |
+| `examples/08-pkg-compose/` (outer + `pkg.render` composition) | **10.8 ms** | 2× `pkg.render` calls |
 | `examples/09-kustomize-hello/` (kustomize-engine-wasm) | **76.3 ms** | 1× `kustomize.build` |
 | `examples/00-helm-hello/` (helm-engine-wasm, forked) | **57.4 ms** | 1× `helm.template` |
 
@@ -116,7 +102,7 @@ The cost is dominated by one-time-per-render startup, not render work itself:
 
 ---
 
-## 5. WASM-engine cold-start cost — and how to amortize it
+## 4. WASM-engine cold-start cost — and how to amortize it
 
 The per-invocation ~60-110 ms sits mostly in Go's package `init()` chains running every call. Three mitigation paths, all open follow-ups:
 

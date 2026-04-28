@@ -85,7 +85,7 @@ These are feature absences, not invariant violations. Users know exactly what th
 - [x] Raw-YAML render writer — deterministic `NNN-kind-name.yaml` + per-output sha256
 - [x] KCL plugin bridge — `plugin_agent: u64` function pointer, JSON-in / JSON-out
 - [x] `akua.*` KCL stdlib (`ctx`, `helm`, `kustomize`, `pkg`) — typed options-schema pattern
-- [x] `pkg.render()` post-eval sentinel composition
+- [x] `pkg.render()` synchronous host-plugin composition
 - [x] Signed + attested OCI distribution (publish / pull / pack / push / sign / verify / verify --tarball)
 - [x] Benchmarks: native vs WASI-wasm (2× overhead — see [docs/performance.md](performance.md))
 

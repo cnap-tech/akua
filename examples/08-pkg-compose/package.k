@@ -26,10 +26,8 @@ schema Input:
 
 input: Input = ctx.input()
 
-# Each call lands as a sentinel at eval time; the akua render
-# pipeline walks the resources list post-eval, expands each
-# sentinel by loading + rendering `./shared/package.k` with the
-# supplied inputs, then splices the nested resources in place.
+# Each call loads + renders `./shared/package.k` synchronously
+# with the supplied inputs and returns the inner resources list.
 _frontend = pkg.render(pkg.Render {
     path   = "./shared"
     inputs = {
