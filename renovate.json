@@ -1,0 +1,12 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "packageRules": [
+    {
+      "description": "Pre-1.0 Rust crates: minor bumps are de-facto breaking under cargo's semver. The default 'all-non-major' batch hides several breaking changes in one untestable PR — split each into its own PR so it can be vetted and landed independently. Stable-version (>= 1.0) patches stay batched as the noise/risk tradeoff favors batching there.",
+      "matchManagers": ["cargo"],
+      "matchCurrentVersion": "/^0\\./",
+      "groupName": null
+    }
+  ]
+}
