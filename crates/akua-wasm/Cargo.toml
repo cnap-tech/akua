@@ -31,7 +31,7 @@ wasm-bindgen = "0.2"
 # backend on wasm32-unknown-unknown. Opt-in here so the dep graph
 # resolves a compatible `getrandom` feature.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2", features = ["js"] }
+getrandom = { version = "0.4", features = ["js"] }
 uuid = { version = "1", features = ["js", "v4"] }
 # `instant` defaults to an `env::now` extern on wasm32; the
 # `wasm-bindgen` feature makes it use `Date.now()` instead — no
