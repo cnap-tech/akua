@@ -65,7 +65,7 @@ const KCL_LAYER_MEDIA_TYPE: &str = "application/vnd.oci.image.layer.v1.tar";
 ///
 /// - `org.kcllang.package.name` — current canonical kpm annotation.
 /// - `org.kclpkg.package.name` — older kpm form, still in the wild.
-/// - `org.akua.package.name` — akua-published artifacts. Stays
+/// - `dev.akua.package.name` — akua-published artifacts. Stays
 ///   compatible with the kcl-lang shape on the wire (every Akua
 ///   Package IS a KCL package by structure), but lets us version
 ///   akua-specific metadata (signing kind, schema bundle digest,
@@ -76,7 +76,7 @@ const KCL_LAYER_MEDIA_TYPE: &str = "application/vnd.oci.image.layer.v1.tar";
 const KCL_PACKAGE_ANNOTATION_KEYS: &[&str] = &[
     "org.kcllang.package.name",
     "org.kclpkg.package.name",
-    "org.akua.package.name",
+    "dev.akua.package.name",
 ];
 
 /// OCI image manifest media type. Some registries (ghcr.io with
@@ -176,7 +176,7 @@ pub enum OciFetchError {
         detail: String,
     },
 
-    #[error("manifest for `{oci_ref}:{version}` has no recognised package layer — expected helm `{HELM_CHART_LAYER_MEDIA_TYPE}` or KCL `{KCL_LAYER_MEDIA_TYPE}` with `org.kcllang.package.*` / `org.kclpkg.package.*` / `org.akua.package.*` annotations")]
+    #[error("manifest for `{oci_ref}:{version}` has no recognised package layer — expected helm `{HELM_CHART_LAYER_MEDIA_TYPE}` or KCL `{KCL_LAYER_MEDIA_TYPE}` with `org.kcllang.package.*` / `org.kclpkg.package.*` / `dev.akua.package.*` annotations")]
     NoChartLayer { oci_ref: String, version: String },
 
     #[error("pulled blob digest `{actual}` doesn't match layer-declared `{declared}`")]
@@ -987,7 +987,7 @@ mod tests {
     #[test]
     fn detect_package_recognizes_akua_specific_annotation() {
         // Closes spike-1 #481: an Akua-published OCI artifact that
-        // carries `org.akua.package.*` (with or without the kcl-lang
+        // carries `dev.akua.package.*` (with or without the kcl-lang
         // alias) decodes the same way as kcl-lang ecosystem packages.
         // Lets akua publish artifacts that are 100% kcl-readable on
         // the wire while still letting akua versioning extend
@@ -999,7 +999,7 @@ mod tests {
                 size: 1,
             }],
             annotations: BTreeMap::from([(
-                "org.akua.package.name".to_string(),
+                "dev.akua.package.name".to_string(),
                 "webapp".to_string(),
             )]),
         };
@@ -1022,9 +1022,9 @@ mod tests {
             }],
             annotations: BTreeMap::from([
                 ("org.kcllang.package.name".to_string(), "webapp".to_string()),
-                ("org.akua.package.name".to_string(), "webapp".to_string()),
+                ("dev.akua.package.name".to_string(), "webapp".to_string()),
                 (
-                    "org.akua.package.signing".to_string(),
+                    "dev.akua.package.signing".to_string(),
                     "cosign-keyless".to_string(),
                 ),
             ]),
