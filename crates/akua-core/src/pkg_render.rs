@@ -69,15 +69,35 @@ pub fn install() {
         let resolved = kcl_plugin::resolve_in_package(&raw).map_err(|e| err(e.to_string()))?;
         let target = resolve_package_file(&resolved);
 
-        // Cycle detection — bail before loading the file. The render
-        // stack tracks every Package currently on the call chain;
-        // hitting an already-rendering path means we're about to
-        // recurse forever.
-        if kcl_plugin::is_rendering(&target) {
+        // Pre-render checks — cycle, depth cap, wall-clock — in one
+        // pass over the render stack. Cycle rejects re-entry of a
+        // Package already on the chain; depth + deadline cover the
+        // remaining runaway shapes (unbounded fan-out through fresh
+        // Packages; host-side eval spinning past the wasm epoch
+        // deadline).
+        let pre = kcl_plugin::pre_check(&target);
+        if pre.cycle {
             return Err(err_at(
                 &target,
                 "cycle detected — already on the render stack",
             ));
+        }
+        if pre.depth >= pre.budget.max_depth {
+            return Err(err_at(
+                &target,
+                format!(
+                    "render depth limit ({}) exceeded — likely composition runaway",
+                    pre.budget.max_depth
+                ),
+            ));
+        }
+        if let Some(deadline) = pre.budget.deadline {
+            if std::time::Instant::now() >= deadline {
+                return Err(err_at(
+                    &target,
+                    "wall-clock budget exhausted in nested render",
+                ));
+            }
         }
 
         // Load + render the inner Package. The recursion is bounded
@@ -352,4 +372,94 @@ resources = pkg.render({ path = "./middle.k" })"#,
             YamlValue::String("deep-from-middle".into())
         );
     }
+
+    /// Wall-clock budget that's already expired by the time the
+    /// outer render starts trips on the first nested `pkg.render`
+    /// call. Confirms the deadline propagates into the plugin
+    /// handler via the inherited budget snapshot.
+    #[test]
+    fn budget_wall_clock_deadline_rejects_nested_render() {
+        use kcl_plugin::BudgetSnapshot;
+        use std::time::{Duration, Instant};
+
+        let tmp = TempDir::new().unwrap();
+        write(tmp.path(), "inner.k", INNER);
+        let outer_path = write(
+            tmp.path(),
+            "outer.k",
+            r#"
+import kcl_plugin.pkg
+
+resources = pkg.render({ path = "./inner.k" })"#,
+        );
+
+        // Deadline already in the past → first pkg.render call rejects.
+        let budget = BudgetSnapshot {
+            deadline: Some(Instant::now() - Duration::from_secs(1)),
+            max_depth: BudgetSnapshot::DEFAULT_MAX_DEPTH,
+        };
+        let _outer_scope = kcl_plugin::RenderScope::enter_with_budget(&outer_path, budget);
+
+        let outer = PackageK::load(&outer_path).expect("load outer");
+        let err = outer
+            .render(&YamlValue::Mapping(Default::default()))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("wall-clock budget exhausted"),
+            "expected wall-clock rejection, got: {err}"
+        );
+    }
+
+    /// Depth cap rejects unbounded fan-out through fresh Packages
+    /// — cycle detection alone doesn't catch this because every
+    /// inner Package is a different file.
+    #[test]
+    fn budget_depth_cap_rejects_runaway_recursion() {
+        use kcl_plugin::BudgetSnapshot;
+
+        // Build a chain where each level renders the next:
+        //   level0.k → level1.k → level2.k → ... → levelN.k
+        let tmp = TempDir::new().unwrap();
+        let chain_len = 5;
+        // Tail: a leaf with a literal resource list.
+        write(
+            tmp.path(),
+            &format!("level{chain_len}.k"),
+            "resources = [{apiVersion: \"v1\", kind: \"ConfigMap\", metadata.name: \"leaf\"}]\n",
+        );
+        for i in (0..chain_len).rev() {
+            let next = format!("./level{}.k", i + 1);
+            write(
+                tmp.path(),
+                &format!("level{i}.k"),
+                &format!(
+                    r#"
+import kcl_plugin.pkg
+
+resources = pkg.render({{ path = "{next}" }})"#
+                ),
+            );
+        }
+
+        // Cap depth at 3 — chain is 6 levels deep so the 3rd
+        // pkg.render call must reject.
+        let outer_path = tmp.path().join("level0.k");
+        let budget = BudgetSnapshot {
+            deadline: None,
+            max_depth: 3,
+        };
+        let _outer_scope = kcl_plugin::RenderScope::enter_with_budget(&outer_path, budget);
+
+        let outer = PackageK::load(&outer_path).expect("load");
+        let err = outer
+            .render(&YamlValue::Mapping(Default::default()))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("depth limit"),
+            "expected depth-limit rejection, got: {err}"
+        );
+    }
+
 }

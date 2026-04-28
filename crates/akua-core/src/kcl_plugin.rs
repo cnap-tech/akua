@@ -41,6 +41,7 @@ use std::ffi::{c_char, CStr, CString};
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
+use std::time::Instant;
 
 use serde_json::Value;
 
@@ -168,6 +169,58 @@ struct RenderFrame {
     /// Package dir are rejected. Forces authors to declare every
     /// chart in `akua.toml`, giving `akua.lock` full coverage.
     strict: bool,
+    /// Inherited budget for nested-render guards (e.g. `pkg.render`).
+    /// Carries the wall-clock deadline and depth cap from the
+    /// outermost render entry; child frames copy it from their
+    /// parent so the limits propagate through composition without
+    /// every call site needing to thread it explicitly.
+    budget: BudgetSnapshot,
+}
+
+/// Resource limits propagated through the render stack. Read by
+/// recursive plugins ([`crate::pkg_render`]) before invoking the
+/// inner Package's render — when exhausted, the plugin returns a
+/// structured error instead of recursing.
+///
+/// `Copy` so child frames inherit by value when a nested
+/// [`RenderScope`] is pushed.
+///
+/// Memory caps are *not* part of the budget — the outer wasmtime
+/// store's `StoreLimits` already bounds total allocations across
+/// nested in-process renders. The budget covers wall-clock
+/// (host-side eval can spin past the wasm epoch deadline) and
+/// composition depth (cycle detection rejects re-entry of a
+/// Package on the stack, but not unbounded fan-out through fresh
+/// Packages).
+#[derive(Copy, Clone, Debug)]
+pub struct BudgetSnapshot {
+    /// Wall-clock deadline. `None` means no wall-clock cap (typical
+    /// for unit tests + library callers that don't set one).
+    pub deadline: Option<Instant>,
+    /// Hard cap on render-stack depth. Reaching this returns an
+    /// error rather than blowing the host stack.
+    pub max_depth: usize,
+}
+
+impl BudgetSnapshot {
+    /// Default cap on render-stack depth. Real composition is shallow
+    /// (1–3 levels in practice); 16 leaves headroom while still
+    /// rejecting runaways.
+    pub const DEFAULT_MAX_DEPTH: usize = 16;
+
+    /// Unbounded wall-clock + the default depth cap.
+    pub const fn unbounded() -> Self {
+        Self {
+            deadline: None,
+            max_depth: Self::DEFAULT_MAX_DEPTH,
+        }
+    }
+}
+
+impl Default for BudgetSnapshot {
+    fn default() -> Self {
+        Self::unbounded()
+    }
 }
 
 thread_local! {
@@ -203,14 +256,7 @@ impl RenderScope {
     /// be a security surface since the plugin-path guard defers to
     /// whatever the top-of-stack frame permits.
     pub(crate) fn enter_with(package: &Path, allowed_roots: &[PathBuf], strict: bool) -> Self {
-        RENDER_STACK.with(|s| {
-            s.borrow_mut().push(RenderFrame {
-                package: package.to_path_buf(),
-                allowed_roots: allowed_roots.to_vec(),
-                strict,
-            });
-        });
-        Self { _private: () }
+        Self::enter_full(package, allowed_roots, strict, top_frame_budget())
     }
 
     /// Push a scope for the wasmtime-hosted render path. Derives the
@@ -230,6 +276,31 @@ impl RenderScope {
             .map(|c| c.abs_path.clone())
             .collect();
         Self::enter_with(package, &allowed_roots, strict)
+    }
+
+    /// Push the outermost frame with an explicit budget. Use this at
+    /// the entry point of a render orchestrator (CLI, library, test)
+    /// to install a wall-clock deadline; nested `pkg.render` calls
+    /// inherit it automatically.
+    pub fn enter_with_budget(package: &Path, budget: BudgetSnapshot) -> Self {
+        Self::enter_full(package, &[], false, budget)
+    }
+
+    fn enter_full(
+        package: &Path,
+        allowed_roots: &[PathBuf],
+        strict: bool,
+        budget: BudgetSnapshot,
+    ) -> Self {
+        RENDER_STACK.with(|s| {
+            s.borrow_mut().push(RenderFrame {
+                package: package.to_path_buf(),
+                allowed_roots: allowed_roots.to_vec(),
+                strict,
+                budget,
+            });
+        });
+        Self { _private: () }
     }
 }
 
@@ -261,6 +332,42 @@ pub fn current_package_dir() -> Option<PathBuf> {
 /// cause infinite recursion.
 pub fn is_rendering(package: &Path) -> bool {
     RENDER_STACK.with(|s| s.borrow().iter().any(|f| f.package == package))
+}
+
+/// Pre-render snapshot for a recursive plugin (`pkg.render`).
+/// Coalesces cycle / depth / budget reads into one `RENDER_STACK`
+/// borrow so the handler doesn't pay three separate borrows per
+/// invocation under list-comprehension fan-out.
+#[derive(Debug)]
+pub struct RenderPreCheck {
+    /// `true` if `target` is already on the stack — the plugin must
+    /// reject before loading to avoid infinite recursion.
+    pub cycle: bool,
+    /// Current stack depth (i.e. depth the inner render would push to).
+    pub depth: usize,
+    /// Inherited budget from the top of stack, or
+    /// [`BudgetSnapshot::unbounded`] if no render is active.
+    pub budget: BudgetSnapshot,
+}
+
+/// Snapshot the render stack for a recursive-plugin pre-check.
+/// One borrow, all the state the handler needs.
+pub fn pre_check(target: &Path) -> RenderPreCheck {
+    RENDER_STACK.with(|s| {
+        let stack = s.borrow();
+        RenderPreCheck {
+            cycle: stack.iter().any(|f| f.package == target),
+            depth: stack.len(),
+            budget: stack.last().map(|f| f.budget).unwrap_or_default(),
+        }
+    })
+}
+
+/// Top-of-stack budget, or [`BudgetSnapshot::unbounded`] when empty.
+/// Used by [`RenderScope::enter_with`] to inherit the parent's
+/// budget into the new frame.
+fn top_frame_budget() -> BudgetSnapshot {
+    RENDER_STACK.with(|s| s.borrow().last().map(|f| f.budget).unwrap_or_default())
 }
 
 /// Absolute roots registered for the top-of-stack frame — the
