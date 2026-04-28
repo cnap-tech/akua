@@ -13,6 +13,62 @@ minor bump in the SDK.
 > single-file/total-package cap is incompatible with the bundled napi
 > addon (~129 MB compressed across the per-platform packages).
 
+## [0.7.0] — 2026-04-28
+
+The `pkg.render` round: a synchronous engine plugin that mirrors
+`helm.template` / `kustomize.build`, plus the supporting work to
+make composition first-class (path-deps + OCI Akua-package deps,
+budget guards, structured error codes, a worked install-as-Package
+example).
+
+### Added
+
+- **`pkg.render` is a synchronous engine plugin.** Returns a real
+  `[{str:}]` list, not a deferred sentinel. List-comprehension
+  patches (`[r | overlay for r in pkg.render(...)]`), filter
+  expressions, and slicing all work natively. Requires the akua
+  KCL fork (`cnap-tech/kcl@akua-wasm32`, commit `d584c0bc`) which
+  copies `PLUGIN_HANDLER_FN_PTR` out of its mutex before invoking
+  the plugin callback so reentrant KCL eval no longer deadlocks.
+- **OCI Akua-package deps.** `[dependencies] upstream = { oci = "..." }`
+  resolves to a `KclModule` even when the artifact carries
+  `package.k` (no `kcl.mod`) and `dev.akua.*` annotations.
+- **Budget header for `pkg.render`.** `BudgetSnapshot { deadline,
+  max_depth }` propagated through the render stack and checked
+  before nested invocations. Default depth cap is 16; outermost
+  callers can install an explicit deadline via
+  `RenderScope::enter_with_budget`. Catches recursive-composition
+  runaway.
+- **Structured error codes** for plugin failures:
+  `E_RENDER_CYCLE`, `E_RENDER_BUDGET_DEPTH`,
+  `E_RENDER_BUDGET_DEADLINE`. Routed through a marker→code lookup
+  table.
+- **`examples/11-install-as-package/`** — worked install-as-Package
+  shape: outer Package overlays a tenant label, filters out a kind,
+  and appends an extras ConfigMap on top of `pkg.render`'d upstream.
+- **`renovate.json`** — pre-1.0 cargo bumps no longer batch into a
+  single PR.
+
+### Changed
+
+- Render-worker rebuild trigger now watches `akua-render-worker/src`
+  + `akua-core/src` and emits a `cargo:warning=` when the staged
+  `.cwasm` is stale.
+- `akua init .` derives the package name from `basename($PWD)`
+  instead of writing `name = "."`.
+- `E_PATH_ESCAPE` errors now carry a `hint` field with both
+  remediations (vendor under the Package or declare in
+  `akua.toml`).
+- `akua render --debug` (under `--json`) emits `evalResult`
+  alongside the summary — the post-eval resources list before
+  YAML normalization.
+
+### Removed
+
+- The `pkg.render` deferred-sentinel mechanism + the
+  `E_PKG_RENDER_PATCH_UNSUPPORTED` fail-loud arm. Patching the
+  return is now native, so the workaround retired.
+
 ## @akua-dev/sdk — [0.6.0] — 2026-04-27
 
 The SDK moves from JSR to npm and renames to `@akua-dev/sdk`. This is
