@@ -106,6 +106,7 @@ tasks:
           --test examples_pkg_compose
           --test examples_kustomize_hello
           --test examples_kcl_ecosystem
+          --test examples_install_as_package
           --test examples_export
 
   # ---- Release builds ------------------------------------------------------

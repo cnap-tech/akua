@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: webapp-install-meta
+  labels:
+    install.cnap.tech/tenant: acme
+data:
+  tenant: acme
+  upstreamApp: webapp
