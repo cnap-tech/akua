@@ -37,6 +37,12 @@ jobs:
           install: true
           cache: true
       - uses: rui314/setup-mold@v1
+      - name: Install wasm32-wasip1 target
+        # release:validate depends on build:render-worker, which
+        # compiles akua-render-worker to wasm32-wasip1. Without this
+        # target installed, the worker build fails with
+        # `can't find crate for core`.
+        run: mise exec -- rustup target add wasm32-wasip1
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: validate
