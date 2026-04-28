@@ -27,6 +27,18 @@ const STRICT_MARKER: &str = "strict mode requires every chart";
 /// variant here — only the in-process render path keeps that typing.
 const ESCAPE_MARKER: &str = "escapes the Package directory";
 
+/// `pkg.render` rejected re-entry of a Package already on the
+/// render stack. Stable substring of the prose error in
+/// `crate::pkg_render`; sniffed out of the KCL plugin-panic envelope.
+const CYCLE_MARKER: &str = "cycle detected";
+
+/// `pkg.render` rejected because the inherited depth cap was hit.
+const DEPTH_BUDGET_MARKER: &str = "render depth limit";
+
+/// `pkg.render` rejected because the inherited wall-clock deadline
+/// was already in the past.
+const DEADLINE_BUDGET_MARKER: &str = "wall-clock budget exhausted";
+
 /// User-facing remediation for `E_PATH_ESCAPE`. Emitted as the
 /// `suggestion` field on the structured error so agents have a
 /// machine-readable next-action without parsing the `docs/errors/`
@@ -36,6 +48,37 @@ const PATH_ESCAPE_SUGGESTION: &str = "Two ways out: \
     (1) vendor the dependency as a subdirectory of this Package and reference it with a Package-relative path (e.g. `./vendor/<name>`); or \
     (2) declare it in `akua.toml` `[dependencies]` and reference the resolved alias (`charts.<name>.path` for Helm charts; `import <alias>` for KCL/Akua packages). \
     See docs/errors/E_PATH_ESCAPE.md.";
+
+const STRICT_SUGGESTION: &str = "Declare the chart in `akua.toml` and `import charts.<name>`, then pass `chart = <name>.path` to `helm.template`.";
+
+const CYCLE_SUGGESTION: &str =
+    "Composition cycle in `pkg.render` calls. Break the dependency loop — a Package cannot directly or transitively render itself.";
+
+const DEPTH_BUDGET_SUGGESTION: &str =
+    "Recursive `pkg.render` exceeded the depth cap (default 16). Flatten the composition chain.";
+
+const DEADLINE_BUDGET_SUGGESTION: &str =
+    "The wall-clock deadline installed by the outer caller had already expired before the nested `pkg.render` could run. Raise the deadline or split the work.";
+
+/// Marker → (code, suggestion) lookup for the `KclEval` arm of
+/// [`RenderError::to_structured`]. Order is by selectivity, but the
+/// `render_error_markers_are_substring_disjoint` test pins the
+/// markers as pairwise-disjoint so any order would be correct.
+const KCL_EVAL_MARKER_TABLE: &[(&str, &str, &str)] = &[
+    (STRICT_MARKER, codes::E_STRICT_UNTYPED_CHART, STRICT_SUGGESTION),
+    (ESCAPE_MARKER, codes::E_PATH_ESCAPE, PATH_ESCAPE_SUGGESTION),
+    (CYCLE_MARKER, codes::E_RENDER_CYCLE, CYCLE_SUGGESTION),
+    (
+        DEPTH_BUDGET_MARKER,
+        codes::E_RENDER_BUDGET_DEPTH,
+        DEPTH_BUDGET_SUGGESTION,
+    ),
+    (
+        DEADLINE_BUDGET_MARKER,
+        codes::E_RENDER_BUDGET_DEADLINE,
+        DEADLINE_BUDGET_SUGGESTION,
+    ),
+];
 
 #[derive(Debug, Clone)]
 pub struct RenderArgs<'a> {
@@ -145,18 +188,15 @@ impl RenderError {
                 // strict-mode marker the `resolve_in_package` error
                 // carries so the CLI surfaces a distinct code + hint
                 // instead of the generic `E_RENDER_KCL`.
-                if msg.contains(STRICT_MARKER) {
-                    StructuredError::new(codes::E_STRICT_UNTYPED_CHART, msg.clone())
-                        .with_suggestion(
-                            "Declare the chart in `akua.toml` and `import charts.<name>`, then pass `chart = <name>.path` to `helm.template`.",
-                        )
-                        .with_default_docs()
-                } else if msg.contains(ESCAPE_MARKER) {
-                    StructuredError::new(codes::E_PATH_ESCAPE, msg.clone())
-                        .with_suggestion(PATH_ESCAPE_SUGGESTION)
-                        .with_default_docs()
-                } else {
-                    StructuredError::new(codes::E_RENDER_KCL, msg.clone()).with_default_docs()
+                match KCL_EVAL_MARKER_TABLE
+                    .iter()
+                    .find(|(marker, _, _)| msg.contains(marker))
+                {
+                    Some((_, code, suggestion)) => StructuredError::new(*code, msg.clone())
+                        .with_suggestion(*suggestion)
+                        .with_default_docs(),
+                    None => StructuredError::new(codes::E_RENDER_KCL, msg.clone())
+                        .with_default_docs(),
                 }
             }
             RenderError::PackageK(PackageKError::InputJson(e)) => {
@@ -165,9 +205,7 @@ impl RenderError {
             RenderError::PackageK(PackageKError::PathEscape(
                 inner @ akua_core::kcl_plugin::PathError::StrictRequiresTypedImport(_),
             )) => StructuredError::new(codes::E_STRICT_UNTYPED_CHART, inner.to_string())
-                .with_suggestion(
-                    "Declare the chart in `akua.toml` and `import charts.<name>`, then pass `chart = <name>.path` to `helm.template`.",
-                )
+                .with_suggestion(STRICT_SUGGESTION)
                 .with_default_docs(),
             RenderError::PackageK(PackageKError::PathEscape(
                 inner @ akua_core::kcl_plugin::PathError::Escape { .. },
@@ -561,6 +599,9 @@ mod tests {
         let markers = [
             ("STRICT_MARKER", STRICT_MARKER),
             ("ESCAPE_MARKER", ESCAPE_MARKER),
+            ("CYCLE_MARKER", CYCLE_MARKER),
+            ("DEPTH_BUDGET_MARKER", DEPTH_BUDGET_MARKER),
+            ("DEADLINE_BUDGET_MARKER", DEADLINE_BUDGET_MARKER),
         ];
         for (i, (a_name, a)) in markers.iter().enumerate() {
             for (b_name, b) in markers.iter().skip(i + 1) {
@@ -570,6 +611,26 @@ mod tests {
                      got {a_name}={a:?} {b_name}={b:?}"
                 );
             }
+        }
+    }
+
+    /// Round-trip: each marker in `KCL_EVAL_MARKER_TABLE` must map a
+    /// `KclEval(prose)` to the table's code via `to_structured`.
+    /// Pins the table-driven dispatch against silent drift — if the
+    /// matching logic ever inverts or ignores the table, this test
+    /// fails.
+    #[test]
+    fn kcl_eval_markers_route_to_their_codes() {
+        for (marker, expected_code, _suggestion) in KCL_EVAL_MARKER_TABLE {
+            let err = RenderError::PackageK(PackageKError::KclEval(format!(
+                "pkg.render(/tmp/x.k): {marker} (synthetic test prose)"
+            )));
+            let structured = err.to_structured();
+            assert_eq!(
+                structured.code, *expected_code,
+                "marker {marker:?} should route to {expected_code}, got {}",
+                structured.code
+            );
         }
     }
 
