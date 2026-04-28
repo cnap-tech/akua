@@ -35,26 +35,21 @@ rendered/
 
 ## How `pkg.render` works
 
-KCL's upstream plugin mechanism holds a global mutex across every
-plugin invocation, which prevents same-thread re-entry into the
-evaluator. Calling `PackageK::render` recursively inside the plugin
-handler would deadlock.
+`pkg.render` is a synchronous KCL host plugin: the handler resolves
+the path against the calling Package's directory (with the same
+sandbox guard `helm.template` and `kustomize.build` use), calls
+`PackageK::load(...).render(inputs)` inline, and returns the inner
+resources list directly to the caller. Because the return is a real
+list, list-comprehension patches and filter expressions on the
+result work natively — no post-eval rewrite step.
 
-Instead, the `pkg.render` handler is **cheap**: it returns a
-sentinel dict of shape
+Reentrancy works because akua's KCL fork copies the plugin handler
+fn pointer out of its mutex before invoking the callback (see
+`cnap-tech/kcl#akua-wasm32`); upstream KCL holds the mutex across
+the call and would deadlock here.
 
-```json
-{ "akuaPkgRenderSentinel": { "path": "…", "inputs": {…} } }
-```
-
-placed in the caller's `resources` list. After the outer Package's
-`eval_kcl` completes (and KCL's mutex is released), akua-core walks
-the resources list, finds the sentinels, loads + renders the
-referenced Packages, and splices each nested resource list in
-place. Cycle detection uses akua-core's thread-local render-stack —
-a Package referring to itself (direct or transitive) is rejected
-before infinite recursion.
-
-Nested `pkg.render` calls — e.g. `A` uses `B`, which uses `C` —
-expand recursively via the same walk; each inner Package's own
-`render()` walks its own sentinels.
+Cycle detection uses akua-core's thread-local render-stack: a
+Package referring to itself, directly or transitively (`A → B → A`),
+is rejected before infinite recursion. Nested `pkg.render` calls
+(`A → B → C`) recurse through the same handler, with each inner
+Package's render pushing/popping the stack.

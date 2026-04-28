@@ -290,12 +290,10 @@ fn render_debug_emits_eval_result_alongside_summary() {
 
 #[test]
 fn render_pkg_render_patches_apply_to_inner_resources() {
-    // Closes spike-1 issue #1. The user's repro:
-    //   _up = pkg.render({path = "./inner"})
-    //   resources = [r | {metadata.labels: {patched: "yes"}} for r in _up]
-    // The pre-#479 sentinel mechanism silently dropped the patch.
-    // After the engine-plugin rewrite (#479), `pkg.render` returns
-    // a real list and the comprehension overlay applies natively.
+    // Boundary test: the unit test in `pkg_render::tests` proves the
+    // plugin handler returns a real list. This one proves the same
+    // shape survives the full CLI → render-worker → on-disk YAML
+    // pipeline (worker serialization, raw-YAML writer, file naming).
     let dir = tempdir();
     let outer = dir.path().join("outer");
     std::fs::create_dir_all(outer.join("inner")).unwrap();

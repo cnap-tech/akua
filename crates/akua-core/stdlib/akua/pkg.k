@@ -10,9 +10,10 @@
 #   })
 #
 # Options-schema call style matches `akua.helm` / `akua.kustomize`. The
-# underlying `kcl_plugin.pkg.render` plugin emits a sentinel that
-# akua-core expands post-eval — see the pkg_render module docs for why
-# this is post-eval and not inline.
+# underlying `kcl_plugin.pkg.render` host plugin loads + renders the
+# inner Package synchronously and returns the resulting list — so
+# list-comprehension patches and filter expressions on the result work
+# natively.
 
 import kcl_plugin.pkg as _pkg
 

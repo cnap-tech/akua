@@ -1,7 +1,7 @@
 //! End-to-end render of `examples/08-pkg-compose/` — verifies that
-//! `pkg.render` sentinel expansion produces the expected per-component
-//! ConfigMaps when the same inner Package is composed twice with
-//! different inputs. Pure-KCL, no engine plugins.
+//! the same inner Package, composed twice via `pkg.render` with
+//! different inputs, produces the expected per-component ConfigMaps.
+//! Pure-KCL, no engine plugins.
 
 #![cfg(all(feature = "cosign-verify", feature = "dev-watch"))]
 
@@ -47,7 +47,7 @@ fn renders_pkg_compose_against_golden() {
     assert_eq!(
         rendered.resources.len(),
         2,
-        "two pkg.render sentinels expand to two ConfigMaps"
+        "two pkg.render calls produce two ConfigMaps"
     );
 
     // Resource order depends on KCL evaluation; look up by metadata.name.

@@ -202,11 +202,8 @@ impl PackageK {
         )?;
         let parsed = parse_rendered(&yaml)?;
 
-        // pkg.render is now a synchronous engine plugin (#479) — by
-        // the time we get here, every `pkg.render(...)` call in the
-        // KCL source has already been resolved inline and the inner
-        // resources are part of `parsed.resources` directly. No
-        // post-eval expansion needed.
+        // `pkg.render` resolves inline inside its plugin handler, so
+        // every nested call is already part of `parsed.resources`.
         Ok(RenderedPackage {
             resources: parsed.resources,
         })
