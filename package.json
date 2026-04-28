@@ -3,6 +3,7 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "crates/akua-napi"
+    "crates/akua-napi",
+    "crates/akua-native-engines-npm"
   ]
 }

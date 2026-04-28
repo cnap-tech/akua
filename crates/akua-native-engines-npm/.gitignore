@@ -1,0 +1,5 @@
+# The wasm files are built by `task build:engines` and copied here
+# by `task native-engines:stage` (or its CI equivalent in
+# native-release.yml). Don't track the binary artifacts.
+helm-engine.wasm
+kustomize-engine.wasm

@@ -300,29 +300,42 @@ tasks:
     cmds:
       - bun install --frozen-lockfile
 
+  native-engines:stage:
+    desc: Copy helm + kustomize engine wasm into crates/akua-native-engines-npm/ so `bun install` resolves the package locally during dev.
+    deps:
+      - build:helm-engine-wasm
+      - build:kustomize-engine-wasm
+    cmds:
+      - cp crates/helm-engine-wasm/assets/helm-engine.wasm crates/akua-native-engines-npm/helm-engine.wasm
+      - cp crates/kustomize-engine-wasm/assets/kustomize-engine.wasm crates/akua-native-engines-npm/kustomize-engine.wasm
+
   native:build:
     desc: Build the napi addon for the host platform (release)
-    deps: [native:install]
+    deps: [native:install, native-engines:stage]
     dir: crates/akua-napi
     cmds:
       - bunx napi build --platform --release
 
   native:publish:check:
-    desc: Dry-run `npm pack` for the meta + per-platform native packages
+    desc: Dry-run `npm pack` for the meta + per-platform native packages + engines.
     deps: [native:build]
-    dir: crates/akua-napi
     cmds:
       # Stage the per-platform npm/<target>/ directories the way the
-      # release workflow does, then pack each + the meta. Dry-run only.
-      - bunx napi create-npm-dirs
-      - bunx napi artifacts || true  # no-op when only host artifact exists
+      # release workflow does, then pack each + the meta + engines.
+      - cd crates/akua-napi && bunx napi create-npm-dirs
+      - cd crates/akua-napi && (bunx napi artifacts || true)  # no-op when only host artifact exists
       - |
         set -eu
+        cd crates/akua-napi
         for dir in npm/*/; do
           echo "--- packing ${dir} ---"
           (cd "$dir" && npm pack --dry-run)
         done
         echo "--- packing meta @akua-dev/native ---"
+        npm pack --dry-run
+      - |
+        echo "--- packing @akua-dev/native-engines ---"
+        cd crates/akua-native-engines-npm
         npm pack --dry-run
 
   npm:bootstrap:
@@ -352,7 +365,7 @@ tasks:
       # `git checkout` regardless of whether publish succeeded.
       - |
         set -eu
-        trap 'git checkout -- crates/akua-napi/package.json packages/sdk/package.json 2>/dev/null || true' EXIT
+        trap 'git checkout -- crates/akua-napi/package.json packages/sdk/package.json crates/akua-native-engines-npm/package.json 2>/dev/null || true' EXIT
 
         v={{.BOOTSTRAP_VERSION}}
         jq --arg v "$v" '.version = $v' \
@@ -362,6 +375,11 @@ tasks:
           '.version = $v | .dependencies["@akua-dev/native"] = $v' \
           packages/sdk/package.json > packages/sdk/package.json.tmp
         mv packages/sdk/package.json.tmp packages/sdk/package.json
+        jq --arg v "$v" '.version = $v' \
+          crates/akua-native-engines-npm/package.json \
+          > crates/akua-native-engines-npm/package.json.tmp
+        mv crates/akua-native-engines-npm/package.json.tmp \
+          crates/akua-native-engines-npm/package.json
 
         (cd crates/akua-napi && bunx napi create-npm-dirs)
 
@@ -372,8 +390,13 @@ tasks:
           (cd "$dir" && npm publish --access public --tag bootstrap)
         done
 
+        # Engines stub — declared as a dep by the meta package, so
+        # claim the name before publishing the meta.
+        echo "--- publishing @akua-dev/native-engines ---"
+        (cd crates/akua-native-engines-npm && npm publish --access public --tag bootstrap)
+
         # Meta package — declares optionalDependencies on the per-
-        # platform stubs we just published.
+        # platform stubs we just published + a hard dep on engines.
         echo "--- publishing meta @akua-dev/native ---"
         (cd crates/akua-napi && npm publish --access public --tag bootstrap)
 
@@ -386,7 +409,7 @@ tasks:
 
         echo
         echo "Bootstrap complete. Next:"
-        echo "  1. https://www.npmjs.com/settings/akua-dev/packages — verify all 9 packages appear"
+        echo "  1. https://www.npmjs.com/settings/akua-dev/packages — verify all 10 packages appear"
         echo "  2. For each package: Settings → Trusted Publishers → add GitHub Actions"
         echo "     org=cnap-tech  repo=akua  workflow=native-release.yml (or sdk-release.yml for the SDK)"
         echo "  3. Tag native-v0.6.0 then sdk-v0.6.0 — CI takes over."

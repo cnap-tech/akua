@@ -8,7 +8,7 @@ repository.workspace = true
 authors.workspace = true
 
 [features]
-default = ["engine-kcl", "engine-helm", "engine-kustomize", "oci-fetch", "git-fetch", "cosign-verify", "dev-watch", "precompile-engines"]
+default = ["engine-kcl", "engine-helm", "engine-kustomize", "oci-fetch", "git-fetch", "cosign-verify", "dev-watch", "precompile-engines", "embed-engines"]
 # `precompile-engines` (default on): forwards to the engine shim
 # crates' `precompile` features. With it OFF, helm/kustomize embed
 # source `.wasm` and JIT at first call — used by the napi
@@ -16,6 +16,17 @@ default = ["engine-kcl", "engine-helm", "engine-kustomize", "oci-fetch", "git-fe
 precompile-engines = [
     "helm-engine-wasm?/precompile",
     "kustomize-engine-wasm?/precompile",
+]
+# `embed-engines` (default on): forwards to the engine shim crates'
+# `embed-engines` features. With it OFF, the engine wasm bytes
+# aren't `include_bytes!`-ed — the consumer must point
+# `AKUA_NATIVE_ENGINES_DIR` at a directory holding the engine
+# files. Set OFF on the napi build so the 7 per-platform
+# `@akua-dev/native-*` packages don't each duplicate ~93 MB of
+# engine bytes; ships once via `@akua-dev/native-engines`. See #482.
+embed-engines = [
+    "helm-engine-wasm?/embed-engines",
+    "kustomize-engine-wasm?/embed-engines",
 ]
 # SDK type emission — off by default. `ts-export` makes the CLI
 # contract types `derive(ts_rs::TS)` so they can be exported as TS

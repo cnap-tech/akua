@@ -8,9 +8,16 @@
     "crates/akua-napi": {
       "name": "@akua-dev/native",
       "version": "0.6.0",
+      "dependencies": {
+        "@akua-dev/native-engines": "0.6.0",
+      },
       "devDependencies": {
         "@napi-rs/cli": "^3.2.0",
       },
+    },
+    "crates/akua-native-engines-npm": {
+      "name": "@akua-dev/native-engines",
+      "version": "0.6.0",
     },
     "packages/sdk": {
       "name": "@akua-dev/sdk",
@@ -30,6 +37,8 @@
   },
   "packages": {
     "@akua-dev/native": ["@akua-dev/native@workspace:crates/akua-napi"],
+
+    "@akua-dev/native-engines": ["@akua-dev/native-engines@workspace:crates/akua-native-engines-npm"],
 
     "@akua-dev/sdk": ["@akua-dev/sdk@workspace:packages/sdk"],
 

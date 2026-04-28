@@ -14,12 +14,16 @@ use serde::{Deserialize, Serialize};
 /// Embedded engine bytes — AOT `.cwasm` (default) or source `.wasm`
 /// (with `precompile` feature OFF, for `@akua-dev/sdk`'s npm
 /// distribution). See helm-engine-wasm for the same pattern.
-#[cfg(feature = "precompile")]
+/// With `embed-engines` OFF, the embedded slot is empty — see
+/// helm-engine-wasm for the migration plan (#482).
+#[cfg(all(feature = "precompile", feature = "embed-engines"))]
 const KUSTOMIZE_ENGINE_BYTES_EMBEDDED: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/kustomize-engine.cwasm"));
-#[cfg(not(feature = "precompile"))]
+#[cfg(all(not(feature = "precompile"), feature = "embed-engines"))]
 const KUSTOMIZE_ENGINE_BYTES_EMBEDDED: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/kustomize-engine.wasm"));
+#[cfg(not(feature = "embed-engines"))]
+const KUSTOMIZE_ENGINE_BYTES_EMBEDDED: &[u8] = &[];
 const IS_PRECOMPILED: bool = cfg!(feature = "precompile");
 
 /// Filename the engine bytes live under when loaded from

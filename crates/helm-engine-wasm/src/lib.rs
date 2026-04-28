@@ -23,12 +23,19 @@ use serde::{Deserialize, Serialize};
 /// distribution where binary size matters more than cold-start
 /// latency). `IS_PRECOMPILED` tags which API path on
 /// [`engine_host_wasm::Session`] to take.
-#[cfg(feature = "precompile")]
+///
+/// With `embed-engines` OFF, the embedded slot is empty — the binary
+/// carries no engine bytes and `engine_bytes()` MUST resolve via the
+/// `AKUA_NATIVE_ENGINES_DIR` override, otherwise rendering fails with
+/// a clear error at first call.
+#[cfg(all(feature = "precompile", feature = "embed-engines"))]
 const HELM_ENGINE_BYTES_EMBEDDED: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.cwasm"));
-#[cfg(not(feature = "precompile"))]
+#[cfg(all(not(feature = "precompile"), feature = "embed-engines"))]
 const HELM_ENGINE_BYTES_EMBEDDED: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/helm-engine.wasm"));
+#[cfg(not(feature = "embed-engines"))]
+const HELM_ENGINE_BYTES_EMBEDDED: &[u8] = &[];
 const IS_PRECOMPILED: bool = cfg!(feature = "precompile");
 
 /// Filename the engine bytes live under when loaded from
@@ -218,8 +225,35 @@ mod tests {
     fn env_var_name_is_stable_contract() {
         // Loader writes this env var; engine reads it. Pinned so the
         // two halves can't drift. Renaming requires updating the
-        // napi loader at the same time — see #473.
+        // napi loader at the same time — see #482.
         assert_eq!(ENV_NATIVE_ENGINES_DIR, "AKUA_NATIVE_ENGINES_DIR");
+    }
+
+    /// With `embed-engines` OFF, the embedded slot must be empty so
+    /// the per-platform npm binary doesn't carry the wasm. Pins the
+    /// load-bearing assumption behind #482's storage savings.
+    #[test]
+    #[cfg(not(feature = "embed-engines"))]
+    fn embed_off_means_zero_embedded_bytes() {
+        assert!(
+            HELM_ENGINE_BYTES_EMBEDDED.is_empty(),
+            "embed-engines OFF must produce an empty embed slot, got {} bytes",
+            HELM_ENGINE_BYTES_EMBEDDED.len()
+        );
+    }
+
+    /// With `embed-engines` ON (the default), the embed slot must
+    /// be populated unless the build skipped engine compilation
+    /// (the `0-byte placeholder` branch in build.rs).
+    #[test]
+    #[cfg(feature = "embed-engines")]
+    fn embed_on_means_nonempty_embedded_bytes() {
+        assert!(
+            HELM_ENGINE_BYTES_EMBEDDED.is_empty()
+                || HELM_ENGINE_BYTES_EMBEDDED.len() > 1_000_000,
+            "embed-engines ON should produce empty placeholder OR a real artifact (>1MB), got {} bytes",
+            HELM_ENGINE_BYTES_EMBEDDED.len()
+        );
     }
 
     #[test]
