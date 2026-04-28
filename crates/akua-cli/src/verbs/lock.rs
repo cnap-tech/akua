@@ -68,7 +68,7 @@ pub enum LockError {
     /// `pkg.render({package = "<alias>"})`) but resolves to a Helm
     /// chart, not a KCL/Akua module. Surfaced at lock time so
     /// the user gets a clear message before `akua check` fails
-    /// with KCL's opaque CannotFindModule. Closes spike-1 issue #3.
+    /// with KCL's opaque CannotFindModule.
     #[error(
         "dep `{alias}` is referenced by `import {alias}` but resolves as a Helm chart — \
          only KCL / Akua-package deps can be imported. \
@@ -142,7 +142,7 @@ pub fn run<W: Write>(
     // via `helm.template(...)` not `import` — surface the mismatch
     // here, before writing the lockfile, so the user gets a clear
     // error pointing at the offending alias instead of `CannotFindModule`
-    // later from `akua check`. Closes spike-1 issue #3.
+    // later from `akua check`.
     let package_k = args.workspace.join("package.k");
     if let Ok(source) = std::fs::read_to_string(&package_k) {
         if let Some(mismatch) = chart_resolver::validate_import_kinds(&source, &resolved)

@@ -771,12 +771,12 @@ mod tests {
 
     #[test]
     fn detect_kind_recognizes_akua_package_at_root() {
-        // Closes spike-1 issue #2: an Akua Package (the akua.toml +
-        // package.k pair) must classify as KclModule so the resolver
-        // routes it through the KCL ExternalPkg mount path instead of
-        // the helm-chart-synthesis path. Pre-fix: `detect_kind` only
-        // knew Chart.yaml / kcl.mod and silently fell back to
-        // HelmChart for Akua packages — `import upstream` then failed
+        // An Akua Package (the akua.toml + package.k pair) must
+        // classify as KclModule so the resolver routes it through
+        // the KCL ExternalPkg mount path instead of the helm-chart-
+        // synthesis path. Without this branch `detect_kind` knows
+        // only Chart.yaml / kcl.mod and silently falls back to
+        // HelmChart for Akua packages — `import upstream` then fails
         // with `CannotFindModule` because nothing got mounted.
         let tmp = tempfile::TempDir::new().unwrap();
         std::fs::write(tmp.path().join("akua.toml"), "").unwrap();
@@ -1033,11 +1033,11 @@ mod tests {
 
     #[test]
     fn detect_package_recognizes_akua_specific_annotation() {
-        // Closes spike-1 #481: an Akua-published OCI artifact that
-        // carries `dev.akua.package.*` (with or without the kcl-lang
-        // alias) decodes the same way as kcl-lang ecosystem packages.
-        // Lets akua publish artifacts that are 100% kcl-readable on
-        // the wire while still letting akua versioning extend
+        // An Akua-published OCI artifact that carries
+        // `dev.akua.package.*` (with or without the kcl-lang alias)
+        // decodes the same way as kcl-lang ecosystem packages. Lets
+        // akua publish artifacts that are 100% kcl-readable on the
+        // wire while still letting akua versioning extend
         // independently.
         let manifest = OciManifest {
             layers: vec![OciLayer {

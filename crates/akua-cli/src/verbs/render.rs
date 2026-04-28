@@ -119,8 +119,7 @@ pub struct RenderArgs<'a> {
     /// Useful for inspecting what `pkg.render` / `helm.template` /
     /// `kustomize.build` actually produced before the render writes
     /// hit disk. Best-effort surface — schema may change between
-    /// releases. Worker-boundary changes (pre-expansion state, eval
-    /// timings, dep-trace) tracked at #480.
+    /// releases.
     pub debug: bool,
 }
 
@@ -497,8 +496,8 @@ pub fn render_in_worker(
         .map_err(|msg| RenderError::PackageK(PackageKError::KclEval(msg)))?;
 
     let parsed = akua_core::parse_rendered_yaml(&yaml)?;
-    // pkg.render is now a synchronous engine plugin (#479): the
-    // worker resolves nested renders inline before returning, so
+    // `pkg.render` is a synchronous engine plugin: the worker
+    // resolves nested renders inline before returning, so
     // `parsed.resources` is already final.
     Ok(akua_core::RenderedPackage {
         resources: parsed.resources,

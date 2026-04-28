@@ -96,6 +96,7 @@ That's it. akua does **not** specify `App`, `Environment`, `Cluster`, `Secret`, 
 
 - Marketing-speak ("empower," "democratize," "unlock," "revolutionize," "AI-first"). Describe what things do; don't frame.
 - Emoji in files (unless explicitly requested by a human user).
+- **PR-history narration in code comments.** No `#<num>` task/PR/issue references, no "Closes spike-1 issue #X", no "tracked at #Y", no "Pre-fix:" / "Pre-#N", no "Now (post-#N):". Code comments explain *why* the code is shaped the way it is — for a reader who has never seen the PR. Issue numbers belong in commit messages, PR descriptions, and changelog entries; the codebase outlives them. Cross-references that survive (`[cli-contract §1.5](docs/...)`, upstream PRs like `kcl-lang/kcl#2086`) are fine.
 - Feature-bingo changelogs. Ship refinements, not bullets.
 - Settings panels for things with an obvious correct default. Pick a default and defend it.
 - Inventing akua-specific vocabulary when a standard exists (JSON Schema, OpenAPI, KRM, OCI, cosign, SLSA, Agent Skills Specification).

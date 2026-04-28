@@ -50,7 +50,7 @@ const ENGINE_FILENAME: &str = if cfg!(feature = "precompile") {
 /// `<dir>/helm-engine.{cwasm|wasm}` is read at first call and cached;
 /// otherwise the embedded bytes serve. Lets the `@akua-dev/native`
 /// loader hand the napi addon a path into `@akua-dev/native-engines`
-/// (tracked at #473) without changing the API.
+/// without changing the API.
 fn engine_bytes() -> &'static [u8] {
     use std::sync::OnceLock;
     static OVERRIDE: OnceLock<Option<Vec<u8>>> = OnceLock::new();
@@ -224,14 +224,15 @@ mod tests {
     #[test]
     fn env_var_name_is_stable_contract() {
         // Loader writes this env var; engine reads it. Pinned so the
-        // two halves can't drift. Renaming requires updating the
-        // napi loader at the same time — see #482.
+        // two halves can't drift — renaming requires updating the
+        // napi loader at the same time.
         assert_eq!(ENV_NATIVE_ENGINES_DIR, "AKUA_NATIVE_ENGINES_DIR");
     }
 
     /// With `embed-engines` OFF, the embedded slot must be empty so
-    /// the per-platform npm binary doesn't carry the wasm. Pins the
-    /// load-bearing assumption behind #482's storage savings.
+    /// the per-platform npm binary doesn't carry the wasm — that's
+    /// the load-bearing assumption behind splitting the engines into
+    /// `@akua-dev/native-engines`.
     #[test]
     #[cfg(not(feature = "embed-engines"))]
     fn embed_off_means_zero_embedded_bytes() {

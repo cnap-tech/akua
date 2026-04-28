@@ -747,8 +747,6 @@ fn resolved_source_for_replace(
 /// the user a clear "wrong dep kind" error pointing at the offending
 /// alias instead of an opaque downstream parse error.
 ///
-/// Closes spike-1 issue #3.
-///
 /// Returns the offending mismatches (each with the alias + the
 /// kind the resolver landed on). Caller decides whether to fail
 /// hard (`akua lock`) or report only (`akua tree`).
