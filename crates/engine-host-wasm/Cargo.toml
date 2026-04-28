@@ -8,6 +8,6 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-wasmtime = "43"
+wasmtime = "44"
 wasmtime-wasi = "43"
 thiserror = { workspace = true }
