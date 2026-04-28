@@ -311,7 +311,7 @@ impl Dependency {
 /// - must not start with `-` (registry ergonomics)
 ///
 /// Digit-prefixed names are permitted (e.g. `01-hello-webapp`).
-fn is_valid_package_name(s: &str) -> bool {
+pub fn is_valid_package_name(s: &str) -> bool {
     let mut chars = s.chars();
     let Some(first) = chars.next() else {
         return false;

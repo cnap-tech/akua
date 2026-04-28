@@ -34,6 +34,23 @@ fn main() {
     println!("cargo:rerun-if-changed={}", worker_wasm.display());
     println!("cargo:rerun-if-changed=build.rs");
 
+    // Watch the source trees that feed into akua-render-worker.wasm so
+    // touching `eval_kcl` (or anything else the worker links) re-runs
+    // this build script — cargo otherwise considers the artifact
+    // up-to-date and silently keeps the stale `.cwasm`. The script can't
+    // *rebuild* the worker (that's a separate cargo invocation against
+    // wasm32-wasip1, run by `task build:render-worker`), but at least
+    // the contributor sees the cargo:warning telling them to run it.
+    let root = workspace_root();
+    println!(
+        "cargo:rerun-if-changed={}",
+        root.join("crates/akua-render-worker/src").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        root.join("crates/akua-core/src").display()
+    );
+
     if !worker_wasm.exists() {
         println!(
             "cargo:warning=akua-render-worker.wasm not found at {} — run `task build:render-worker` first. Emitting empty sandbox module (runtime will surface E_SANDBOX_UNAVAILABLE).",
@@ -42,6 +59,24 @@ fn main() {
         std::fs::write(&cwasm_out, []).expect("write empty cwasm marker");
         std::fs::write(&wasm_out, []).expect("write empty wasm marker");
         return;
+    }
+
+    // Best-effort freshness check: if any source file under the watched
+    // trees is newer than the staged `.wasm`, warn loudly. The rerun-if-
+    // changed lines above force this build.rs to re-run on source edits;
+    // this loop turns "build.rs re-ran" into "you need to rebuild the
+    // worker." No-op when both trees and the wasm artifact are clean.
+    if let Some(stale) = source_newer_than(
+        &worker_wasm,
+        &[
+            root.join("crates/akua-render-worker/src"),
+            root.join("crates/akua-core/src"),
+        ],
+    ) {
+        println!(
+            "cargo:warning=akua-render-worker.wasm is older than {} — run `task build:render-worker` to rebuild it before re-running cargo build.",
+            stale.display()
+        );
     }
 
     let wasm = std::fs::read(&worker_wasm)
@@ -70,6 +105,45 @@ fn main() {
             wasm.len()
         );
     }
+}
+
+/// Walk each tree under `roots` and return the first `.rs` file with
+/// an mtime newer than `target`'s — or `None` if none is. Best-effort:
+/// any I/O error is treated as "can't tell," skipped silently. The
+/// caller turns the result into a `cargo:warning=`.
+fn source_newer_than(target: &std::path::Path, roots: &[PathBuf]) -> Option<PathBuf> {
+    let target_mtime = std::fs::metadata(target).ok()?.modified().ok()?;
+    for root in roots {
+        if let Some(stale) = walk_for_newer_rs(root, target_mtime) {
+            return Some(stale);
+        }
+    }
+    None
+}
+
+fn walk_for_newer_rs(
+    dir: &std::path::Path,
+    target_mtime: std::time::SystemTime,
+) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let ft = entry.file_type().ok()?;
+        if ft.is_dir() {
+            if let Some(found) = walk_for_newer_rs(&path, target_mtime) {
+                return Some(found);
+            }
+        } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+            if let Ok(meta) = entry.metadata() {
+                if let Ok(mtime) = meta.modified() {
+                    if mtime > target_mtime {
+                        return Some(path);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// akua-cli's build.rs runs with CWD = crates/akua-cli. The workspace

@@ -100,6 +100,50 @@ fn init_scaffolds_three_files_and_reports_them() {
 }
 
 #[test]
+fn init_dot_uses_cwd_basename_not_literal_dot() {
+    // Regression for #4: `akua init .` from a directory must record
+    // the directory's basename in [package].name, not the literal `.`.
+    // Without the fix, render → check fails because `.` isn't a valid
+    // KCL identifier and the manifest parser rejects it.
+    let dir = tempdir();
+    let pkg = dir.path().join("hello-app");
+    std::fs::create_dir_all(&pkg).unwrap();
+
+    let out = run(&pkg, &["init", ".", "--json"]);
+    assert_exit(&out, 0);
+
+    let parsed = stdout_json(&out);
+    assert_eq!(parsed["name"], "hello-app");
+
+    // Files should land in `pkg`, not in a `./.` subdirectory.
+    assert!(pkg.join("akua.toml").is_file());
+    assert!(pkg.join("package.k").is_file());
+
+    // The scaffolded manifest must round-trip through the parser —
+    // the bug surfaced as `E_MANIFEST_PARSE` on the next render.
+    let toml = std::fs::read_to_string(pkg.join("akua.toml")).unwrap();
+    assert!(
+        toml.contains("name    = \"hello-app\""),
+        "akua.toml lacks expected name line:\n{toml}"
+    );
+}
+
+#[test]
+fn init_dot_sanitizes_basename_with_dots_and_capitals() {
+    // Directory name is `My.Pkg.v2` — invalid as a package name.
+    // The CLI sanitizes it to `my_pkg_v2` rather than refusing.
+    let dir = tempdir();
+    let pkg = dir.path().join("My.Pkg.v2");
+    std::fs::create_dir_all(&pkg).unwrap();
+
+    let out = run(&pkg, &["init", ".", "--json"]);
+    assert_exit(&out, 0);
+
+    let parsed = stdout_json(&out);
+    assert_eq!(parsed["name"], "my_pkg_v2");
+}
+
+#[test]
 fn init_without_force_refuses_to_clobber() {
     let dir = tempdir();
     run(dir.path(), &["init", "pkg"])

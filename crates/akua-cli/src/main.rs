@@ -1231,21 +1231,7 @@ fn run_lint(args: &UniversalArgs, package: &std::path::Path) -> ExitCode {
 
 fn run_init(args: &UniversalArgs, name: Option<&str>, force: bool) -> ExitCode {
     let ctx = resolve_ctx(args);
-
-    // When `name` is absent, scaffold into CWD and derive the package
-    // name from its basename. When provided, scaffold into `./<name>/`.
-    let (target, pkg_name) = match name {
-        Some(n) => (PathBuf::from(n), n.to_string()),
-        None => {
-            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-            let derived = cwd
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_string();
-            (cwd, derived)
-        }
-    };
+    let (target, pkg_name) = derive_init_target_and_name(name);
     let verb_args = init_verb::InitArgs {
         target: &target,
         package_name: &pkg_name,
@@ -1260,6 +1246,78 @@ fn run_init(args: &UniversalArgs, name: Option<&str>, force: bool) -> ExitCode {
 
 fn resolve_ctx(args: &UniversalArgs) -> Context {
     Context::resolve(args, AgentContext::detect())
+}
+
+/// Decide where `akua init` writes and what `[package].name` it records.
+///
+/// Four cases:
+/// 1. No name → CWD + sanitized basename (`mkdir foo && cd foo && akua init`).
+/// 2. `.` / `./` → CWD + sanitized basename (the broken case from #4).
+/// 3. Bare valid identifier → `./<name>/` + name as-is.
+/// 4. Path-like or invalid identifier → use as path, sanitize basename
+///    for the package name.
+fn derive_init_target_and_name(name: Option<&str>) -> (PathBuf, String) {
+    match name {
+        Some(n) if n != "." && n != "./" && akua_core::is_valid_package_name(n) => {
+            // Bare identifier — original behavior.
+            (PathBuf::from(n), n.to_string())
+        }
+        Some(n) if n == "." || n == "./" => {
+            // Scaffold into CWD; derive name from CWD basename.
+            init_target_from_cwd()
+        }
+        Some(n) => {
+            // Path-like name (e.g. `./foo`, `../bar`, `my-pkg/sub`) —
+            // use as the target path, derive name from the basename.
+            let target = PathBuf::from(n);
+            let basename = target
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+            let sanitized = sanitize_package_name(&basename);
+            (target, sanitized)
+        }
+        None => init_target_from_cwd(),
+    }
+}
+
+fn init_target_from_cwd() -> (PathBuf, String) {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    // Canonicalize so `.` resolves to a real basename instead of the
+    // empty string. Falls back to the relative path if canonicalize
+    // fails (CWD deleted underneath us, etc.) — `EmptyName` will
+    // surface from the verb in that pathological case.
+    let resolved = cwd.canonicalize().unwrap_or_else(|_| cwd.clone());
+    let basename = resolved
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_string();
+    let sanitized = sanitize_package_name(&basename);
+    (resolved, sanitized)
+}
+
+/// Coerce an arbitrary string into something `is_valid_package_name`
+/// accepts. Lowercases ASCII, replaces non-`[a-z0-9_-]` with `_`,
+/// strips leading hyphens. Returns empty if nothing usable remains —
+/// the verb's existing `EmptyName` error covers that.
+fn sanitize_package_name(raw: &str) -> String {
+    let mut out: String = raw
+        .chars()
+        .map(|c| {
+            let lc = c.to_ascii_lowercase();
+            if lc.is_ascii_alphanumeric() || lc == '_' || lc == '-' {
+                lc
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    while out.starts_with('-') {
+        out.remove(0);
+    }
+    out
 }
 
 fn run_whoami(args: &UniversalArgs) -> ExitCode {
@@ -1345,6 +1403,49 @@ fn emit_io_error(ctx: &Context, err: &io::Error) -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_package_name_lowercases_and_replaces_dots_with_underscore() {
+        assert_eq!(sanitize_package_name("Foo.Bar"), "foo_bar");
+        assert_eq!(sanitize_package_name("my pkg"), "my_pkg");
+        assert_eq!(sanitize_package_name("HELLO"), "hello");
+    }
+
+    #[test]
+    fn sanitize_package_name_strips_leading_hyphens_and_keeps_internal() {
+        assert_eq!(sanitize_package_name("-leading-dash"), "leading-dash");
+        assert_eq!(sanitize_package_name("---multi"), "multi");
+        assert_eq!(sanitize_package_name("hello-world"), "hello-world");
+    }
+
+    #[test]
+    fn sanitize_package_name_returns_empty_for_pathological_input() {
+        // The init verb surfaces this as E_INIT_EMPTY_NAME — it's the
+        // single failure mode `derive_init_target_and_name` doesn't
+        // try to fix.
+        assert_eq!(sanitize_package_name(""), "");
+        assert_eq!(sanitize_package_name("---"), "");
+    }
+
+    // The `Some(".")` → CWD-basename path mutates process-global CWD
+    // and would race other tests; covered end-to-end in the
+    // tests/cli_integration.rs subprocess harness instead.
+
+    #[test]
+    fn derive_init_with_bare_identifier_keeps_legacy_shape() {
+        let (target, name) = derive_init_target_and_name(Some("my_pkg"));
+        assert_eq!(target, std::path::PathBuf::from("my_pkg"));
+        assert_eq!(name, "my_pkg");
+    }
+
+    #[test]
+    fn derive_init_with_path_arg_uses_path_target_and_sanitized_basename() {
+        // `akua init ./Some.Subdir` → target `./Some.Subdir`, name
+        // `some_subdir`. Path-like args are a separate case from `.`.
+        let (target, name) = derive_init_target_and_name(Some("./Some.Subdir"));
+        assert_eq!(target, std::path::PathBuf::from("./Some.Subdir"));
+        assert_eq!(name, "some_subdir");
+    }
 
     #[test]
     fn parses_whoami_with_universal_flags() {
