@@ -289,16 +289,13 @@ fn render_debug_emits_eval_result_alongside_summary() {
 }
 
 #[test]
-fn render_pkg_render_patched_sentinel_fails_loud() {
+fn render_pkg_render_patches_apply_to_inner_resources() {
     // Closes spike-1 issue #1. The user's repro:
     //   _up = pkg.render({path = "./inner"})
     //   resources = [r | {metadata.labels: {patched: "yes"}} for r in _up]
-    // Pre-fix, this rendered cleanly with the labels silently dropped
-    // — the post-eval expander wholesale-replaced the sentinel with
-    // the inner Package's resources, losing the comprehension's
-    // sibling fields. Now it fails with E_PKG_RENDER_PATCH_UNSUPPORTED
-    // pointing the user at #479 (the real fix is engine-style
-    // pkg.render via reentrant KCL host mutex).
+    // The pre-#479 sentinel mechanism silently dropped the patch.
+    // After the engine-plugin rewrite (#479), `pkg.render` returns
+    // a real list and the comprehension overlay applies natively.
     let dir = tempdir();
     let outer = dir.path().join("outer");
     std::fs::create_dir_all(outer.join("inner")).unwrap();
@@ -327,25 +324,17 @@ fn render_pkg_render_patched_sentinel_fails_loud() {
     .unwrap();
 
     let out = run(&outer, &["render", "--out", "./deploy", "--json"]);
-    assert_exit(&out, 1);
+    assert_exit(&out, 0);
 
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    let parsed: serde_json::Value =
-        serde_json::from_str(stderr.trim()).expect("structured error on stderr");
-    assert_eq!(
-        parsed["code"], "E_PKG_RENDER_PATCH_UNSUPPORTED",
-        "expected E_PKG_RENDER_PATCH_UNSUPPORTED, got {}",
-        parsed["code"]
-    );
-    let msg = parsed["message"].as_str().unwrap_or("");
+    let rendered = std::fs::read_to_string(outer.join("deploy/000-configmap-hi.yaml"))
+        .expect("rendered ConfigMap on disk");
     assert!(
-        msg.contains("metadata"),
-        "error message should name the dropped sibling key, got: {msg}"
+        rendered.contains("patched"),
+        "rendered YAML should contain the comprehension-overlaid `patched` label; got:\n{rendered}"
     );
-    let suggestion = parsed["suggestion"].as_str().unwrap_or("");
     assert!(
-        suggestion.contains("479"),
-        "suggestion should reference the engine-plugin follow-up issue, got: {suggestion}"
+        rendered.contains("yes"),
+        "rendered YAML should carry the `yes` value from the overlay; got:\n{rendered}"
     );
 }
 

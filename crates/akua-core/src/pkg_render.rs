@@ -1,58 +1,45 @@
-//! `pkg.render(Render) -> sentinel` — recursive Package composition.
+//! `pkg.render(opts) -> [resource]` — recursive Package composition.
 //!
-//! # Architecture: post-eval expansion
+//! # Architecture: synchronous engine plugin
 //!
-//! The obvious design — recurse into `PackageK::render` inside the
-//! plugin handler — deadlocks against KCL upstream, which holds the
-//! global `PLUGIN_HANDLER_FN_PTR` mutex across every plugin call.
-//! A nested `FastRunner::run` tries to re-acquire the same mutex
-//! on the same thread; `std::sync::Mutex` isn't reentrant.
+//! Mirrors the call shape of [`crate::helm`] and [`crate::kustomize`]:
+//! the plugin handler runs the inner Package's `render()`
+//! synchronously and returns the resulting list of resources to the
+//! KCL caller. List-comprehension patches, filter expressions, and
+//! anything else KCL does to a `[{str:}]` work natively because the
+//! return is a real list, not a placeholder.
 //!
-//! Instead, the handler returns a **sentinel** shaped like
+//! ## Why this needs the patched KCL fork
 //!
-//! ```json
-//! { "akuaPkgRenderSentinel": { "path": "…", "inputs": {…} } }
-//! ```
+//! Upstream `kcl-runtime/src/stdlib/plugin.rs` historically held
+//! `PLUGIN_HANDLER_FN_PTR` across the user-supplied callback. A
+//! plugin that re-entered KCL deadlocked on the same thread —
+//! `std::sync::Mutex` isn't reentrant. akua carries a one-line patch
+//! at `cnap-tech/kcl#akua-wasm32` (commit `d584c0bc`) that copies the
+//! fn pointer out of the lock before invoking it, freeing the
+//! reentrant call. Without that patch this design hangs; the older
+//! sentinel-deferred-expansion approach was a workaround that the
+//! one-line fix retired.
 //!
-//! (camelCase; KCL's plan serializer strips keys whose names start
-//! with `_`, so the usual `__dunder__` convention doesn't survive
-//! the round-trip.)
+//! Cycle detection still uses the thread-local render stack
+//! [`crate::kcl_plugin::RenderScope`]: `pkg.render` of a path
+//! already on the stack returns [`crate::package_k::PackageKError::Cycle`]
+//! before the inner load.
 //!
-//! The sentinel lands in the caller's `resources` list. After the
-//! caller's eval_kcl completes and releases the KCL mutex,
-//! [`expand_sentinels`] walks the resources, loads the referenced
-//! Package.k, calls its `render()`, and splices the nested
-//! resources in place. The inner render gets a fresh KCL evaluator
-//! session with no contention.
-//!
-//! Cycle detection uses the thread-local render-scope established
-//! by [`crate::kcl_plugin::RenderScope`]: if an expansion would
-//! push a path already on the stack, we reject with a typed error.
+//! See `cnap-tech/akua#479` for the rollout context.
 
 use std::path::{Path, PathBuf};
-
-use serde_yaml::Value as YamlValue;
 
 use crate::{kcl_plugin, PackageK};
 
 pub const PLUGIN_NAME: &str = "pkg.render";
 
-/// Sentinel key the handler emits, detected by [`expand_sentinels`]
-/// during post-render expansion.
-///
-/// KCL's plan serializer strips keys whose names start with `_`
-/// (the language's "private" convention), which is why this key
-/// lives in a camelCase namespace instead of the more conventional
-/// `__akua_pkg_render__`.
-pub const SENTINEL_KEY: &str = "akuaPkgRenderSentinel";
-
 fn err(msg: impl std::fmt::Display) -> String {
     format!("{PLUGIN_NAME}: {msg}")
 }
 
-/// Register the plugin. The handler is intentionally cheap — it
-/// serializes a sentinel and returns. Actual rendering is deferred
-/// to [`expand_sentinels`].
+/// Register the synchronous `pkg.render` plugin. Replaces the
+/// previous sentinel mechanism wholesale.
 pub fn install() {
     kcl_plugin::register(PLUGIN_NAME, |args, _kwargs| {
         let opts = kcl_plugin::extract_options_arg(args, PLUGIN_NAME, "pkg.Render")?;
@@ -60,114 +47,62 @@ pub fn install() {
             .get("path")
             .and_then(serde_json::Value::as_str)
             .ok_or_else(|| err("options.path must be a string"))?;
-        let inputs = opts
+        let inputs_json = opts
             .get("inputs")
             .cloned()
             .unwrap_or(serde_json::Value::Null);
 
-        // Emit a list (pkg.render's KCL-side contract is "returns
-        // [resource]") with one sentinel in it. expand_sentinels
-        // replaces the sentinel with the rendered list.
-        Ok(serde_json::json!([{
-            SENTINEL_KEY: {
-                "path": path_str,
-                "inputs": inputs,
-            }
-        }]))
+        // Convert the JSON inputs into a serde_yaml::Value because
+        // `PackageK::render` takes the same shape `ctx.input()` flows
+        // through (yaml-typed). serde_yaml round-trips JSON cleanly —
+        // every JSON value has a yaml equivalent, no Tag variants
+        // appear here.
+        let inputs_yaml = json_to_yaml(&inputs_json).map_err(err)?;
+
+        // Sandbox guard: resolve the path against the current
+        // RenderScope's package directory + reject `..` / symlink
+        // escapes. Same guard helm.template / kustomize.build use.
+        let raw = PathBuf::from(path_str);
+        let resolved = kcl_plugin::resolve_in_package(&raw).map_err(|e| err(e.to_string()))?;
+        let target = resolve_package_file(&resolved);
+
+        // Cycle detection — bail before loading the file. The render
+        // stack tracks every Package currently on the call chain;
+        // hitting an already-rendering path means we're about to
+        // recurse forever.
+        if kcl_plugin::is_rendering(&target) {
+            return Err(err(format!(
+                "cycle detected — `{}` is already on the render stack",
+                target.display()
+            )));
+        }
+
+        // Load + render the inner Package. The recursion is bounded
+        // by RenderScope (push on enter, pop on drop): even when the
+        // inner Package itself calls pkg.render, the stack stays
+        // balanced and the cycle check fires correctly.
+        let pkg = PackageK::load(&target).map_err(|e| err(e.to_string()))?;
+        let rendered = pkg.render(&inputs_yaml).map_err(|e| err(e.to_string()))?;
+
+        // Convert back to serde_json — KCL's plugin contract returns
+        // JSON, and the caller's `_up = pkg.render(...)` binding is
+        // a real list of real dicts after this returns.
+        let json_resources: Vec<serde_json::Value> = rendered
+            .resources
+            .into_iter()
+            .map(|y| serde_json::to_value(y).map_err(|e| err(e.to_string())))
+            .collect::<Result<_, _>>()?;
+        Ok(serde_json::Value::Array(json_resources))
     });
 }
 
-/// Walk `resources`, replacing every pkg.render sentinel with the
-/// rendered resources of the referenced Package. Recursive: nested
-/// sentinels inside inner renders expand in turn. Cycle detection
-/// via [`kcl_plugin::is_rendering`].
-///
-/// Called by `PackageK::render` after `eval_kcl` returns — the KCL
-/// evaluator mutex is no longer held, so inner renders are free to
-/// acquire it fresh.
-pub fn expand_sentinels(
-    resources: Vec<YamlValue>,
-) -> Result<Vec<YamlValue>, crate::package_k::PackageKError> {
-    let mut out = Vec::with_capacity(resources.len());
-    for r in resources {
-        match extract_sentinel(&r)? {
-            Some(call) => {
-                let nested = render_nested(&call.path, &call.inputs)?;
-                out.extend(nested);
-            }
-            None => out.push(r),
-        }
-    }
-    Ok(out)
-}
-
-#[derive(Debug)]
-struct SentinelCall {
-    path: String,
-    inputs: YamlValue,
-}
-
-/// Returns:
-/// - `Ok(Some(call))` when `v` is a clean sentinel — only the
-///   `SENTINEL_KEY` entry, no sibling fields.
-/// - `Ok(None)` when `v` isn't a sentinel at all (a real resource).
-/// - `Err(PkgRenderPatchUnsupported)` when `v` is a sentinel that
-///   the user has tried to patch via list-comprehension overlay
-///   (e.g. `[r | {metadata.labels: {...}} for r in pkg.render(...)]`).
-///   The expander wholesale-replaces the sentinel entry with the
-///   inner Package's resources, so any sibling fields would silently
-///   disappear — fail loud instead. Closes spike-1 issue #1.
-fn extract_sentinel(
-    v: &YamlValue,
-) -> Result<Option<SentinelCall>, crate::package_k::PackageKError> {
-    let Some(inner) = v.get(SENTINEL_KEY) else {
-        return Ok(None);
-    };
-    if let Some(map) = v.as_mapping() {
-        let extra: Vec<String> = map
-            .iter()
-            .filter_map(|(k, _)| k.as_str())
-            .filter(|s| *s != SENTINEL_KEY)
-            .map(|s| s.to_string())
-            .collect();
-        if !extra.is_empty() {
-            return Err(crate::package_k::PackageKError::PkgRenderPatchUnsupported { keys: extra });
-        }
-    }
-    let path = inner
-        .get("path")
-        .and_then(YamlValue::as_str)
-        .ok_or_else(|| {
-            // Malformed sentinel — `pkg.render` always emits `path`.
-            // Treat as KclEval error since the sentinel itself is the
-            // boundary contract with the KCL plugin handler.
-            crate::package_k::PackageKError::KclEval(format!(
-                "pkg.render sentinel missing required `path` field: {v:?}"
-            ))
-        })?
-        .to_string();
-    let inputs = inner.get("inputs").cloned().unwrap_or(YamlValue::Null);
-    Ok(Some(SentinelCall { path, inputs }))
-}
-
-fn render_nested(
-    path_str: &str,
-    inputs: &YamlValue,
-) -> Result<Vec<YamlValue>, crate::package_k::PackageKError> {
-    let raw = PathBuf::from(path_str);
-    let resolved = kcl_plugin::resolve_in_package(&raw)?;
-    let target = resolve_package_file(&resolved);
-
-    if kcl_plugin::is_rendering(&target) {
-        return Err(crate::package_k::PackageKError::Cycle { path: target });
-    }
-
-    let pkg = PackageK::load(&target)?;
-    // `render` recurses naturally — it pushes its own scope, evals,
-    // and walks its own sentinels. The `_scope` RAII in `render`
-    // ensures the stack stays balanced even on error.
-    let rendered = pkg.render(inputs)?;
-    Ok(rendered.resources)
+/// Convert a `serde_json::Value` into a `serde_yaml::Value`. Every
+/// JSON value has a YAML equivalent (no Tag variants, no anchors /
+/// aliases on the JSON side), so the round-trip via the canonical
+/// serializers is lossless.
+fn json_to_yaml(v: &serde_json::Value) -> Result<serde_yaml::Value, String> {
+    let s = serde_json::to_string(v).map_err(|e| e.to_string())?;
+    serde_yaml::from_str(&s).map_err(|e| e.to_string())
 }
 
 /// Accept either a directory (append `package.k`) or a direct file path.
@@ -186,6 +121,7 @@ fn resolve_package_file(resolved: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_yaml::Value as YamlValue;
     use std::fs;
     use tempfile::TempDir;
 
@@ -213,58 +149,7 @@ resources = [{
 "#;
 
     #[test]
-    fn extract_sentinel_rejects_sibling_keys_with_typed_error() {
-        // Closes spike-1 issue #1. `pkg.render(...)` returns a list
-        // containing one sentinel; if the user list-comprehension-
-        // patches it (e.g. `[r | {labels: {...}} for r in _up]`),
-        // the sentinel ends up with sibling keys. The expander
-        // wholesale-replaces the sentinel — sibling fields would
-        // silently disappear. The fix turns this into a typed error
-        // before expansion runs.
-        let mut map = serde_yaml::Mapping::new();
-        map.insert(
-            YamlValue::String(SENTINEL_KEY.into()),
-            serde_yaml::from_str("path: ./inner\ninputs: { name: hi }\n").unwrap(),
-        );
-        map.insert(
-            YamlValue::String("metadata".into()),
-            serde_yaml::from_str("labels:\n  patched: 'yes'\n").unwrap(),
-        );
-        let patched = YamlValue::Mapping(map);
-
-        let err = extract_sentinel(&patched).expect_err("must reject patched sentinel");
-        match err {
-            crate::package_k::PackageKError::PkgRenderPatchUnsupported { keys } => {
-                assert_eq!(keys, vec!["metadata".to_string()], "got: {keys:?}");
-            }
-            other => panic!("expected PkgRenderPatchUnsupported, got: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn extract_sentinel_returns_none_for_real_resource() {
-        let resource: YamlValue =
-            serde_yaml::from_str("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: hi\n")
-                .unwrap();
-        assert!(matches!(extract_sentinel(&resource), Ok(None)));
-    }
-
-    #[test]
-    fn extract_sentinel_returns_call_for_clean_sentinel() {
-        let mut map = serde_yaml::Mapping::new();
-        map.insert(
-            YamlValue::String(SENTINEL_KEY.into()),
-            serde_yaml::from_str("path: ./inner\ninputs: { name: hi }\n").unwrap(),
-        );
-        let clean = YamlValue::Mapping(map);
-        let call = extract_sentinel(&clean)
-            .expect("ok")
-            .expect("some sentinel call");
-        assert_eq!(call.path, "./inner");
-    }
-
-    #[test]
-    fn outer_package_expands_inner_pkg_render_sentinel() {
+    fn outer_package_renders_inner_synchronously() {
         let tmp = TempDir::new().unwrap();
         write(tmp.path(), "inner.k", INNER);
         let outer_path = write(
@@ -273,9 +158,7 @@ resources = [{
             r#"
 import kcl_plugin.pkg
 
-_nested = pkg.render({ path = "./inner.k", inputs = { name = "from-outer" } })
-
-resources = _nested"#,
+resources = pkg.render({ path = "./inner.k", inputs = { name = "from-outer" } })"#,
         );
 
         let outer = PackageK::load(&outer_path).expect("load outer");
@@ -283,16 +166,79 @@ resources = _nested"#,
             .render(&YamlValue::Mapping(Default::default()))
             .expect("render outer");
 
-        assert_eq!(
-            rendered.resources.len(),
-            1,
-            "sentinel should expand to one ConfigMap"
-        );
+        assert_eq!(rendered.resources.len(), 1);
         let cm = &rendered.resources[0];
         assert_eq!(cm["kind"], YamlValue::String("ConfigMap".into()));
         assert_eq!(
             cm["metadata"]["name"],
             YamlValue::String("from-outer".into())
+        );
+    }
+
+    /// Closes spike-1 issue #1: the patched-sentinel case the
+    /// previous deferred-expansion mechanism could only fail-loud on
+    /// now works because the plugin returns a real list.
+    #[test]
+    fn list_comprehension_patches_apply_to_pkg_render_output() {
+        let tmp = TempDir::new().unwrap();
+        write(tmp.path(), "inner.k", INNER);
+        let outer_path = write(
+            tmp.path(),
+            "outer.k",
+            r#"
+import kcl_plugin.pkg
+
+_up = pkg.render({ path = "./inner.k" })
+resources = [r | {metadata.labels = {"patched" = "yes"}} for r in _up]"#,
+        );
+
+        let outer = PackageK::load(&outer_path).expect("load outer");
+        let rendered = outer
+            .render(&YamlValue::Mapping(Default::default()))
+            .expect("render outer");
+
+        assert_eq!(rendered.resources.len(), 1);
+        let cm = &rendered.resources[0];
+        assert_eq!(
+            cm["metadata"]["labels"]["patched"],
+            YamlValue::String("yes".into()),
+            "list-comprehension overlay should apply now that pkg.render returns a real list"
+        );
+    }
+
+    /// Filtering on the result also works — the use case the
+    /// sentinel mechanism couldn't express at all.
+    #[test]
+    fn filter_expression_works_on_pkg_render_output() {
+        let tmp = TempDir::new().unwrap();
+        write(
+            tmp.path(),
+            "multi.k",
+            r#"
+resources = [
+    {apiVersion: "v1", kind: "ConfigMap", metadata.name: "keep-me"},
+    {apiVersion: "v1", kind: "Secret", metadata.name: "drop-me"},
+]"#,
+        );
+        let outer_path = write(
+            tmp.path(),
+            "outer.k",
+            r#"
+import kcl_plugin.pkg
+
+_all = pkg.render({ path = "./multi.k" })
+resources = [r for r in _all if r.kind == "ConfigMap"]"#,
+        );
+
+        let outer = PackageK::load(&outer_path).expect("load outer");
+        let rendered = outer
+            .render(&YamlValue::Mapping(Default::default()))
+            .expect("render outer");
+
+        assert_eq!(rendered.resources.len(), 1);
+        assert_eq!(
+            rendered.resources[0]["metadata"]["name"],
+            YamlValue::String("keep-me".into())
         );
     }
 
@@ -349,7 +295,7 @@ resources = _rs"#,
     }
 
     #[test]
-    fn nested_pkg_render_expands_recursively() {
+    fn nested_pkg_render_recurses() {
         let tmp = TempDir::new().unwrap();
         write(tmp.path(), "deep.k", INNER);
         write(
@@ -374,12 +320,11 @@ resources = pkg.render({ path = "./middle.k" })"#,
             .render(&YamlValue::Mapping(Default::default()))
             .expect("render");
         assert_eq!(rendered.resources.len(), 1);
-        // The innermost render used its default name; `middle`
-        // didn't plumb name through. Asserting we reached the
-        // innermost resource via two sentinel expansions.
+        // The innermost render received `name = "deep-from-middle"`
+        // through two layers of pkg.render — proves the input flow.
         assert_eq!(
-            rendered.resources[0]["kind"],
-            YamlValue::String("ConfigMap".into())
+            rendered.resources[0]["metadata"]["name"],
+            YamlValue::String("deep-from-middle".into())
         );
     }
 }
