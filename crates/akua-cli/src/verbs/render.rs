@@ -20,6 +20,23 @@ use akua_core::{
 /// the PathError message stays colocated with its consumer.
 const STRICT_MARKER: &str = "strict mode requires every chart";
 
+/// Substring of the `PathError::Escape` Display, sniffed out of the
+/// same KCL plugin-panic envelope as STRICT_MARKER. The sandboxed
+/// render path collapses all errors to `KclEval(string)`, which is
+/// why we can't pattern-match on the typed `PathError::Escape`
+/// variant here — only the in-process render path keeps that typing.
+const ESCAPE_MARKER: &str = "escapes the Package directory";
+
+/// User-facing remediation for `E_PATH_ESCAPE`. Emitted as the
+/// `suggestion` field on the structured error so agents have a
+/// machine-readable next-action without parsing the `docs/errors/`
+/// page. Kept identical across the sandboxed (KclEval-string) and
+/// in-process (typed PathError::Escape) match arms.
+const PATH_ESCAPE_SUGGESTION: &str = "Two ways out: \
+    (1) vendor the dependency as a subdirectory of this Package and reference it with a Package-relative path (e.g. `./vendor/<name>`); or \
+    (2) declare it in `akua.toml` `[dependencies]` and reference the resolved alias (`charts.<name>.path` for Helm charts; `import <alias>` for KCL/Akua packages). \
+    See docs/errors/E_PATH_ESCAPE.md.";
+
 #[derive(Debug, Clone)]
 pub struct RenderArgs<'a> {
     pub package_path: &'a Path,
@@ -125,6 +142,10 @@ impl RenderError {
                             "Declare the chart in `akua.toml` and `import charts.<name>`, then pass `chart = <name>.path` to `helm.template`.",
                         )
                         .with_default_docs()
+                } else if msg.contains(ESCAPE_MARKER) {
+                    StructuredError::new(codes::E_PATH_ESCAPE, msg.clone())
+                        .with_suggestion(PATH_ESCAPE_SUGGESTION)
+                        .with_default_docs()
                 } else {
                     StructuredError::new(codes::E_RENDER_KCL, msg.clone()).with_default_docs()
                 }
@@ -138,6 +159,11 @@ impl RenderError {
                 .with_suggestion(
                     "Declare the chart in `akua.toml` and `import charts.<name>`, then pass `chart = <name>.path` to `helm.template`.",
                 )
+                .with_default_docs(),
+            RenderError::PackageK(PackageKError::PathEscape(
+                inner @ akua_core::kcl_plugin::PathError::Escape { .. },
+            )) => StructuredError::new(codes::E_PATH_ESCAPE, inner.to_string())
+                .with_suggestion(PATH_ESCAPE_SUGGESTION)
                 .with_default_docs(),
             RenderError::PackageK(PackageKError::PathEscape(inner)) => StructuredError::new(
                 codes::E_PATH_ESCAPE,
