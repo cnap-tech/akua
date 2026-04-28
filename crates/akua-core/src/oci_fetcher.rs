@@ -59,12 +59,25 @@ const HELM_CHART_LAYER_MEDIA_TYPE: &str = "application/vnd.cncf.helm.chart.conte
 /// is too generic (other artifact types also use it).
 const KCL_LAYER_MEDIA_TYPE: &str = "application/vnd.oci.image.layer.v1.tar";
 
-/// Annotation keys kpm stamps onto KCL package manifests. `org.kcllang.*`
-/// is the current canonical form (kpm 0.10+); `org.kclpkg.*` is the
-/// older form some packages still publish under. Presence of either on
-/// the manifest's `annotations` map is the kind discriminator.
-const KCL_PACKAGE_ANNOTATION_KEYS: &[&str] =
-    &["org.kcllang.package.name", "org.kclpkg.package.name"];
+/// Annotation keys that signal a manifest carries a KCL-decodable
+/// package payload (a plain-tar layer with `kcl.mod` or `akua.toml +
+/// package.k` at the root):
+///
+/// - `org.kcllang.package.name` — current canonical kpm annotation.
+/// - `org.kclpkg.package.name` — older kpm form, still in the wild.
+/// - `org.akua.package.name` — akua-published artifacts. Stays
+///   compatible with the kcl-lang shape on the wire (every Akua
+///   Package IS a KCL package by structure), but lets us version
+///   akua-specific metadata (signing kind, schema bundle digest,
+///   publishing tool version) independently of upstream kpm.
+///
+/// Presence of *any* of these on the manifest's `annotations` map
+/// flips kind detection to `KclModule`.
+const KCL_PACKAGE_ANNOTATION_KEYS: &[&str] = &[
+    "org.kcllang.package.name",
+    "org.kclpkg.package.name",
+    "org.akua.package.name",
+];
 
 /// OCI image manifest media type. Some registries (ghcr.io with
 /// compatibility mode, ECR) still serve `application/vnd.docker.*`
@@ -163,7 +176,7 @@ pub enum OciFetchError {
         detail: String,
     },
 
-    #[error("manifest for `{oci_ref}:{version}` has no recognised package layer — expected helm `{HELM_CHART_LAYER_MEDIA_TYPE}` or KCL `{KCL_LAYER_MEDIA_TYPE}` with `org.kcllang.package.*` annotations")]
+    #[error("manifest for `{oci_ref}:{version}` has no recognised package layer — expected helm `{HELM_CHART_LAYER_MEDIA_TYPE}` or KCL `{KCL_LAYER_MEDIA_TYPE}` with `org.kcllang.package.*` / `org.kclpkg.package.*` / `org.akua.package.*` annotations")]
     NoChartLayer { oci_ref: String, version: String },
 
     #[error("pulled blob digest `{actual}` doesn't match layer-declared `{declared}`")]
@@ -969,5 +982,54 @@ mod tests {
             annotations: BTreeMap::new(),
         };
         assert!(detect_package(&manifest).is_none());
+    }
+
+    #[test]
+    fn detect_package_recognizes_akua_specific_annotation() {
+        // Closes spike-1 #481: an Akua-published OCI artifact that
+        // carries `org.akua.package.*` (with or without the kcl-lang
+        // alias) decodes the same way as kcl-lang ecosystem packages.
+        // Lets akua publish artifacts that are 100% kcl-readable on
+        // the wire while still letting akua versioning extend
+        // independently.
+        let manifest = OciManifest {
+            layers: vec![OciLayer {
+                media_type: KCL_LAYER_MEDIA_TYPE.into(),
+                digest: "sha256:akua".into(),
+                size: 1,
+            }],
+            annotations: BTreeMap::from([(
+                "org.akua.package.name".to_string(),
+                "webapp".to_string(),
+            )]),
+        };
+        let detected = detect_package(&manifest).expect("akua-annotated package detected");
+        assert_eq!(detected.kind, PackageKind::KclModule);
+        assert!(matches!(detected.format, ArchiveFormat::PlainTar));
+    }
+
+    #[test]
+    fn detect_package_recognizes_dual_annotation() {
+        // Akua-published artifacts may carry both annotation sets
+        // (kcl-lang for ecosystem compatibility + akua for our
+        // metadata). The detector still resolves them to a single
+        // KclModule decode.
+        let manifest = OciManifest {
+            layers: vec![OciLayer {
+                media_type: KCL_LAYER_MEDIA_TYPE.into(),
+                digest: "sha256:dual".into(),
+                size: 1,
+            }],
+            annotations: BTreeMap::from([
+                ("org.kcllang.package.name".to_string(), "webapp".to_string()),
+                ("org.akua.package.name".to_string(), "webapp".to_string()),
+                (
+                    "org.akua.package.signing".to_string(),
+                    "cosign-keyless".to_string(),
+                ),
+            ]),
+        };
+        let detected = detect_package(&manifest).unwrap();
+        assert_eq!(detected.kind, PackageKind::KclModule);
     }
 }
