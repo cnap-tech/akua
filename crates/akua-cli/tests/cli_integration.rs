@@ -178,6 +178,107 @@ fn render_missing_package_surfaces_structured_error_on_stderr() {
     assert_eq!(parsed["code"], "E_PACKAGE_MISSING");
 }
 
+#[test]
+fn path_dep_to_akua_package_resolves_through_tree() {
+    // Closes spike-1 issue #2: a [dependencies] entry pointing to a
+    // sibling Akua Package (akua.toml + package.k, no kcl.mod) must
+    // resolve through the dep system. `akua tree --json` reports
+    // resolved deps; pre-fix the resolver tried to classify the dep
+    // as a Helm chart and the dep ended up either missing or
+    // mis-shaped in the tree output.
+    let dir = tempdir();
+
+    // Upstream Akua package — no render lambda required by the user-
+    // demanded design (#476 description). Just a normal Package.
+    let upstream = dir.path().join("upstream");
+    std::fs::create_dir_all(&upstream).unwrap();
+    std::fs::write(
+        upstream.join("akua.toml"),
+        "[package]\nname = \"upstream\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n[dependencies]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        upstream.join("package.k"),
+        "import akua.ctx\n\
+         schema Input:\n    appName: str = \"upstream-default\"\n\
+         input: Input = ctx.input()\n\
+         resources = [{\n    apiVersion = \"v1\"\n    kind = \"ConfigMap\"\n    metadata.name = input.appName\n}]\n",
+    )
+    .unwrap();
+
+    // Install Package with a path-dep on upstream.
+    let install = dir.path().join("install");
+    std::fs::create_dir_all(&install).unwrap();
+    std::fs::write(
+        install.join("akua.toml"),
+        "[package]\nname = \"install\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n\
+         [dependencies]\nupstream = { path = \"../upstream\" }\n",
+    )
+    .unwrap();
+    std::fs::write(install.join("package.k"), "resources = []\n").unwrap();
+
+    let out = run(&install, &["tree", "--json"]);
+    assert_exit(&out, 0);
+
+    let parsed = stdout_json(&out);
+    let deps = parsed["dependencies"]
+        .as_array()
+        .expect("tree.dependencies array");
+    let upstream_entry = deps
+        .iter()
+        .find(|d| d["name"] == "upstream")
+        .unwrap_or_else(|| panic!("expected `upstream` dep in tree output:\n{parsed}"));
+    // Path-style deps record `source: "path"` regardless of whether
+    // the resolved tree is helm- or kcl-shaped — the discriminator is
+    // the dep declaration form, not the artifact kind.
+    assert_eq!(upstream_entry["source"], "path");
+    assert_eq!(upstream_entry["source_ref"], "../upstream");
+}
+
+#[test]
+fn lock_rejects_helm_dep_referenced_via_import() {
+    // Closes spike-1 issue #3: a [dependencies] entry that resolves
+    // as a Helm chart but appears in `import <alias>` must fail at
+    // lock time with E_DEP_KIND_MISMATCH. Pre-fix the resolver wrote
+    // a perfectly-shaped LockedPackage and the failure deferred to
+    // `akua check`'s opaque CannotFindModule.
+    let dir = tempdir();
+
+    // Helm chart on disk — minimal Chart.yaml + templates/.
+    let chart = dir.path().join("nginx-chart");
+    std::fs::create_dir_all(chart.join("templates")).unwrap();
+    std::fs::write(
+        chart.join("Chart.yaml"),
+        "apiVersion: v2\nname: nginx\nversion: 0.1.0\n",
+    )
+    .unwrap();
+    std::fs::write(chart.join("templates/cm.yaml"), "kind: ConfigMap\n").unwrap();
+
+    // Install Package mistakenly does `import nginx` against a Helm dep.
+    let install = dir.path().join("install");
+    std::fs::create_dir_all(&install).unwrap();
+    std::fs::write(
+        install.join("akua.toml"),
+        "[package]\nname = \"install\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n\
+         [dependencies]\nnginx = { path = \"../nginx-chart\" }\n",
+    )
+    .unwrap();
+    std::fs::write(install.join("package.k"), "import nginx\nresources = []\n").unwrap();
+
+    let out = run(&install, &["lock", "--json"]);
+    assert_exit(&out, 1);
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stderr.trim()).expect("structured error on stderr");
+    assert_eq!(parsed["code"], "E_DEP_KIND_MISMATCH");
+    let msg = parsed["message"].as_str().unwrap_or("");
+    assert!(
+        msg.contains("nginx"),
+        "expected the offending alias `nginx` in the error message, got: {msg}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // fmt
 // ---------------------------------------------------------------------------

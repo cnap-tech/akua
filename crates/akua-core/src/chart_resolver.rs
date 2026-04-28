@@ -738,6 +738,100 @@ fn resolved_source_for_replace(
 /// Preserves prior `signature` / `attestation` when the entry already
 /// existed so a merge doesn't silently drop cosign metadata a
 /// follow-up `akua publish` has since populated.
+/// Cross-validate that every dep alias referenced by a top-level
+/// `import <alias>` statement in `package.k` resolves to a
+/// `KclModule`-shaped artifact. Aliases that resolve as `HelmChart`
+/// or aren't in `[dependencies]` at all aren't reachable through
+/// KCL's import resolver — `akua check` would later fail with
+/// `CannotFindModule`. Catching the mismatch at lock time gives
+/// the user a clear "wrong dep kind" error pointing at the offending
+/// alias instead of an opaque downstream parse error.
+///
+/// Closes spike-1 issue #3.
+///
+/// Returns the offending mismatches (each with the alias + the
+/// kind the resolver landed on). Caller decides whether to fail
+/// hard (`akua lock`) or report only (`akua tree`).
+pub fn validate_import_kinds(
+    package_k_source: &str,
+    resolved: &ResolvedCharts,
+) -> Vec<ImportKindMismatch> {
+    let mut out = Vec::new();
+    for alias in scan_top_level_import_roots(package_k_source) {
+        // Stdlib + ad-hoc aliases (`akua.*`, `kcl_plugin.*`, `charts.*`,
+        // and anything else not declared in `[dependencies]`) don't
+        // need a corresponding dep entry — they come from the host
+        // stdlib mount or the chart-resolver's synthetic `charts/`
+        // wrapper, neither of which is user-visible in akua.toml.
+        if alias == "akua" || alias == "kcl_plugin" || alias == "charts" {
+            continue;
+        }
+        let Some(chart) = resolved.entries.get(&alias) else {
+            // Not in [dependencies] — the KCL parser will surface
+            // CannotFindModule on its own; let it. Lock-time isn't
+            // the place to invent new "import points at nothing"
+            // errors when the existing one is sufficient.
+            continue;
+        };
+        if chart.kind != PackageKind::KclModule {
+            out.push(ImportKindMismatch {
+                alias,
+                resolved_kind: chart.kind,
+            });
+        }
+    }
+    out
+}
+
+/// One offending alias for [`validate_import_kinds`]. The pair is
+/// enough for the caller to construct an `E_DEP_KIND_MISMATCH`
+/// message — the resolved-source detail (path / oci / git) is
+/// available off the `ResolvedCharts` map if needed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportKindMismatch {
+    pub alias: String,
+    pub resolved_kind: PackageKind,
+}
+
+/// Scan a `package.k` for top-level `import <alias>(.path)?( as Y)?`
+/// statements and collect the root identifier (`<alias>`).
+///
+/// Conservative line-based parser — KCL imports are a single line, the
+/// language doesn't support multi-line imports, and import statements
+/// must precede any other top-level construct. Stops at the first
+/// non-blank, non-comment, non-import line. We don't need a full KCL
+/// parser for this; the workspace's KCL evaluator does the real
+/// validation downstream (this pass is the early-warning gate).
+fn scan_top_level_import_roots(source: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in source.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some(rest) = trimmed.strip_prefix("import ") else {
+            // KCL forbids any other top-level construct above imports,
+            // so the first non-blank, non-comment, non-import line
+            // means the import block is over. Stop scanning.
+            break;
+        };
+        // Take the dotted path up to whitespace, comment, or `as`.
+        let path: String = rest
+            .chars()
+            .take_while(|c| !c.is_whitespace() && *c != '#')
+            .collect();
+        if path.is_empty() {
+            continue;
+        }
+        // Root identifier is everything before the first `.`.
+        let root = path.split('.').next().unwrap_or(&path).to_string();
+        if !root.is_empty() {
+            out.push(root);
+        }
+    }
+    out
+}
+
 pub fn merge_into_lock(lock: &mut crate::lock_file::AkuaLock, resolved: &ResolvedCharts) {
     use crate::lock_file::LockedPackage;
     for chart in resolved.entries.values() {
@@ -778,7 +872,9 @@ fn detect_dep_kind(dir: &Path) -> PackageKind {
     }
     #[cfg(not(feature = "oci-fetch"))]
     {
-        if dir.join("kcl.mod").is_file() {
+        if dir.join("kcl.mod").is_file()
+            || (dir.join("akua.toml").is_file() && dir.join("package.k").is_file())
+        {
             PackageKind::KclModule
         } else {
             PackageKind::HelmChart
@@ -917,6 +1013,123 @@ fn collect_files(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scan_extracts_root_idents_from_dotted_aliased_imports() {
+        let src = "\
+            import akua.ctx\n\
+            import akua.pkg as p\n\
+            import upstream\n\
+            import upstream.subpkg as sub\n\
+            \n\
+            # not an import\n\
+            schema Input:\n\
+                x: str\n\
+        ";
+        let roots = scan_top_level_import_roots(src);
+        assert_eq!(
+            roots,
+            vec![
+                "akua".to_string(),
+                "akua".to_string(),
+                "upstream".to_string(),
+                "upstream".to_string(),
+            ],
+        );
+    }
+
+    #[test]
+    fn scan_stops_at_first_non_import_top_level_line() {
+        // KCL forbids any other top-level construct above imports;
+        // the scanner mirrors that — once non-import code starts the
+        // import block is over, even if a later line happens to start
+        // with "import" (it'd be syntactically invalid KCL anyway).
+        let src = "\
+            import akua.ctx\n\
+            schema X:\n    y: str\n\
+            import too_late\n\
+        ";
+        let roots = scan_top_level_import_roots(src);
+        assert_eq!(roots, vec!["akua".to_string()]);
+    }
+
+    #[test]
+    fn scan_skips_blanks_and_comments_in_import_block() {
+        let src = "\
+            # leading comment\n\
+            \n\
+            import akua.ctx\n\
+            \n\
+            # mid-block comment\n\
+            import upstream\n\
+        ";
+        let roots = scan_top_level_import_roots(src);
+        assert_eq!(roots, vec!["akua".to_string(), "upstream".to_string()]);
+    }
+
+    #[test]
+    fn validate_flags_helm_chart_referenced_via_import() {
+        // Spike-1 issue #3 repro at the unit level: a dep classified
+        // as HelmChart with a matching `import` in package.k surfaces
+        // the mismatch.
+        let mut entries = std::collections::BTreeMap::new();
+        entries.insert(
+            "upstream".to_string(),
+            ResolvedChart {
+                name: "upstream".to_string(),
+                abs_path: PathBuf::from("/cache/upstream"),
+                sha256: "deadbeef".into(),
+                kind: PackageKind::HelmChart,
+                source: ResolvedSource::Path {
+                    declared: "../upstream".into(),
+                },
+            },
+        );
+        let resolved = ResolvedCharts { entries };
+        let mismatches = validate_import_kinds("import upstream\nresources = []\n", &resolved);
+        assert_eq!(mismatches.len(), 1);
+        assert_eq!(mismatches[0].alias, "upstream");
+        assert_eq!(mismatches[0].resolved_kind, PackageKind::HelmChart);
+    }
+
+    #[test]
+    fn validate_passes_when_kcl_module_is_imported() {
+        let mut entries = std::collections::BTreeMap::new();
+        entries.insert(
+            "upstream".to_string(),
+            ResolvedChart {
+                name: "upstream".to_string(),
+                abs_path: PathBuf::from("/cache/upstream"),
+                sha256: "deadbeef".into(),
+                kind: PackageKind::KclModule,
+                source: ResolvedSource::Path {
+                    declared: "../upstream".into(),
+                },
+            },
+        );
+        let resolved = ResolvedCharts { entries };
+        let mismatches = validate_import_kinds("import upstream\nresources = []\n", &resolved);
+        assert!(
+            mismatches.is_empty(),
+            "expected no mismatches, got {mismatches:?}"
+        );
+    }
+
+    #[test]
+    fn validate_ignores_stdlib_and_unknown_aliases() {
+        // `akua.*` and `kcl_plugin.*` are stdlib mounts — never in
+        // [dependencies]. Aliases NOT in the resolved map are left to
+        // KCL's CannotFindModule path; lock-time isn't the place.
+        let entries = std::collections::BTreeMap::new();
+        let resolved = ResolvedCharts { entries };
+        let src = "\
+            import akua.ctx\n\
+            import kcl_plugin.helm\n\
+            import charts.nginx\n\
+            import never_declared\n\
+        ";
+        assert!(validate_import_kinds(src, &resolved).is_empty());
+    }
 
     fn minimal_manifest(body: &str) -> AkuaManifest {
         let src = format!(
