@@ -513,6 +513,22 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    /// `to_structured`'s `KclEval` arm sniffs the message for
+    /// `STRICT_MARKER` and `ESCAPE_MARKER` to recover a typed error
+    /// code from KCL's opaque plugin-panic envelope. If one marker
+    /// were a substring of the other, the order-dependent
+    /// `if/else if` chain would silently misroute one of them.
+    /// Pin both markers as disjoint here so a future edit to either
+    /// can't break this without tripping the test.
+    #[test]
+    fn render_error_markers_are_substring_disjoint() {
+        assert!(
+            !STRICT_MARKER.contains(ESCAPE_MARKER) && !ESCAPE_MARKER.contains(STRICT_MARKER),
+            "STRICT_MARKER and ESCAPE_MARKER must not be substrings of each other; \
+             got STRICT={STRICT_MARKER:?} ESCAPE={ESCAPE_MARKER:?}"
+        );
+    }
+
     const MINIMAL_PACKAGE: &str = r#"
 schema Input:
     replicas: int = 2
