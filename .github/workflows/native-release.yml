@@ -103,12 +103,15 @@ jobs:
         # uploaded as part of the engines artifact below).
         run: mise exec -- task build:engines
 
-      - name: Upload engine wasm artifact (one job, not the matrix)
-        # Only the first matrix runner needs to publish this — every
-        # job builds it identically (Go → wasip1 is deterministic).
-        # Skipped for the others; the publish job downloads exactly
-        # one copy.
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
+      - name: Upload engine wasm artifact (linux runners — redundant)
+        # Both linux-gnu runners upload the artifact with `overwrite:
+        # true` so a single failed runner doesn't take down the
+        # publish job. Go → wasip1 is deterministic — every runner
+        # produces byte-identical output, so the overwrite races
+        # benignly. Limited to linux jobs because that's where the
+        # Go toolchain is available + fast; the windows / mac runners
+        # in the matrix don't run `task build:engines`.
+        if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-unknown-linux-gnu'
         uses: actions/upload-artifact@v4
         with:
           name: native-engines-wasm
@@ -117,6 +120,7 @@ jobs:
             crates/kustomize-engine-wasm/assets/kustomize-engine.wasm
           if-no-files-found: error
           retention-days: 1
+          overwrite: true
 
       - uses: mlugg/setup-zig@v2
         if: matrix.cross == true

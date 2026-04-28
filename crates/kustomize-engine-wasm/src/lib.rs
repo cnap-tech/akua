@@ -175,6 +175,33 @@ mod tests {
         );
     }
 
+    /// With `embed-engines` OFF, the embedded slot must be empty so
+    /// the per-platform npm binary doesn't carry the wasm. Pins the
+    /// load-bearing assumption behind #482's storage savings.
+    #[test]
+    #[cfg(not(feature = "embed-engines"))]
+    fn embed_off_means_zero_embedded_bytes() {
+        assert!(
+            KUSTOMIZE_ENGINE_BYTES_EMBEDDED.is_empty(),
+            "embed-engines OFF must produce an empty embed slot, got {} bytes",
+            KUSTOMIZE_ENGINE_BYTES_EMBEDDED.len()
+        );
+    }
+
+    /// With `embed-engines` ON (the default), the embed slot must
+    /// be populated unless the build skipped engine compilation
+    /// (the `0-byte placeholder` branch in build.rs).
+    #[test]
+    #[cfg(feature = "embed-engines")]
+    fn embed_on_means_nonempty_embedded_bytes() {
+        assert!(
+            KUSTOMIZE_ENGINE_BYTES_EMBEDDED.is_empty()
+                || KUSTOMIZE_ENGINE_BYTES_EMBEDDED.len() > 1_000_000,
+            "embed-engines ON should produce empty placeholder OR a real artifact (>1MB), got {} bytes",
+            KUSTOMIZE_ENGINE_BYTES_EMBEDDED.len()
+        );
+    }
+
     #[test]
     fn renders_minimal_overlay() {
         if !engine_is_built() {

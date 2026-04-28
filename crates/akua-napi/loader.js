@@ -31,11 +31,23 @@ if (!process.env[ENV_VAR]) {
 		const enginesPkgEntry = require.resolve('@akua-dev/native-engines');
 		process.env[ENV_VAR] = path.dirname(enginesPkgEntry);
 	} catch (e) {
-		// Fall through silently — the Rust side has its own
-		// fallback to embedded bytes when `embed-engines` is on, and
-		// surfaces a clear plugin-panic error when it isn't and no
-		// engines are reachable. Don't pre-empt that with a confusing
-		// loader-time throw.
+		// `@akua-dev/native-engines` is a hard dependency of
+		// `@akua-dev/native` (declared in package.json), so missing
+		// it means the consumer's install is broken — typically
+		// `npm install` skipped optionalDependencies, or a tool
+		// hand-vendored the addon without bringing engines along.
+		// Warn loudly: the Rust side will still surface its own
+		// E_ENGINE_NOT_AVAILABLE on the first helm.template /
+		// kustomize.build call, but that's a render-time error a
+		// loader-time warning prevents.
+		const msg = e && e.message ? e.message : String(e);
+		// eslint-disable-next-line no-console
+		console.warn(
+			`@akua-dev/native: could not locate @akua-dev/native-engines (${msg}). ` +
+				`Reinstall with \`npm install @akua-dev/native\` (engines must come along), ` +
+				`or set ${ENV_VAR} explicitly to a directory containing helm-engine.wasm + kustomize-engine.wasm. ` +
+				`Renders that don't call helm.template / kustomize.build will still work.`,
+		);
 	}
 }
 
