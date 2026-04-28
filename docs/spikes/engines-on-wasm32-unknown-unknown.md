@@ -61,23 +61,28 @@ Reasoning:
 3. **Both engineering candidates are uncertain + multi-week.** Option A risks fork divergence; option B risks perf blowout. Either delays v0.1.0 by >2 weeks with real risk of further slipping.
 4. **The punt is additive.** `package.json` conditional exports are already structured for a `"browser"` condition; adding it in v0.2.0 is a minor version bump, not a breaking change. Consumers who import `@akua-dev/sdk` today keep working.
 
-## What lands for v0.1.0 under this decision
+## What landed for v0.1.x under this decision
 
-- `@akua-dev/sdk` ships to JSR with Node-loadable WASM bundle (`packages/sdk/wasm/nodejs/`) only.
-- `package.json` / `jsr.json` `exports` condition on `"node"` + `"default"` (both resolve to the same ESM module for now — `"default"` exists so Deno + Bun still resolve something).
-- No `packages/sdk/wasm/browser/` directory in v0.1.0 publish. Dry-run verifies.
-- Release notes explicitly name "Node 20+" (+ Deno + Bun via Node-compat runtime resolution) as the v0.1.0 target.
-- `docs/sdk.md`'s "Browser" section stays, framed as "v0.2.0" / "target-state". Not a regression — it was already framed that way after the docs sweep.
-- Roadmap's Phase 4B exit gate tightened to Node + Deno + Bun only for v0.1.0; browser moves to Phase 4B's v0.2.0 completion.
+- `@akua-dev/sdk` shipped Node + Bun + Deno (anything that loads Node-API addons), via the **napi-rs path** rather than the wasm32-unknown-unknown JSR bundle the original spike framed (#468–#472):
+  - `@akua-dev/native` per-platform `.node` binary embeds the same wasmtime + helm-engine + kustomize-engine the CLI uses.
+  - Same sandbox, same engines, same render orchestrator — no fork.
+  - Distributed via npm `optionalDependencies` (one binary downloads per host).
+- The earlier `packages/sdk/wasm/nodejs/` bundle is still produced for the pure-KCL fast path (no engine callouts), but the napi addon is the SDK's primary transport for the verbs that need OCI fetch / cosign verify / helm / kustomize.
+- The JSR distribution channel was retired entirely — JSR's 20 MB single-file/total-package cap is incompatible with the napi binary. See the rename note in `CHANGELOG.md` under `@akua-dev/sdk 0.6.0`.
 
-## What v0.2.0 needs to revisit
+## What v0.2.x needs for browser
 
-- Re-evaluate A vs B with another 6 months of tooling maturation. In particular: wasmer-js 2026 releases, wasm-component-model browser support, WASI-preview-2 browser polyfills.
-- If neither matures, commit to A and budget 3 weeks for the Go-engine recompile + bridge re-implementation.
-- Ship `packages/sdk/wasm/browser/` + the conditional-exports `"browser"` key.
+The napi route doesn't extend to the browser (no Node-API there). The browser path therefore still wants candidate **A** or **B** from above, with the additional constraint that the in-process render must reuse the existing wasmtime-host plugin protocol or replace it with a pure-JS equivalent. Status as of 2026-04:
+
+- **A (`GOOS=js` engine recompile):** still uncertain. wasm-component-model + WASI-preview-2 browser polyfills landing piecemeal in 2026 reduce the bridge re-implementation surface but don't eliminate it. Budget 2-3 weeks when prioritized.
+- **B (WASI-in-JS polyfill on existing wasip1 modules):** `@bjorn3/browser_wasi_shim` gained preopen support during 2026; wasmer-js stays heavy. Worth re-spiking when v0.2.x browser becomes a hard requirement.
+- **C (defer further):** unchanged option. Browser still doesn't gate the agent-first usage akua targets.
+
+When the work is taken up, this doc becomes the running state — append decisions inline, don't re-fork.
 
 ## References
 
-- [docs/roadmap.md § Phase 4B](../roadmap.md#phase-4b--akua-wasm-for-jsr-delivery-blocks-v010) — parent phase.
+- [docs/roadmap.md § Phase 4B](../roadmap.md#phase-4b--akua-wasm-for-jsr-delivery-blocks-v010) — parent phase (note: roadmap section title still references JSR; the channel is npm now, but the phase numbering is stable).
 - [docs/spikes/kcl-wasm-feasibility.md](kcl-wasm-feasibility.md) — KCL on both wasm32 targets.
 - [docs/spikes/wasmtime-multi-engine.md](wasmtime-multi-engine.md) — Engine/Store architecture the bridge depends on.
+- `crates/akua-napi/` — the v0.6.0 napi-rs implementation that replaces the wasm32-unknown-unknown approach for Node/Bun/Deno consumers.
