@@ -207,6 +207,62 @@ fn init_then_render_without_inputs_flag_uses_scaffold_inputs_example() {
 }
 
 #[test]
+fn render_path_escape_emits_e_path_escape_with_remediation_suggestion() {
+    // Regression for #7: a Package that calls a path-taking plugin
+    // with a path that escapes its own directory must surface
+    // E_PATH_ESCAPE with an actionable `suggestion` field naming both
+    // remediations (vendor under the Package, or declare in akua.toml
+    // and reference the resolved alias). Pre-fix: the suggestion was
+    // a generic "no `..` escape" line that gave no path forward.
+    let dir = tempdir();
+    let pkg = dir.path().join("escaper");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(
+        pkg.join("akua.toml"),
+        "[package]\nname = \"escaper\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n[dependencies]\n",
+    )
+    .unwrap();
+    // pkg.render takes a path that escapes the Package dir. The
+    // sandboxed render path collapses this to KclEval(string), so
+    // the test also exercises the ESCAPE_MARKER stringly-typed
+    // sniffer in render.rs::to_structured.
+    std::fs::write(
+        pkg.join("package.k"),
+        "import akua.pkg\n\
+         _ = pkg.render(pkg.Render { path = \"../../../etc\" })\n\
+         resources = _\n",
+    )
+    .unwrap();
+
+    let out = run(&pkg, &["render", "--out", "./deploy", "--json"]);
+    assert_exit(&out, 1);
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stderr.trim()).expect("structured error on stderr");
+
+    assert_eq!(
+        parsed["code"], "E_PATH_ESCAPE",
+        "expected E_PATH_ESCAPE, got {}",
+        parsed["code"]
+    );
+
+    let suggestion = parsed["suggestion"].as_str().unwrap_or("");
+    assert!(
+        suggestion.contains("vendor"),
+        "suggestion should mention vendoring as a remediation, got: {suggestion}"
+    );
+    assert!(
+        suggestion.contains("akua.toml"),
+        "suggestion should mention akua.toml as the alternative remediation, got: {suggestion}"
+    );
+    assert!(
+        suggestion.contains("docs/errors/E_PATH_ESCAPE.md"),
+        "suggestion should link to the dedicated error doc page, got: {suggestion}"
+    );
+}
+
+#[test]
 fn render_missing_package_surfaces_structured_error_on_stderr() {
     let dir = tempdir();
     let out = run(
