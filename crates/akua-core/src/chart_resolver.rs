@@ -756,6 +756,11 @@ pub fn validate_import_kinds(
     package_k_source: &str,
     resolved: &ResolvedCharts,
 ) -> Vec<ImportKindMismatch> {
+    // No deps declared → no possible mismatches. Common case for
+    // standalone Packages; skip the line scan entirely.
+    if resolved.entries.is_empty() {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     for alias in scan_top_level_import_roots(package_k_source) {
         // Stdlib + ad-hoc aliases (`akua.*`, `kcl_plugin.*`, `charts.*`,
@@ -803,6 +808,13 @@ pub struct ImportKindMismatch {
 /// parser for this; the workspace's KCL evaluator does the real
 /// validation downstream (this pass is the early-warning gate).
 fn scan_top_level_import_roots(source: &str) -> Vec<String> {
+    // Cheap pre-check: if the file contains no `import ` token at all,
+    // skip the per-line scan + per-line allocations. KCL forbids
+    // imports anywhere except the top of the file, so a substring
+    // miss is a definitive negative.
+    if !source.contains("import ") {
+        return Vec::new();
+    }
     let mut out = Vec::new();
     for line in source.lines() {
         let trimmed = line.trim_start();

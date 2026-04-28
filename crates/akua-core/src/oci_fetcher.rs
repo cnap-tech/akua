@@ -263,48 +263,27 @@ fn detect_package(manifest: &OciManifest) -> Option<DetectedLayer<'_>> {
 /// questions: "is this a recognised package?" (Some/None) and
 /// "which kind?" (the variant).
 pub fn detect_kind(dir: &Path) -> Option<PackageKind> {
-    detect_kind_at(dir, "Chart.yaml", PackageKind::HelmChart)
-        .or_else(|| detect_kind_at(dir, "kcl.mod", PackageKind::KclModule))
-        .or_else(|| detect_akua_package(dir))
+    // The Akua-package signature requires *both* `akua.toml` and
+    // `package.k` so the workspace root (which usually has only the
+    // toml) doesn't accidentally classify as a KCL module.
+    detect_kind_at(dir, &["Chart.yaml"], PackageKind::HelmChart)
+        .or_else(|| detect_kind_at(dir, &["kcl.mod"], PackageKind::KclModule))
+        .or_else(|| detect_kind_at(dir, &["akua.toml", "package.k"], PackageKind::KclModule))
 }
 
-/// An Akua Package is a directory containing both `akua.toml` and
-/// `package.k` at the root. Distinct from a kcl-lang ecosystem
-/// package (which uses `kcl.mod`) but both render through the same
-/// KCL evaluator path — so we classify them as `KclModule` and let
-/// the materializer mount the directory as an `ExternalPkg`.
-///
-/// `akua.toml` alone wouldn't be enough — it could be a workspace
-/// manifest. Requiring both files is the smallest unambiguous
-/// signature the detection can rely on.
-fn detect_akua_package(dir: &Path) -> Option<PackageKind> {
-    let direct = dir.join("akua.toml").is_file() && dir.join("package.k").is_file();
-    if direct {
-        return Some(PackageKind::KclModule);
-    }
-    // Mirror the one-level-deep search detect_kind_at does, so a
-    // tarball that unpacks to `<dir>/<pkg-name>/{akua.toml,package.k}`
-    // (kcl-lang's typical OCI layout) resolves the same way as one
-    // unpacked flat.
-    let rd = std::fs::read_dir(dir).ok()?;
-    rd.flatten()
-        .find(|e| {
-            let p = e.path();
-            p.is_dir() && p.join("akua.toml").is_file() && p.join("package.k").is_file()
-        })
-        .map(|_| PackageKind::KclModule)
-}
-
-fn detect_kind_at(dir: &Path, marker: &str, kind: PackageKind) -> Option<PackageKind> {
-    if dir.join(marker).is_file() {
+/// Look for a directory matching every name in `markers` (logical AND).
+/// Checks `dir` itself, then one level deep — the latter handles
+/// tarballs that unpack to `<dir>/<pkg-name>/...`. Uses the cached
+/// `DirEntry::file_type()` from the read_dir to skip a redundant
+/// `is_dir()` syscall per child.
+fn detect_kind_at(dir: &Path, markers: &[&str], kind: PackageKind) -> Option<PackageKind> {
+    let all_present = |d: &Path| markers.iter().all(|m| d.join(m).is_file());
+    if all_present(dir) {
         return Some(kind);
     }
     let rd = std::fs::read_dir(dir).ok()?;
     rd.flatten()
-        .find(|e| {
-            let p = e.path();
-            p.is_dir() && p.join(marker).is_file()
-        })
+        .find(|e| e.file_type().map(|ft| ft.is_dir()).unwrap_or(false) && all_present(&e.path()))
         .map(|_| kind)
 }
 
