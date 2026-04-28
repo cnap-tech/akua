@@ -289,6 +289,48 @@ fn render_debug_emits_eval_result_alongside_summary() {
 }
 
 #[test]
+fn render_pkg_render_cycle_emits_e_render_cycle() {
+    // pkg.render of a Package already on the render stack must
+    // surface as E_RENDER_CYCLE with a remediation suggestion. Same
+    // CYCLE_MARKER sniffer in to_structured covers transitive cycles
+    // too — the unit test in pkg_render::tests proves both shapes
+    // hit the same string.
+    let dir = tempdir();
+    let pkg = dir.path().join("self-cyclic");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(
+        pkg.join("akua.toml"),
+        "[package]\nname = \"self-cyclic\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n[dependencies]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        pkg.join("package.k"),
+        "import akua.pkg\n\
+         _self = pkg.render(pkg.Render { path = \"./package.k\" })\n\
+         resources = _self\n",
+    )
+    .unwrap();
+
+    let out = run(&pkg, &["render", "--out", "./deploy", "--json"]);
+    assert_exit(&out, 1);
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stderr.trim()).expect("structured error on stderr");
+
+    assert_eq!(
+        parsed["code"], "E_RENDER_CYCLE",
+        "expected E_RENDER_CYCLE, got {}",
+        parsed["code"]
+    );
+    let suggestion = parsed["suggestion"].as_str().unwrap_or("");
+    assert!(
+        suggestion.contains("cycle") || suggestion.contains("loop"),
+        "suggestion should name the cycle/loop concern, got: {suggestion}"
+    );
+}
+
+#[test]
 fn render_pkg_render_patches_apply_to_inner_resources() {
     // Boundary test: the unit test in `pkg_render::tests` proves the
     // plugin handler returns a real list. This one proves the same

@@ -40,6 +40,20 @@ pub const E_ENGINE_NOT_AVAILABLE: &str = "E_ENGINE_NOT_AVAILABLE";
 /// the Package directory (traversal / symlink escape).
 pub const E_PATH_ESCAPE: &str = "E_PATH_ESCAPE";
 
+/// `pkg.render` re-entered a Package already on the render stack
+/// — composition cycle. Caught before the inner load to bound
+/// recursion; covers both direct and transitive cycles.
+pub const E_RENDER_CYCLE: &str = "E_RENDER_CYCLE";
+
+/// `pkg.render` exceeded the render-stack depth cap. Default is
+/// generous (16); hitting it usually means runaway composition
+/// through fresh Packages, which cycle detection alone can't catch.
+pub const E_RENDER_BUDGET_DEPTH: &str = "E_RENDER_BUDGET_DEPTH";
+
+/// `pkg.render` was called after the wall-clock deadline the
+/// outer caller installed for the render had already expired.
+pub const E_RENDER_BUDGET_DEADLINE: &str = "E_RENDER_BUDGET_DEADLINE";
+
 /// `charts.*` dep in `akua.toml` failed to resolve (missing path,
 /// not-a-directory, OCI/git Phase-2b gate). See chart_resolver.
 pub const E_CHART_RESOLVE: &str = "E_CHART_RESOLVE";
