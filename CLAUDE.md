@@ -117,6 +117,8 @@ akua policy check   # when policy changed; verdict must be allow
 
 All are embedded — no installation of `opa` / `kcl` / `regal` needed.
 
+**Pre-push hook.** `task hooks:install` wires `.githooks/` into this repo (`core.hooksPath`). The pre-push hook runs `task fmt:check` + `task lint` so CI's `Rust (fmt + clippy + test)` job doesn't catch drift the laptop already saw. Skip with `git push --no-verify` only when you mean it.
+
 ## Development stance
 
 - The project is **pre-alpha** (v0.x). APIs churn. Every change should be reviewed against the invariants above before shipping.

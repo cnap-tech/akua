@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Pre-push hook — `task fmt:check` + `task lint` before letting code
+# leave the laptop. Skip with `git push --no-verify` if you must.
+#
+# Install: `task hooks:install` (sets `core.hooksPath = .githooks`).
+
+set -e
+
+if ! command -v task >/dev/null 2>&1; then
+  echo "pre-push: \`task\` not on PATH; install via \`mise install\` or skip with --no-verify" >&2
+  exit 1
+fi
+
+echo "pre-push: fmt:check"
+task fmt:check
+
+echo "pre-push: lint"
+task lint
