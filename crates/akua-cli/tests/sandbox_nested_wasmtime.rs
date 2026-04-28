@@ -54,13 +54,14 @@ fn helm_render_direct_no_sandbox() {
     eprintln!("[direct-helm] produced {} manifests", manifests.len());
 }
 
-/// Canary for task #420 — currently FAILS because KCL's parser at
+/// Canary — currently FAILS because KCL's parser at
 /// `kcl-parser/src/lib.rs:668` uses `Path::exists()` to probe
 /// `/charts/kcl.mod` on the preopen, and Rust's wasip1 std doesn't
 /// resolve absolute paths through preopens for metadata calls.
 /// Preopen wiring + protocol are correct; the failure surfaces as
-/// `pkgroot not found: "charts.nginx"` from KCL itself. Re-enable
-/// (drop `ignore`) once #420 is resolved.
+/// `pkgroot not found: "charts.nginx"` from KCL itself. Drop the
+/// `#[ignore]` once the wasip1 absolute-path-through-preopen gap is
+/// resolved upstream.
 #[test]
 fn charts_import_resolves_inside_sandbox_via_preopen() {
     // Narrow scope: verify that an absolute preopen path (`/charts`)

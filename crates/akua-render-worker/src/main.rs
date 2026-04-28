@@ -4,22 +4,11 @@
 //! `akua` CLI binary, instantiated per-render inside a wasmtime
 //! `Store` with hard memory / fuel / epoch caps and capability-model
 //! filesystem preopens. This is how CLAUDE.md's "sandboxed by
-//! default" invariant is actually delivered (Phase 4).
+//! default" invariant is actually delivered.
 //!
-//! ## Scaffold state
-//!
-//! This commit ships the binary + its Cargo config but no render
-//! logic yet. The body is a smoke harness:
-//!
-//! - Read a JSON request from stdin.
-//! - Echo a JSON response on stdout.
-//! - Exit 0 on success, non-zero on parse error.
-//!
-//! Task #410 grows the body into the real render dispatcher:
-//! load `akua.toml` + `Package.k` from a preopened workspace,
+//! Body: load `akua.toml` + `Package.k` from a preopened workspace,
 //! resolve deps, eval KCL, write YAML into a preopened output dir,
-//! return the `RenderSummary`. Task #412 adds the adversarial test
-//! suite that validates the sandbox holds.
+//! return the `RenderSummary` over JSON-on-stdio.
 //!
 //! ## Protocol
 //!

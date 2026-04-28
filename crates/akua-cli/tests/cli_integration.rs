@@ -264,10 +264,10 @@ fn render_path_escape_emits_e_path_escape_with_remediation_suggestion() {
 
 #[test]
 fn render_debug_emits_eval_result_alongside_summary() {
-    // Closes spike-1 issue #8 (minimal slice via #480). Under --json
-    // --debug, the render verb wraps its summary in an envelope that
-    // also exposes the post-eval resources list — useful for reading
-    // back what helm.template / pkg.render actually produced.
+    // Under --json --debug, the render verb wraps its summary in an
+    // envelope that also exposes the post-eval resources list —
+    // useful for reading back what helm.template / pkg.render
+    // actually produced.
     let dir = tempdir();
     run(dir.path(), &["init", "app"]);
     let app = dir.path().join("app");
@@ -396,16 +396,15 @@ fn render_missing_package_surfaces_structured_error_on_stderr() {
 
 #[test]
 fn path_dep_to_akua_package_resolves_through_tree() {
-    // Closes spike-1 issue #2: a [dependencies] entry pointing to a
-    // sibling Akua Package (akua.toml + package.k, no kcl.mod) must
-    // resolve through the dep system. `akua tree --json` reports
-    // resolved deps; pre-fix the resolver tried to classify the dep
-    // as a Helm chart and the dep ended up either missing or
-    // mis-shaped in the tree output.
+    // A [dependencies] entry pointing to a sibling Akua Package
+    // (akua.toml + package.k, no kcl.mod) must resolve through the
+    // dep system. `akua tree --json` reports resolved deps; without
+    // detection of the Akua-package shape the resolver would
+    // classify the dep as a Helm chart.
     let dir = tempdir();
 
-    // Upstream Akua package — no render lambda required by the user-
-    // demanded design (#476 description). Just a normal Package.
+    // Upstream Akua package — just a normal Package, no render
+    // lambda required.
     let upstream = dir.path().join("upstream");
     std::fs::create_dir_all(&upstream).unwrap();
     std::fs::write(
@@ -453,11 +452,11 @@ fn path_dep_to_akua_package_resolves_through_tree() {
 
 #[test]
 fn lock_rejects_helm_dep_referenced_via_import() {
-    // Closes spike-1 issue #3: a [dependencies] entry that resolves
-    // as a Helm chart but appears in `import <alias>` must fail at
-    // lock time with E_DEP_KIND_MISMATCH. Pre-fix the resolver wrote
-    // a perfectly-shaped LockedPackage and the failure deferred to
-    // `akua check`'s opaque CannotFindModule.
+    // A [dependencies] entry that resolves as a Helm chart but
+    // appears in `import <alias>` must fail at lock time with
+    // E_DEP_KIND_MISMATCH — without this guard the lockfile writes
+    // cleanly and the failure defers to `akua check`'s opaque
+    // CannotFindModule.
     let dir = tempdir();
 
     // Helm chart on disk — minimal Chart.yaml + templates/.

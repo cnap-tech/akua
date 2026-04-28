@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 /// Embedded engine bytes — AOT `.cwasm` (default) or source `.wasm`
 /// (with `precompile` feature OFF, for `@akua-dev/sdk`'s npm
 /// distribution). See helm-engine-wasm for the same pattern.
-/// With `embed-engines` OFF, the embedded slot is empty — see
-/// helm-engine-wasm for the migration plan (#482).
+/// With `embed-engines` OFF, the embedded slot is empty — engines
+/// ship via `@akua-dev/native-engines` instead.
 #[cfg(all(feature = "precompile", feature = "embed-engines"))]
 const KUSTOMIZE_ENGINE_BYTES_EMBEDDED: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/kustomize-engine.cwasm"));
@@ -35,8 +35,7 @@ const ENGINE_FILENAME: &str = if cfg!(feature = "precompile") {
 };
 
 /// Resolve engine bytes once per process. See helm-engine-wasm for
-/// the rationale + #473 for the migration to a separate
-/// `@akua-dev/native-engines` npm package.
+/// the rationale; engines ship via `@akua-dev/native-engines`.
 fn engine_bytes() -> &'static [u8] {
     use std::sync::OnceLock;
     static OVERRIDE: OnceLock<Option<Vec<u8>>> = OnceLock::new();
@@ -176,8 +175,9 @@ mod tests {
     }
 
     /// With `embed-engines` OFF, the embedded slot must be empty so
-    /// the per-platform npm binary doesn't carry the wasm. Pins the
-    /// load-bearing assumption behind #482's storage savings.
+    /// the per-platform npm binary doesn't carry the wasm — that's
+    /// the load-bearing assumption behind splitting the engines into
+    /// `@akua-dev/native-engines`.
     #[test]
     #[cfg(not(feature = "embed-engines"))]
     fn embed_off_means_zero_embedded_bytes() {
