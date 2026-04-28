@@ -90,6 +90,8 @@ That's it. akua does **not** specify `App`, `Environment`, `Cluster`, `Secret`, 
 
 **Touching `eval_kcl` or anything called from it:** `cargo build` doesn't rebuild `akua-render-worker.cwasm` (the worker is compiled separately to `wasm32-wasip1` by `task build:render-worker`). `crates/akua-cli/build.rs` watches `crates/akua-render-worker/src` and `crates/akua-core/src` and emits a `cargo:warning=` when sources are newer than the staged `.wasm` — heed it and run `task build:render-worker` before re-running `cargo build`.
 
+**Project domain is `akua.dev`.** Reverse-DNS namespaces (OCI annotations, Java-style package roots, anything following the `org.kcllang.*` shape) use **`dev.akua.*`** — *not* `org.akua.*`. The npm scope is `@akua-dev` because npm scopes have to be unique on the registry and bare `@akua` was taken; the scope name doesn't follow the reverse-DNS rule.
+
 ## What we refuse
 
 - Marketing-speak ("empower," "democratize," "unlock," "revolutionize," "AI-first"). Describe what things do; don't frame.
