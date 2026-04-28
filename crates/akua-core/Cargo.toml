@@ -72,7 +72,7 @@ thiserror = { workspace = true }
 # engine-kcl compiled to wasip1 — that's how Phase 4 delivers the
 # sandbox.
 kcl-lang = { git = "https://github.com/kcl-lang/lib", optional = true }
-sha2 = { version = "0.10", optional = true }
+sha2 = { version = "0.11", optional = true }
 tempfile = { version = "3", optional = true }
 
 # SDK type-emission deps. Optional; pulled in only when the
@@ -90,23 +90,23 @@ helm-engine-wasm = { path = "../helm-engine-wasm", optional = true, default-feat
 kustomize-engine-wasm = { path = "../kustomize-engine-wasm", optional = true, default-features = false }
 
 # OCI chart fetch. `rustls-tls` avoids the openssl dep chain.
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
 flate2 = { version = "1", optional = true }
 tar = { version = "0.4", optional = true }
 base64 = { version = "0.22", optional = true }
 # `blocking-http-transport-reqwest-rust-tls` reuses the reqwest stack
 # we already pull in for oci-fetch; `max-performance-safe` keeps
 # compile time reasonable (skips `zlib-ng` optional perf wins).
-gix = { version = "0.66", default-features = false, features = ["blocking-http-transport-reqwest-rust-tls", "max-performance-safe", "worktree-mutation"], optional = true }
+gix = { version = "0.83", default-features = false, features = ["blocking-http-transport-reqwest-rust-tls", "max-performance-safe", "worktree-mutation"], optional = true }
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std", "pem", "pkcs8"], optional = true }
-pkcs8 = { version = "0.10", default-features = false, features = ["pem", "pkcs5", "encryption", "alloc"], optional = true }
+pkcs8 = { version = "0.11", default-features = false, features = ["pem", "pkcs5", "encryption", "alloc"], optional = true }
 pem = { version = "3", optional = true }
 signature = { version = "2", optional = true }
 notify = { version = "6", optional = true }
-notify-debouncer-mini = { version = "0.4", optional = true, default-features = false }
+notify-debouncer-mini = { version = "0.7", optional = true, default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
 # cosign test fixtures generate a keypair per test run; keeps tests
 # hermetic instead of committing a PEM to the repo.
-rand = "0.8"
+rand = "0.10"
