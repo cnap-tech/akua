@@ -263,20 +263,27 @@ fn detect_package(manifest: &OciManifest) -> Option<DetectedLayer<'_>> {
 /// questions: "is this a recognised package?" (Some/None) and
 /// "which kind?" (the variant).
 pub fn detect_kind(dir: &Path) -> Option<PackageKind> {
-    detect_kind_at(dir, "Chart.yaml", PackageKind::HelmChart)
-        .or_else(|| detect_kind_at(dir, "kcl.mod", PackageKind::KclModule))
+    // The Akua-package signature requires *both* `akua.toml` and
+    // `package.k` so the workspace root (which usually has only the
+    // toml) doesn't accidentally classify as a KCL module.
+    detect_kind_at(dir, &["Chart.yaml"], PackageKind::HelmChart)
+        .or_else(|| detect_kind_at(dir, &["kcl.mod"], PackageKind::KclModule))
+        .or_else(|| detect_kind_at(dir, &["akua.toml", "package.k"], PackageKind::KclModule))
 }
 
-fn detect_kind_at(dir: &Path, marker: &str, kind: PackageKind) -> Option<PackageKind> {
-    if dir.join(marker).is_file() {
+/// Look for a directory matching every name in `markers` (logical AND).
+/// Checks `dir` itself, then one level deep — the latter handles
+/// tarballs that unpack to `<dir>/<pkg-name>/...`. Uses the cached
+/// `DirEntry::file_type()` from the read_dir to skip a redundant
+/// `is_dir()` syscall per child.
+fn detect_kind_at(dir: &Path, markers: &[&str], kind: PackageKind) -> Option<PackageKind> {
+    let all_present = |d: &Path| markers.iter().all(|m| d.join(m).is_file());
+    if all_present(dir) {
         return Some(kind);
     }
     let rd = std::fs::read_dir(dir).ok()?;
     rd.flatten()
-        .find(|e| {
-            let p = e.path();
-            p.is_dir() && p.join(marker).is_file()
-        })
+        .find(|e| e.file_type().map(|ft| ft.is_dir()).unwrap_or(false) && all_present(&e.path()))
         .map(|_| kind)
 }
 
@@ -740,6 +747,58 @@ mod tests {
     use super::*;
 
     // Ref-parsing tests live next to the parser in `oci_transport`.
+
+    #[test]
+    fn detect_kind_recognizes_akua_package_at_root() {
+        // Closes spike-1 issue #2: an Akua Package (the akua.toml +
+        // package.k pair) must classify as KclModule so the resolver
+        // routes it through the KCL ExternalPkg mount path instead of
+        // the helm-chart-synthesis path. Pre-fix: `detect_kind` only
+        // knew Chart.yaml / kcl.mod and silently fell back to
+        // HelmChart for Akua packages — `import upstream` then failed
+        // with `CannotFindModule` because nothing got mounted.
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("akua.toml"), "").unwrap();
+        std::fs::write(tmp.path().join("package.k"), "").unwrap();
+        assert_eq!(detect_kind(tmp.path()), Some(PackageKind::KclModule));
+    }
+
+    #[test]
+    fn detect_kind_recognizes_akua_package_one_level_deep() {
+        // OCI tarballs commonly unpack to `<dir>/<pkg-name>/...` —
+        // detect_kind already searches one level deep for Chart.yaml
+        // and kcl.mod, so the Akua-package branch must too or the
+        // OCI cache-hit path misclassifies.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let nested = tmp.path().join("webapp-1.2.0");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("akua.toml"), "").unwrap();
+        std::fs::write(nested.join("package.k"), "").unwrap();
+        assert_eq!(detect_kind(tmp.path()), Some(PackageKind::KclModule));
+    }
+
+    #[test]
+    fn detect_kind_does_not_classify_lone_akua_toml_as_kcl() {
+        // akua.toml alone could be a workspace manifest. Requiring
+        // package.k alongside is the smallest unambiguous signature.
+        // Without this guard the workspace root would itself match
+        // and the resolver would loop on it.
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("akua.toml"), "").unwrap();
+        assert_eq!(detect_kind(tmp.path()), None);
+    }
+
+    #[test]
+    fn detect_kind_prefers_helm_when_both_markers_present() {
+        // Pathological mixed dir — Chart.yaml wins because the helm
+        // path is what we've shipped historically and we don't want
+        // to silently relabel an existing dep on upgrade.
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("Chart.yaml"), "").unwrap();
+        std::fs::write(tmp.path().join("akua.toml"), "").unwrap();
+        std::fs::write(tmp.path().join("package.k"), "").unwrap();
+        assert_eq!(detect_kind(tmp.path()), Some(PackageKind::HelmChart));
+    }
 
     #[test]
     fn cache_dir_is_content_addressed() {

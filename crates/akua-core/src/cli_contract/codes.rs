@@ -16,6 +16,14 @@ pub const E_LOCK_PARSE: &str = "E_LOCK_PARSE";
 /// found drift. Re-run `akua lock` without `--check` to refresh.
 pub const E_LOCK_DRIFT: &str = "E_LOCK_DRIFT";
 
+/// A dep alias referenced by `import <alias>` (or `pkg.render({package =
+/// "<alias>"})`) in `package.k` resolves to a kind that's unreachable
+/// from KCL. Most common case: an Akua/KCL-module dep was misclassified
+/// as a Helm chart by the resolver, or the user declared a Helm chart
+/// alias they then tried to `import`. `akua lock` catches this before
+/// `akua check` later fails with the opaque `CannotFindModule` from KCL.
+pub const E_DEP_KIND_MISMATCH: &str = "E_DEP_KIND_MISMATCH";
+
 // ----- Render --------------------------------------------------------------
 
 pub const E_PACKAGE_MISSING: &str = "E_PACKAGE_MISSING";

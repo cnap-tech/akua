@@ -64,6 +64,18 @@ pub enum LockError {
     )]
     Drift,
 
+    /// A dep alias is referenced by `import <alias>` (or
+    /// `pkg.render({package = "<alias>"})`) but resolves to a Helm
+    /// chart, not a KCL/Akua module. Surfaced at lock time so
+    /// the user gets a clear message before `akua check` fails
+    /// with KCL's opaque CannotFindModule. Closes spike-1 issue #3.
+    #[error(
+        "dep `{alias}` is referenced by `import {alias}` but resolves as a Helm chart — \
+         only KCL / Akua-package deps can be imported. \
+         Either remove the import or change the dep declaration."
+    )]
+    KindMismatch { alias: String },
+
     #[error("write to stdout failed: {0}")]
     StdoutWrite(#[source] std::io::Error),
 }
@@ -82,6 +94,13 @@ impl LockError {
             }
             LockError::Drift => {
                 StructuredError::new(codes::E_LOCK_DRIFT, self.to_string()).with_default_docs()
+            }
+            LockError::KindMismatch { .. } => {
+                StructuredError::new(codes::E_DEP_KIND_MISMATCH, self.to_string())
+                    .with_suggestion(
+                        "Remove the `import` for this alias, or replace the dep with a path/OCI reference to a KCL or Akua package (akua.toml + package.k, or kcl.mod).",
+                    )
+                    .with_default_docs()
             }
             LockError::StdoutWrite(e) => {
                 StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
@@ -117,6 +136,24 @@ pub fn run<W: Write>(
     let opts = ResolverOptions::online_with(expected_digests);
 
     let resolved = chart_resolver::resolve_with_options(&manifest, args.workspace, &opts)?;
+
+    // Cross-validate: every dep alias the workspace `package.k` imports
+    // must resolve as a KCL/Akua module. Helm-chart deps are reachable
+    // via `helm.template(...)` not `import` — surface the mismatch
+    // here, before writing the lockfile, so the user gets a clear
+    // error pointing at the offending alias instead of `CannotFindModule`
+    // later from `akua check`. Closes spike-1 issue #3.
+    let package_k = args.workspace.join("package.k");
+    if let Ok(source) = std::fs::read_to_string(&package_k) {
+        if let Some(mismatch) = chart_resolver::validate_import_kinds(&source, &resolved)
+            .into_iter()
+            .next()
+        {
+            return Err(LockError::KindMismatch {
+                alias: mismatch.alias,
+            });
+        }
+    }
 
     let mut new_lock = prior_lock.clone();
     chart_resolver::merge_into_lock(&mut new_lock, &resolved);
