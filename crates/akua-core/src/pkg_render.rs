@@ -90,26 +90,64 @@ pub fn expand_sentinels(
 ) -> Result<Vec<YamlValue>, crate::package_k::PackageKError> {
     let mut out = Vec::with_capacity(resources.len());
     for r in resources {
-        if let Some(call) = extract_sentinel(&r) {
-            let nested = render_nested(&call.path, &call.inputs)?;
-            out.extend(nested);
-        } else {
-            out.push(r);
+        match extract_sentinel(&r)? {
+            Some(call) => {
+                let nested = render_nested(&call.path, &call.inputs)?;
+                out.extend(nested);
+            }
+            None => out.push(r),
         }
     }
     Ok(out)
 }
 
+#[derive(Debug)]
 struct SentinelCall {
     path: String,
     inputs: YamlValue,
 }
 
-fn extract_sentinel(v: &YamlValue) -> Option<SentinelCall> {
-    let inner = v.get(SENTINEL_KEY)?;
-    let path = inner.get("path").and_then(YamlValue::as_str)?.to_string();
+/// Returns:
+/// - `Ok(Some(call))` when `v` is a clean sentinel — only the
+///   `SENTINEL_KEY` entry, no sibling fields.
+/// - `Ok(None)` when `v` isn't a sentinel at all (a real resource).
+/// - `Err(PkgRenderPatchUnsupported)` when `v` is a sentinel that
+///   the user has tried to patch via list-comprehension overlay
+///   (e.g. `[r | {metadata.labels: {...}} for r in pkg.render(...)]`).
+///   The expander wholesale-replaces the sentinel entry with the
+///   inner Package's resources, so any sibling fields would silently
+///   disappear — fail loud instead. Closes spike-1 issue #1.
+fn extract_sentinel(
+    v: &YamlValue,
+) -> Result<Option<SentinelCall>, crate::package_k::PackageKError> {
+    let Some(inner) = v.get(SENTINEL_KEY) else {
+        return Ok(None);
+    };
+    if let Some(map) = v.as_mapping() {
+        let extra: Vec<String> = map
+            .iter()
+            .filter_map(|(k, _)| k.as_str())
+            .filter(|s| *s != SENTINEL_KEY)
+            .map(|s| s.to_string())
+            .collect();
+        if !extra.is_empty() {
+            return Err(crate::package_k::PackageKError::PkgRenderPatchUnsupported { keys: extra });
+        }
+    }
+    let path = inner
+        .get("path")
+        .and_then(YamlValue::as_str)
+        .ok_or_else(|| {
+            // Malformed sentinel — `pkg.render` always emits `path`.
+            // Treat as KclEval error since the sentinel itself is the
+            // boundary contract with the KCL plugin handler.
+            crate::package_k::PackageKError::KclEval(format!(
+                "pkg.render sentinel missing required `path` field: {v:?}"
+            ))
+        })?
+        .to_string();
     let inputs = inner.get("inputs").cloned().unwrap_or(YamlValue::Null);
-    Some(SentinelCall { path, inputs })
+    Ok(Some(SentinelCall { path, inputs }))
 }
 
 fn render_nested(
@@ -173,6 +211,57 @@ resources = [{
     metadata.name: input.name
 }]
 "#;
+
+    #[test]
+    fn extract_sentinel_rejects_sibling_keys_with_typed_error() {
+        // Closes spike-1 issue #1. `pkg.render(...)` returns a list
+        // containing one sentinel; if the user list-comprehension-
+        // patches it (e.g. `[r | {labels: {...}} for r in _up]`),
+        // the sentinel ends up with sibling keys. The expander
+        // wholesale-replaces the sentinel — sibling fields would
+        // silently disappear. The fix turns this into a typed error
+        // before expansion runs.
+        let mut map = serde_yaml::Mapping::new();
+        map.insert(
+            YamlValue::String(SENTINEL_KEY.into()),
+            serde_yaml::from_str("path: ./inner\ninputs: { name: hi }\n").unwrap(),
+        );
+        map.insert(
+            YamlValue::String("metadata".into()),
+            serde_yaml::from_str("labels:\n  patched: 'yes'\n").unwrap(),
+        );
+        let patched = YamlValue::Mapping(map);
+
+        let err = extract_sentinel(&patched).expect_err("must reject patched sentinel");
+        match err {
+            crate::package_k::PackageKError::PkgRenderPatchUnsupported { keys } => {
+                assert_eq!(keys, vec!["metadata".to_string()], "got: {keys:?}");
+            }
+            other => panic!("expected PkgRenderPatchUnsupported, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extract_sentinel_returns_none_for_real_resource() {
+        let resource: YamlValue =
+            serde_yaml::from_str("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: hi\n")
+                .unwrap();
+        assert!(matches!(extract_sentinel(&resource), Ok(None)));
+    }
+
+    #[test]
+    fn extract_sentinel_returns_call_for_clean_sentinel() {
+        let mut map = serde_yaml::Mapping::new();
+        map.insert(
+            YamlValue::String(SENTINEL_KEY.into()),
+            serde_yaml::from_str("path: ./inner\ninputs: { name: hi }\n").unwrap(),
+        );
+        let clean = YamlValue::Mapping(map);
+        let call = extract_sentinel(&clean)
+            .expect("ok")
+            .expect("some sentinel call");
+        assert_eq!(call.path, "./inner");
+    }
 
     #[test]
     fn outer_package_expands_inner_pkg_render_sentinel() {

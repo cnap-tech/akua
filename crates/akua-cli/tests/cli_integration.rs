@@ -263,6 +263,67 @@ fn render_path_escape_emits_e_path_escape_with_remediation_suggestion() {
 }
 
 #[test]
+fn render_pkg_render_patched_sentinel_fails_loud() {
+    // Closes spike-1 issue #1. The user's repro:
+    //   _up = pkg.render({path = "./inner"})
+    //   resources = [r | {metadata.labels: {patched: "yes"}} for r in _up]
+    // Pre-fix, this rendered cleanly with the labels silently dropped
+    // — the post-eval expander wholesale-replaced the sentinel with
+    // the inner Package's resources, losing the comprehension's
+    // sibling fields. Now it fails with E_PKG_RENDER_PATCH_UNSUPPORTED
+    // pointing the user at #479 (the real fix is engine-style
+    // pkg.render via reentrant KCL host mutex).
+    let dir = tempdir();
+    let outer = dir.path().join("outer");
+    std::fs::create_dir_all(outer.join("inner")).unwrap();
+
+    std::fs::write(
+        outer.join("inner/akua.toml"),
+        "[package]\nname = \"inner\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        outer.join("inner/package.k"),
+        "resources = [{\n    apiVersion = \"v1\"\n    kind = \"ConfigMap\"\n    metadata.name = \"hi\"\n}]\n",
+    )
+    .unwrap();
+    std::fs::write(
+        outer.join("akua.toml"),
+        "[package]\nname = \"outer\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        outer.join("package.k"),
+        "import akua.pkg\n\
+         _up = pkg.render(pkg.Render { path = \"./inner\" })\n\
+         resources = [r | {metadata.labels = {\"patched\" = \"yes\"}} for r in _up]\n",
+    )
+    .unwrap();
+
+    let out = run(&outer, &["render", "--out", "./deploy", "--json"]);
+    assert_exit(&out, 1);
+
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let parsed: serde_json::Value =
+        serde_json::from_str(stderr.trim()).expect("structured error on stderr");
+    assert_eq!(
+        parsed["code"], "E_PKG_RENDER_PATCH_UNSUPPORTED",
+        "expected E_PKG_RENDER_PATCH_UNSUPPORTED, got {}",
+        parsed["code"]
+    );
+    let msg = parsed["message"].as_str().unwrap_or("");
+    assert!(
+        msg.contains("metadata"),
+        "error message should name the dropped sibling key, got: {msg}"
+    );
+    let suggestion = parsed["suggestion"].as_str().unwrap_or("");
+    assert!(
+        suggestion.contains("479"),
+        "suggestion should reference the engine-plugin follow-up issue, got: {suggestion}"
+    );
+}
+
+#[test]
 fn render_missing_package_surfaces_structured_error_on_stderr() {
     let dir = tempdir();
     let out = run(

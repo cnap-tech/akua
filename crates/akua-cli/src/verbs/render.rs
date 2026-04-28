@@ -27,6 +27,12 @@ const STRICT_MARKER: &str = "strict mode requires every chart";
 /// variant here — only the in-process render path keeps that typing.
 const ESCAPE_MARKER: &str = "escapes the Package directory";
 
+/// Substring of the `PkgRenderPatchUnsupported` Display, sniffed
+/// from the same string-typed envelope. Same rationale as the other
+/// markers — sandboxed renders lose the typed variant on the way
+/// back through the worker boundary.
+const PKG_RENDER_PATCH_MARKER: &str = "pkg.render result has extra sibling keys";
+
 /// User-facing remediation for `E_PATH_ESCAPE`. Emitted as the
 /// `suggestion` field on the structured error so agents have a
 /// machine-readable next-action without parsing the `docs/errors/`
@@ -146,12 +152,35 @@ impl RenderError {
                     StructuredError::new(codes::E_PATH_ESCAPE, msg.clone())
                         .with_suggestion(PATH_ESCAPE_SUGGESTION)
                         .with_default_docs()
+                } else if msg.contains(PKG_RENDER_PATCH_MARKER) {
+                    StructuredError::new(codes::E_PKG_RENDER_PATCH_UNSUPPORTED, msg.clone())
+                        .with_suggestion(
+                            "Apply patches inline in the inner Package's `resources` (the upstream gets to do the merge), \
+                             or wait for the engine-style pkg.render plugin (cnap-tech/akua#479) which lets list-comprehension \
+                             patches + filters work naturally.",
+                        )
+                        .with_default_docs()
                 } else {
                     StructuredError::new(codes::E_RENDER_KCL, msg.clone()).with_default_docs()
                 }
             }
             RenderError::PackageK(PackageKError::InputJson(e)) => {
                 StructuredError::new(codes::E_INPUTS_PARSE, e.to_string()).with_default_docs()
+            }
+            RenderError::PackageK(PackageKError::PkgRenderPatchUnsupported { keys }) => {
+                StructuredError::new(
+                    codes::E_PKG_RENDER_PATCH_UNSUPPORTED,
+                    format!(
+                        "pkg.render result has extra sibling keys ({}) that would be lost at sentinel expansion",
+                        keys.join(", ")
+                    ),
+                )
+                .with_suggestion(
+                    "Apply patches inline in the inner Package's `resources` (the upstream gets to do the merge), \
+                     or wait for the engine-style pkg.render plugin (cnap-tech/akua#479) which lets list-comprehension \
+                     patches + filters work naturally.",
+                )
+                .with_default_docs()
             }
             RenderError::PackageK(PackageKError::PathEscape(
                 inner @ akua_core::kcl_plugin::PathError::StrictRequiresTypedImport(_),
@@ -513,20 +542,28 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    /// `to_structured`'s `KclEval` arm sniffs the message for
-    /// `STRICT_MARKER` and `ESCAPE_MARKER` to recover a typed error
-    /// code from KCL's opaque plugin-panic envelope. If one marker
-    /// were a substring of the other, the order-dependent
-    /// `if/else if` chain would silently misroute one of them.
-    /// Pin both markers as disjoint here so a future edit to either
-    /// can't break this without tripping the test.
+    /// `to_structured`'s `KclEval` arm sniffs the message for several
+    /// markers to recover a typed error code from KCL's opaque plugin-
+    /// panic envelope. If any marker were a substring of another, the
+    /// order-dependent `if/else if` chain would silently misroute one
+    /// of them. Pin all of them as pairwise-disjoint here so a future
+    /// edit to any can't break this without tripping the test.
     #[test]
     fn render_error_markers_are_substring_disjoint() {
-        assert!(
-            !STRICT_MARKER.contains(ESCAPE_MARKER) && !ESCAPE_MARKER.contains(STRICT_MARKER),
-            "STRICT_MARKER and ESCAPE_MARKER must not be substrings of each other; \
-             got STRICT={STRICT_MARKER:?} ESCAPE={ESCAPE_MARKER:?}"
-        );
+        let markers = [
+            ("STRICT_MARKER", STRICT_MARKER),
+            ("ESCAPE_MARKER", ESCAPE_MARKER),
+            ("PKG_RENDER_PATCH_MARKER", PKG_RENDER_PATCH_MARKER),
+        ];
+        for (i, (a_name, a)) in markers.iter().enumerate() {
+            for (b_name, b) in markers.iter().skip(i + 1) {
+                assert!(
+                    !a.contains(b) && !b.contains(a),
+                    "{a_name} and {b_name} must not be substrings of each other; \
+                     got {a_name}={a:?} {b_name}={b:?}"
+                );
+            }
+        }
     }
 
     const MINIMAL_PACKAGE: &str = r#"
