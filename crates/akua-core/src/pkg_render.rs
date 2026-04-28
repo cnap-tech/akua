@@ -461,5 +461,4 @@ resources = pkg.render({{ path = "{next}" }})"#
             "expected depth-limit rejection, got: {err}"
         );
     }
-
 }

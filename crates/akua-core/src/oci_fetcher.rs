@@ -513,8 +513,7 @@ fn find_package_root(cache_dir: &Path, kind: PackageKind) -> Result<PathBuf, Oci
         PackageKind::HelmChart => &["Chart.yaml"],
         PackageKind::KclModule => &["kcl.mod", "package.k"],
     };
-    let has_marker =
-        |dir: &Path| -> bool { markers.iter().any(|m| dir.join(m).is_file()) };
+    let has_marker = |dir: &Path| -> bool { markers.iter().any(|m| dir.join(m).is_file()) };
 
     if has_marker(cache_dir) {
         return Ok(cache_dir.to_path_buf());

@@ -65,7 +65,11 @@ const DEADLINE_BUDGET_SUGGESTION: &str =
 /// `render_error_markers_are_substring_disjoint` test pins the
 /// markers as pairwise-disjoint so any order would be correct.
 const KCL_EVAL_MARKER_TABLE: &[(&str, &str, &str)] = &[
-    (STRICT_MARKER, codes::E_STRICT_UNTYPED_CHART, STRICT_SUGGESTION),
+    (
+        STRICT_MARKER,
+        codes::E_STRICT_UNTYPED_CHART,
+        STRICT_SUGGESTION,
+    ),
     (ESCAPE_MARKER, codes::E_PATH_ESCAPE, PATH_ESCAPE_SUGGESTION),
     (CYCLE_MARKER, codes::E_RENDER_CYCLE, CYCLE_SUGGESTION),
     (

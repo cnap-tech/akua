@@ -45,6 +45,12 @@ tasks:
       - cargo check --workspace
       - cargo clippy --workspace --all-targets -- -D warnings
 
+  hooks:install:
+    desc: Wire `.githooks/` as this repo's hooks dir (sets `core.hooksPath`)
+    cmds:
+      - git config core.hooksPath .githooks
+      - echo "git hooks → .githooks (run \`git config --unset core.hooksPath\` to disable)"
+
   fmt:
     desc: Format Rust code
     cmds:
