@@ -218,7 +218,7 @@ impl Session {
     /// Instantiate the engine from a source `.wasm` slice — wasmtime
     /// JIT-compiles at first call. Used by build modes that ship the
     /// 3x-smaller source `.wasm` instead of the AOT'd `.cwasm` (e.g.
-    /// `@akua/sdk`'s npm distribution). Cold init pays the compile
+    /// `@akua-dev/sdk`'s npm distribution). Cold init pays the compile
     /// cost (~5–10s for helm-engine); subsequent renders are
     /// engine-call latency only.
     pub fn init_from_wasm(wasm: &[u8], spec: EngineSpec) -> Result<Self, EngineHostError> {

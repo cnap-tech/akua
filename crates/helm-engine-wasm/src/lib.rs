@@ -19,7 +19,7 @@ use engine_host_wasm::{EngineSpec, SessionSlot};
 use serde::{Deserialize, Serialize};
 
 /// Embedded engine bytes — AOT-compiled `.cwasm` (default) or source
-/// `.wasm` (with `precompile` feature OFF, for the `@akua/sdk` npm
+/// `.wasm` (with `precompile` feature OFF, for the `@akua-dev/sdk` npm
 /// distribution where binary size matters more than cold-start
 /// latency). `IS_PRECOMPILED` tags which API path on
 /// [`engine_host_wasm::Session`] to take.

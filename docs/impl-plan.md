@@ -1,6 +1,6 @@
 # Implementation Plan
 
-> **Purpose.** Concrete, agent-executable plan for pivoting the akua codebase from v0.3 (`package.yaml` / JSON-Schema era) to the interface-spec target (KCL-authored Packages, Rego-authored Policies, 30 verbs, `@akua/sdk` parity, embedded multi-engine pipeline). Phasing lives in [`roadmap.md`](./roadmap.md); this doc is the "how."
+> **Purpose.** Concrete, agent-executable plan for pivoting the akua codebase from v0.3 (`package.yaml` / JSON-Schema era) to the interface-spec target (KCL-authored Packages, Rego-authored Policies, 30 verbs, `@akua-dev/sdk` parity, embedded multi-engine pipeline). Phasing lives in [`roadmap.md`](./roadmap.md); this doc is the "how."
 
 akua is a pre-alpha project; the pivot is a **surgical rewrite, not a greenfield one.** Most of v0.3 (OCI client, fetch, security guards, Helm engine embedding, attestation) is carry-forward. The authoring vocabulary and verb surface are what change.
 
@@ -18,7 +18,7 @@ akua is a pre-alpha project; the pivot is a **surgical rewrite, not a greenfield
 | `crates/akua-core/src/metadata.rs` | `.akua/metadata.yaml` provenance — still useful |
 | `crates/helm-engine-wasm/` | Embedded Helm v4 via wasip1 — the `helm.template()` callable target |
 | `crates/akua-core/src/tar_security.rs` (implicit) | Tar extraction guards — P0 security fixes stay |
-| `packages/sdk/src/oci.ts` | `@akua/sdk` OCI pull primitives — reusable |
+| `packages/sdk/src/oci.ts` | `@akua-dev/sdk` OCI pull primitives — reusable |
 
 ### Rewrite (shape changes)
 
@@ -100,7 +100,7 @@ Within each phase, tasks execute in a partially ordered DAG. Agents pick up any 
    idempotency, agent detection)
 
   [A.5] akua render (KCL-only)     ──┐
-                                     ├─▶  [A.8] @akua/sdk render parity
+                                     ├─▶  [A.8] @akua-dev/sdk render parity
   [A.6] akua publish + verify      ──┘
 ```
 
@@ -152,7 +152,7 @@ Each task below is sized for a single agent session (~1–3 hours of focused wor
 - Deliverable: `examples/01-hello-webapp/Package.k` + `examples/01-hello-webapp/App.k` + a `README.md` that walks author → render → publish → verify. Used as the exit gate.
 - Depends on: A.5, A.6.
 
-**A.8 — `@akua/sdk` render parity**
+**A.8 — `@akua-dev/sdk` render parity**
 - Spec: [`sdk.md`](./sdk.md)
 - Deliverable: `packages/sdk/src/render.ts` produces byte-identical output to `akua render` for the same inputs. Same for `publish` and `verify`.
 - Tests: cross-consumer determinism test (CLI output hash == SDK output hash).
@@ -285,7 +285,7 @@ Every phase's exit gate includes one of the existing examples in [`examples/`](.
 Additional cross-cutting checks:
 
 - **Determinism.** `akua render` on any example, run three times, produces byte-identical output. Run in CI.
-- **CLI / SDK parity.** Every verb that produces output is called from both `akua <verb>` and `@akua/sdk.<verb>()`; outputs must match byte-for-byte. Run in CI.
+- **CLI / SDK parity.** Every verb that produces output is called from both `akua <verb>` and `@akua-dev/sdk.<verb>()`; outputs must match byte-for-byte. Run in CI.
 - **Agent contract.** `akua whoami --json` exposes the agent context correctly under `CLAUDECODE=1` / `CURSOR_CLI=1` / `GEMINI_CLI=1` / `AGENT=foo`. CI matrix runs verbs under each.
 - **Policy gate.** The rewrite branch maintains a passing `akua policy check` against `tier/production`. Merges to main require green.
 

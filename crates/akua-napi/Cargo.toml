@@ -8,7 +8,7 @@ authors.workspace = true
 publish = false
 
 # Native Node.js addon exposing `akua-core` via napi-rs. JS consumers
-# (`@akua/sdk`) load the per-platform `.node` binary via the standard
+# (`@akua-dev/sdk`) load the per-platform `.node` binary via the standard
 # `optionalDependencies` pattern (the loader stub picks the right
 # arch/libc, mirroring @swc/core / @biomejs/biome / lightningcss).
 #

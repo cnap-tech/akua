@@ -1,5 +1,5 @@
 //! `akua-wasm` — browser/Node/Deno/Bun-facing WASM bundle for
-//! `@akua/sdk`. Lightweight `wasm-bindgen` wrapper around
+//! `@akua-dev/sdk`. Lightweight `wasm-bindgen` wrapper around
 //! `akua-core`'s pure-KCL render path.
 //!
 //! Scope for v0.1.0 first slice: a single `render(source, inputs)`

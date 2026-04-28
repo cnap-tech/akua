@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/cnap-tech/akua/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/cnap-tech/akua/ci.yml?branch=main&label=CI&style=flat-square"></a>
   <a href="https://github.com/cnap-tech/akua/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/cnap-tech/akua?label=release&style=flat-square"></a>
-  <a href="https://jsr.io/@akua/sdk"><img alt="JSR" src="https://img.shields.io/jsr/v/%40akua/sdk?style=flat-square&label=%40akua%2Fsdk"></a>
+  <a href="https://www.npmjs.com/package/@akua-dev/sdk"><img alt="npm" src="https://img.shields.io/npm/v/%40akua-dev%2Fsdk?style=flat-square&label=%40akua-dev%2Fsdk"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square"></a>
   <a href="#status"><img alt="Status" src="https://img.shields.io/badge/status-alpha-yellow?style=flat-square"></a>
 </p>
@@ -85,8 +85,8 @@ cargo install --git https://github.com/cnap-tech/akua akua-cli
 ```
 
 ```sh
-# TypeScript SDK — in-process WASM, no binary required for pure-compute verbs
-bun add jsr:@akua/sdk
+# TypeScript SDK — in-process via napi, no `akua` binary on PATH
+bun add @akua-dev/sdk
 
 # Agent skills (universal — works across 25+ agents)
 npx skills install github:cnap-tech/akua/skills

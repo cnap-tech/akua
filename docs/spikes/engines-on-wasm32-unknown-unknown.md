@@ -2,9 +2,9 @@
 
 ## Context
 
-Phase 4 shipped `akua-wasm` compiling the KCL render path to `wasm32-unknown-unknown`. `@akua/sdk` v0.0.0 consumes the Node build; `Akua.renderSource()` renders pure-KCL Packages in-process.
+Phase 4 shipped `akua-wasm` compiling the KCL render path to `wasm32-unknown-unknown`. `@akua-dev/sdk` v0.0.0 consumes the Node build; `Akua.renderSource()` renders pure-KCL Packages in-process.
 
-The remaining Phase 4B gap is **engine callouts from the browser**: `helm.template(...)` and `kustomize.build(...)` are implemented as Go engines compiled to `wasm32-wasip1`, hosted inside the CLI's wasmtime Engine via the `engine-host-wasm` crate. That shape works on the CLI (`akua render`) and on `@akua/sdk` for Node (bundled CLI binary — though the SDK today wires only `renderSource`, not the helm/kustomize callouts). It does **not** work in the browser: there's no wasmtime, no WASI host, and the `env::kcl_plugin_invoke_json_wasm` bridge has no one to answer it.
+The remaining Phase 4B gap is **engine callouts from the browser**: `helm.template(...)` and `kustomize.build(...)` are implemented as Go engines compiled to `wasm32-wasip1`, hosted inside the CLI's wasmtime Engine via the `engine-host-wasm` crate. That shape works on the CLI (`akua render`) and on `@akua-dev/sdk` for Node (bundled CLI binary — though the SDK today wires only `renderSource`, not the helm/kustomize callouts). It does **not** work in the browser: there's no wasmtime, no WASI host, and the `env::kcl_plugin_invoke_json_wasm` bridge has no one to answer it.
 
 v0.1.0 blocks on deciding what to do. This doc enumerates the candidates and records the call.
 
@@ -36,7 +36,7 @@ Keep the existing `.wasm` artifacts; load them in the browser through a WASI-in-
 
 Estimate: 1-2 weeks of JS runtime wrangling + perf work. Uncertain whether the perf budget is reachable.
 
-### C. Punt browser to v0.2.0. Ship `@akua/sdk` Node-only for v0.1.0.
+### C. Punt browser to v0.2.0. Ship `@akua-dev/sdk` Node-only for v0.1.0.
 
 - **Pros:**
   - v0.1.0 ships this quarter, not next.
@@ -52,18 +52,18 @@ Estimate: zero engineering; just docs + release-note framing.
 
 ## Decision
 
-**C. Ship `@akua/sdk` v0.1.0 Node-only. Punt browser to v0.2.0.**
+**C. Ship `@akua-dev/sdk` v0.1.0 Node-only. Punt browser to v0.2.0.**
 
 Reasoning:
 
 1. **The v0.1.0 security-invariant promise is already kept by what ships.** Phase 4's sandbox + Phase 4B's Node build + adversarial suite are the load-bearing pieces. Browser is a deployment-target question, not an invariant question.
 2. **The agent-first positioning doesn't need browser.** Agents (Claude Code, Cursor, Codex, etc.) run on Linux sandboxes with Node or bun. That's the user. Browser matters for `akua.dev/playground` and embedded audit UIs — important, not v0.1.0-critical.
 3. **Both engineering candidates are uncertain + multi-week.** Option A risks fork divergence; option B risks perf blowout. Either delays v0.1.0 by >2 weeks with real risk of further slipping.
-4. **The punt is additive.** `package.json` conditional exports are already structured for a `"browser"` condition; adding it in v0.2.0 is a minor version bump, not a breaking change. Consumers who import `@akua/sdk` today keep working.
+4. **The punt is additive.** `package.json` conditional exports are already structured for a `"browser"` condition; adding it in v0.2.0 is a minor version bump, not a breaking change. Consumers who import `@akua-dev/sdk` today keep working.
 
 ## What lands for v0.1.0 under this decision
 
-- `@akua/sdk` ships to JSR with Node-loadable WASM bundle (`packages/sdk/wasm/nodejs/`) only.
+- `@akua-dev/sdk` ships to JSR with Node-loadable WASM bundle (`packages/sdk/wasm/nodejs/`) only.
 - `package.json` / `jsr.json` `exports` condition on `"node"` + `"default"` (both resolve to the same ESM module for now — `"default"` exists so Deno + Bun still resolve something).
 - No `packages/sdk/wasm/browser/` directory in v0.1.0 publish. Dry-run verifies.
 - Release notes explicitly name "Node 20+" (+ Deno + Bun via Node-compat runtime resolution) as the v0.1.0 target.

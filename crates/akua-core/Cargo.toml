@@ -19,7 +19,7 @@ precompile-engines = [
 ]
 # SDK type emission — off by default. `ts-export` makes the CLI
 # contract types `derive(ts_rs::TS)` so they can be exported as TS
-# sources for `@akua/sdk`. `schema-export` does the same for
+# sources for `@akua-dev/sdk`. `schema-export` does the same for
 # schemars (JSON Schema bundle). Both are build-time only; zero
 # cost in production builds. Triggered by the emission test in
 # akua-cli (`cargo test -p akua-cli --features schema-export,ts-export`).

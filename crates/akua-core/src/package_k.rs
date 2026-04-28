@@ -279,7 +279,7 @@ pub struct LintIssue {
 
 /// Parse a KCL source buffer and return any parse / load errors. Pure;
 /// no execution, no filesystem read. Pair entry point for
-/// `wasm32-unknown-unknown` consumers and `@akua/sdk`'s in-process
+/// `wasm32-unknown-unknown` consumers and `@akua-dev/sdk`'s in-process
 /// `lint` verb. `filename` is used for diagnostic rendering only —
 /// KCL doesn't touch it on disk when `sources` is populated.
 pub fn lint_kcl_source(filename: &str, source: &str) -> Result<Vec<LintIssue>, PackageKError> {

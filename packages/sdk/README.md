@@ -1,31 +1,29 @@
-# @akua/sdk
+# @akua-dev/sdk
 
-TypeScript SDK for [akua](https://github.com/cnap-tech/akua). Pure-compute verbs run in-process via a bundled WASM module — no `akua` binary required. Network- and OS-dependent verbs shell out to the CLI.
+TypeScript SDK for [akua](https://github.com/cnap-tech/akua). Every verb runs in-process via a bundled native addon (napi-rs) — same `akua-core` the CLI uses, no `akua` binary on `$PATH` required.
 
 ## Install
 
 ```sh
-bun  add jsr:@akua/sdk
-deno add jsr:@akua/sdk
-pnpm add jsr:@akua/sdk
-npm  install jsr:@akua/sdk
+bun  add @akua-dev/sdk
+pnpm add @akua-dev/sdk
+npm  install @akua-dev/sdk
 ```
 
-Node 20+ / Deno / Bun. Browser in v0.2.0 — the crate + bundler-target build are ready; engine bundling is the gating decision.
+Node 22+ / Bun 1.3+. Browser target deferred to v0.2.x (the napi addon is host-side; a `wasm32-unknown-unknown` bundle is the path forward — see [docs/spikes/engines-on-wasm32-unknown-unknown.md](../../docs/spikes/engines-on-wasm32-unknown-unknown.md)).
+
+`bun add` resolves the right per-platform binary via `optionalDependencies` on `@akua-dev/native-{darwin,linux,win32}-*`. The meta package is `@akua-dev/native`; the SDK depends on it transitively.
 
 ## Usage
 
 ```ts
-import { Akua, AkuaUserError, AkuaRateLimitedError } from '@akua/sdk';
+import { Akua, AkuaUserError, AkuaRateLimitedError } from '@akua-dev/sdk';
 
 const akua = new Akua();
 
-// WASM, in-process — no binary needed
 const yaml = await akua.renderSource('package.k', PACKAGE_K_SOURCE, { replicas: 3 });
 const lint = await akua.lint({ package: './package.k' });
 const tree = await akua.tree({ workspace: '.' });
-
-// Shell-out — needs `akua` on PATH for verbs that aren't yet WASM
 const summary = await akua.render({ package: './package.k', out: './deploy' });
 ```
 
@@ -41,20 +39,9 @@ try {
 }
 ```
 
-## Transport per verb (v0.1.0)
-
-| Verb | Transport | Binary required? |
-|---|---|---|
-| `renderSource`, `check`, `lint`, `fmt`, `inspect` (package), `tree`, `diff` | WASM | no |
-| `render`, `verify`, `version`, `whoami` | shell-out | yes |
-| `add`, `publish`, `pull`, `push`, `pack`, `sign`, `lock`, `update`, `cache`, `auth`, `dev`, `repl` | not yet wired (shell-out only via CLI) | yes |
-| `inspect` (tarball mode) | deferred to v0.2.0 | — |
-
-Override the binary path when shell-out is needed: `new Akua({ binary: '/path/to/akua' })`.
-
 ## Examples
 
-Runnable recipes in [`examples/`](examples/). Run any of them directly — they exercise WASM paths and need no binary:
+Runnable recipes in [`examples/`](examples/):
 
 ```sh
 bun run packages/sdk/examples/01-render-source.ts
@@ -74,38 +61,22 @@ Drift is guarded by `task sdk:check` — regenerate + `git diff --exit-code`.
 ```sh
 task sdk:gen             # regenerate types + schema from Rust
 task sdk:check           # regenerate + diff-check (wired into `task ci`)
-task sdk:test            # bun test (no binary required for the WASM-backed tests)
-task sdk:e2e             # build akua CLI, then run every SDK test with AKUA_E2E=1
-task sdk:publish:check   # dry-run `jsr publish`
+task sdk:build           # bun bundle + tsc declarations → packages/sdk/dist/
+task sdk:test            # bun test (uses the bundled native addon)
+task sdk:publish:check   # npm pack --dry-run
 ```
 
 ## Release flow
 
 SDK versions float independently of the Rust crate version — a wrapper-layer fix ships without rebuilding the binary.
 
-1. Land changes on `main`; `task ci` must be green (includes `sdk:check` drift guard).
-2. `task sdk:publish:check` locally to confirm the JSR manifest + slow-type check pass.
-3. Push tag `sdk-v<semver>`:
+1. Land changes on `main`; `task ci` must be green.
+2. Tag the matching `@akua-dev/native` first (`native-v<semver>`), let the matrix CI publish 8 native packages.
+3. Tag `sdk-v<semver>` — `.github/workflows/sdk-release.yml` regenerates types + schema, runs the drift guard, verifies the matching native is on npm, and publishes via npm OIDC trusted publishing (no token).
 
-   ```sh
-   git tag sdk-v0.1.0
-   git push origin sdk-v0.1.0
-   ```
-
-4. `.github/workflows/sdk-release.yml` regenerates types + schema on the runner (so a stale local checkout can't leak), runs the drift guard, overwrites `jsr.json.version` from the tag suffix, and publishes via JSR's OIDC auth (no PAT).
-
-### Publish guards
-
-Three layers, stackable:
-
-- **JSR auth**: `bunx jsr publish` without `--dry-run` requires either an OIDC-signed CI run or an interactive JSR auth token. No one can publish by typo-ing a command in a shell without authenticating.
-- **Tag gate**: the workflow only runs on `sdk-v*` tags (`workflow_dispatch` supports dry-run only by default).
-- **Dirty-check**: `jsr publish` refuses to publish without `--allow-dirty` when the working tree has uncommitted changes.
-
-`package.json` has `"private": true`, but note that JSR reads `jsr.json` preferentially — that flag is only effective against `npm publish`, not `jsr publish`. The three guards above are what actually prevent accidents.
+See [`.github/workflows/sdk-release.yml`](../../.github/workflows/sdk-release.yml) and [`.github/workflows/native-release.yml`](../../.github/workflows/native-release.yml) for the matrix.
 
 ## Still coming
 
-- Browser target — bundler-build is staged; blocked on helm/kustomize on `wasm32-unknown-unknown` (see [docs/spikes/engines-on-wasm32-unknown-unknown.md](../../docs/spikes/engines-on-wasm32-unknown-unknown.md)).
-- Remaining network / OS-dependent verbs (`add`, `publish`, `pull`, `push`, `lock`, `update`, `cache`, `auth`, `dev`). Each will ship as a thin shell-out wrapper; the WASM bundle stays focused on pure-compute verbs.
-- Signed OCI publish of `src/schemas/akua.json` to `ghcr.io/cnap-tech/akua/schemas:v1` for polyglot consumers.
+- Browser target — bundler-build path requires `helm-engine-wasm` / `kustomize-engine-wasm` to compile to `wasm32-unknown-unknown` (currently `wasm32-wasip1` only). See [docs/spikes/engines-on-wasm32-unknown-unknown.md](../../docs/spikes/engines-on-wasm32-unknown-unknown.md).
+- Engine `.wasm` deduplicated across platform packages via a single `@akua-dev/native-engines` package — currently each per-platform addon embeds its own copy.

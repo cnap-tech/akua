@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
-# Phase 4B: minimal JS-facing surface for `@akua/sdk`. Exports a
+# Phase 4B: minimal JS-facing surface for `@akua-dev/sdk`. Exports a
 # `render()` function that evaluates pure-KCL Packages inside the
 # browser / Node / Deno / Bun via `wasm-bindgen`. Engine callouts
 # (`helm.template`, `kustomize.build`) are not yet wired — Packages

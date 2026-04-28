@@ -1,4 +1,4 @@
-# @akua/sdk — TypeScript SDK
+# @akua-dev/sdk — TypeScript SDK
 
 Programmatic access to akua capabilities for Node.js and the browser. Mirrors the CLI surface where appropriate; differs where the context demands it.
 
@@ -7,19 +7,19 @@ Programmatic access to akua capabilities for Node.js and the browser. Mirrors th
 ## Install
 
 ```sh
-bun add @akua/sdk
+bun add @akua-dev/sdk
 # or
-npm install @akua/sdk
+npm install @akua-dev/sdk
 ```
 
-Published to [JSR](https://jsr.io/@akua/sdk). ESM-only. Node 20+ or any modern browser.
+Published to [npm](https://www.npmjs.com/package/-dev/sdk). ESM-only. Node 20+ or any modern browser.
 
 ---
 
 ## Single entry point
 
 ```ts
-import { Akua } from '@akua/sdk';
+import { Akua } from '@akua-dev/sdk';
 ```
 
 One import path for every runtime. The shipped artifact ships both a Node-loadable wasm bundle (via wasm-pack `--target nodejs`) and, once browser support lands, a browser-loadable bundle — the right one is picked automatically through `package.json` conditional exports (`"node"` / `"browser"` / `"default"`). Callers don't choose; the runtime does.
@@ -62,7 +62,7 @@ See [security-model.md](security-model.md) for the sandbox-layers table and [spi
 ## Quickstart (Node)
 
 ```ts
-import { Akua } from '@akua/sdk';
+import { Akua } from '@akua-dev/sdk';
 
 const akua = new Akua({
   binary: 'akua',               // path; default: 'akua' (PATH)
@@ -825,7 +825,7 @@ try {
 
 ## Browser
 
-Same `Akua` class, same single `@akua/sdk` import. When the browser build + engine bundling (see [docs/roadmap.md § Phase 4B](roadmap.md#phase-4b--akua-wasm-for-jsr-delivery-blocks-v010)) land, the `"browser"` conditional export resolves to a bundler-target WASM build that loads the Rust core once, lazily, and runs render / diff / verify / inspect entirely in-page. No CLI shell-out — `execFile` isn't available in the browser, and SDK methods that would need it throw `E_WRITE_UNSUPPORTED_IN_BROWSER`.
+Same `Akua` class, same single `@akua-dev/sdk` import. When the browser build + engine bundling (see [docs/roadmap.md § Phase 4B](roadmap.md#phase-4b--akua-wasm-for-jsr-delivery-blocks-v010)) land, the `"browser"` conditional export resolves to a bundler-target WASM build that loads the Rust core once, lazily, and runs render / diff / verify / inspect entirely in-page. No CLI shell-out — `execFile` isn't available in the browser, and SDK methods that would need it throw `E_WRITE_UNSUPPORTED_IN_BROWSER`.
 
 Expected availability in-browser once shipped:
 
@@ -881,4 +881,4 @@ The SDK's types mirror the underlying format specs. For the authoritative data s
 - **Embedded engines** (`engine?: 'auto' | 'embedded'`) — [embedded-engines.md](embedded-engines.md)
 - **Agent usage + auto-detection** — [agent-usage.md](agent-usage.md)
 
-TypeScript types in `@akua/sdk` are generated from the same akua-specified schemas the CLI consumes (Package, Policy, akua.toml — the shapes akua owns), so a field shape in the SDK always matches the file-format spec. When the spec evolves, the generated types follow on the next `@akua/sdk` release.
+TypeScript types in `@akua-dev/sdk` are generated from the same akua-specified schemas the CLI consumes (Package, Policy, akua.toml — the shapes akua owns), so a field shape in the SDK always matches the file-format spec. When the spec evolves, the generated types follow on the next `@akua-dev/sdk` release.

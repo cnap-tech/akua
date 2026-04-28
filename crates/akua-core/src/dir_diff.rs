@@ -136,7 +136,7 @@ pub fn diff(before: &Path, after: &Path) -> Result<DirDiff, DirDiffError> {
 }
 
 /// Diff two `{relative_path → sha256-hex}` maps. Pure function — no
-/// filesystem access; the caller (typically `@akua/sdk`'s `diff`
+/// filesystem access; the caller (typically `@akua-dev/sdk`'s `diff`
 /// verb or a WASM host that lacks `std::fs`) pre-walks the trees and
 /// hashes each file.
 ///

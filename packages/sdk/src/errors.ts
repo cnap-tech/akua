@@ -1,4 +1,4 @@
-// Error hierarchy for `@akua/sdk`. Consumers branch either via
+// Error hierarchy for `@akua-dev/sdk`. Consumers branch either via
 // `instanceof AkuaUserError` (stack name preserved per subclass) or
 // by reading `err.structured.code` — the stable `E_*` identifier
 // cli-contract §1.2 guarantees.

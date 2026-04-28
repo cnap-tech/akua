@@ -1,4 +1,4 @@
-# @akua/sdk examples
+# @akua-dev/sdk examples
 
 Runnable recipes showing each of the SDK's verbs. Every file is a
 standalone `bun run <file>` target — no configuration, no CLI binary

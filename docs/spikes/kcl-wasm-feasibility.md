@@ -7,7 +7,7 @@ Date: 2026-04-24. Task: #408. Blocks: Phase 4 + Phase 4B + v0.1.0.
 Can `kcl-lang` compile to WebAssembly targets without maintaining a fork? Specifically:
 
 1. **wasm32-wasip1** (Phase 4 — CLI wasmtime-hosted render)
-2. **wasm32-unknown-unknown** (Phase 4B — `@akua/sdk` via JSR, browser + JS runtimes)
+2. **wasm32-unknown-unknown** (Phase 4B — `@akua-dev/sdk` via JSR, browser + JS runtimes)
 
 ## Method
 

@@ -66,7 +66,7 @@ node packages/sdk/spike/helm-engine-via-node-wasi.ts
 ```
 
 Both files are deliberately self-contained and short. They are not
-shipped with `@akua/sdk`; deletion is tracked alongside #459 once
+shipped with `@akua-dev/sdk`; deletion is tracked alongside #459 once
 the production code lands and the spike read-out is captured in
 [`docs/spikes/engines-on-wasm32-unknown-unknown.md`](../../../docs/spikes/engines-on-wasm32-unknown-unknown.md)
 (#466).

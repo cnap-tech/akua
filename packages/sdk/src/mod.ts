@@ -127,7 +127,7 @@ export interface AkuaOptions {
 	/**
 	 * Reserved for future configuration knobs (cache dir, log
 	 * threshold, etc.). Currently empty — every method routes through
-	 * the bundled native addon (`@akua/native` per platform), so
+	 * the bundled native addon (`@akua-dev/native` per platform), so
 	 * there's no binary path to override.
 	 */
 }

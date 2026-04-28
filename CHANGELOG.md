@@ -4,17 +4,23 @@ All notable changes to Akua will be documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
-once v1 ships. Until then, `@akua/sdk` versions bump independently of the
+once v1 ships. Until then, `@akua-dev/sdk` versions bump independently of the
 Rust workspace; breaking changes to `v1alpha1` data shapes trigger a
 minor bump in the SDK.
 
-## @akua/sdk — [0.6.0] — 2026-04-27
+> **Note:** the SDK was published as `@akua/sdk` on JSR through 0.5.0.
+> Starting with 0.6.0 it ships as `@akua-dev/sdk` on npm — JSR's 20 MB
+> single-file/total-package cap is incompatible with the bundled napi
+> addon (~129 MB compressed across the per-platform packages).
 
-The SDK pivots from the chart-tooling shape (`pullChart`,
-`packChart`, `pullChartStream`, `inspectChartBytes` — last shipped
-as 0.5.0) to a CLI-mirror shape: an `Akua` class whose methods map
-1:1 to the binary's verbs. Same `--json` envelopes, same typed
-errors, all in-process.
+## @akua-dev/sdk — [0.6.0] — 2026-04-27
+
+The SDK moves from JSR to npm and renames to `@akua-dev/sdk`. This is
+also the version that pivots from the chart-tooling shape (`pullChart`,
+`packChart`, `pullChartStream`, `inspectChartBytes` — last shipped as
+`@akua/sdk` 0.5.0) to a CLI-mirror shape: an `Akua` class whose methods
+map 1:1 to the binary's verbs. Same `--json` envelopes, same typed
+errors, all in-process via a bundled napi addon.
 
 ### Added
 
@@ -28,8 +34,8 @@ errors, all in-process.
     consumers.
 - Full feature parity with the binary in-process — Helm + Kustomize
   engines, OCI fetch, cosign verify, JSON Schema / OpenAPI export.
-  No `akua` binary on `$PATH`, no shell-out. Native addon (`@akua/
-  native`, per-platform via Node-API / napi-rs) for the
+  No `akua` binary on `$PATH`, no shell-out. Native addon
+  (`@akua-dev/native`, per-platform via Node-API / napi-rs) for the
   feature-rich path; the existing `akua-wasm` bundle stays for the
   pure-KCL fast path and browser targets.
 - `renderSource({ source, package, packageFilename, packageDir,

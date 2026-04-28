@@ -185,7 +185,7 @@ tasks:
       - ls -lh {{.RENDER_WORKER_WASM}}
 
   build:akua-wasm:
-    desc: Build the @akua/sdk WASM bundle (wasm32-unknown-unknown + wasm-bindgen)
+    desc: Build the @akua-dev/sdk WASM bundle (wasm32-unknown-unknown + wasm-bindgen)
     sources:
       - crates/akua-wasm/**/*.rs
       - crates/akua-wasm/Cargo.toml
@@ -195,14 +195,14 @@ tasks:
       - "{{.AKUA_WASM_PKG}}/akua_wasm.d.ts"
     cmds:
       # `--target bundler` leaves the import shape neutral — the
-      # eventual `@akua/sdk` wrapper adds the runtime-aware loader
+      # eventual `@akua-dev/sdk` wrapper adds the runtime-aware loader
       # (Node fs.readFile vs fetch() in the browser). `web`/`nodejs`
       # targets lock in one runtime; we want one artifact for all.
       - wasm-pack build crates/akua-wasm --target bundler --release --out-dir pkg
       - ls -lh {{.AKUA_WASM_PKG}}
 
   build:akua-wasm:nodejs:
-    desc: Build a Node-loadable copy of akua-wasm + stage it into @akua/sdk
+    desc: Build a Node-loadable copy of akua-wasm + stage it into @akua-dev/sdk
     sources:
       - crates/akua-wasm/**/*.rs
       - crates/akua-wasm/Cargo.toml

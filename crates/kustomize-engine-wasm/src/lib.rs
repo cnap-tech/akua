@@ -12,7 +12,7 @@ use engine_host_wasm::{EngineSpec, SessionSlot};
 use serde::{Deserialize, Serialize};
 
 /// Embedded engine bytes — AOT `.cwasm` (default) or source `.wasm`
-/// (with `precompile` feature OFF, for `@akua/sdk`'s npm
+/// (with `precompile` feature OFF, for `@akua-dev/sdk`'s npm
 /// distribution). See helm-engine-wasm for the same pattern.
 #[cfg(feature = "precompile")]
 const KUSTOMIZE_ENGINE_BYTES: &[u8] =

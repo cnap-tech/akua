@@ -35,10 +35,10 @@ Three stages, each independently pluggable. See [`docs/package-format.md`](./pac
 | consumer | surface | when used |
 |---|---|---|
 | **CLI** — `akua` binary | 26 shipped verbs + ~10 planned (see [`cli.md`](./cli.md)) | developers, CI, agents in sandboxes |
-| **SDK** — `@akua/sdk` | same capabilities, Node/Bun-native | backend services that embed akua in-process |
+| **SDK** — `@akua-dev/sdk` | same capabilities, Node/Bun-native | backend services that embed akua in-process |
 | **Browser** — playground at `akua.dev` + local `akua dev` UI | subset that compiles to WebAssembly | authoring, review, live-preview |
 
-**Trust contract:** the binary, the SDK, and the browser produce byte-identical output for the same inputs. No "the real thing is behind the paywall." A backend service calling `@akua/sdk.render()` gets the same bytes a developer gets from `akua render` in their terminal.
+**Trust contract:** the binary, the SDK, and the browser produce byte-identical output for the same inputs. No "the real thing is behind the paywall." A backend service calling `@akua-dev/sdk.render()` gets the same bytes a developer gets from `akua render` in their terminal.
 
 See [`docs/cli-contract.md`](./cli-contract.md) for the universal contract every consumer honors.
 

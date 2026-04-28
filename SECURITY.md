@@ -3,7 +3,7 @@
 akua's threat model assumes the **package author is untrusted**. A
 worker process, CI runner, local developer, or agent sandbox should be
 able to run `akua render` / `akua inspect` / `akua publish` / `akua
-policy check` / `@akua/sdk` calls against attacker-controlled
+policy check` / `@akua-dev/sdk` calls against attacker-controlled
 `Package.k` + chart tarballs + Rego modules **without an OS-level
 sandbox** for the vast majority of workflows.
 

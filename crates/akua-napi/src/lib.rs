@@ -1,5 +1,5 @@
 //! `akua-napi` — Node.js native addon exposing `akua-core` via the
-//! Node-API ABI. Loaded by `@akua/sdk` per-platform; covers Node 22+,
+//! Node-API ABI. Loaded by `@akua-dev/sdk` per-platform; covers Node 22+,
 //! Bun, and Deno (all three implement Node-API). The wasm32-unknown-
 //! unknown bundle stays for browsers + pure-KCL fast path.
 //!

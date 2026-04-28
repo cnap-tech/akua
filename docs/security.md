@@ -95,7 +95,7 @@ User-authored KCL programs are evaluated in a `wasm32-wasip1` guest with bounded
 - Access environment variables.
 - Escape to the host process.
 
-This applies whether the evaluator is the CLI binary or the `@akua/sdk` library.
+This applies whether the evaluator is the CLI binary or the `@akua-dev/sdk` library.
 
 ---
 
