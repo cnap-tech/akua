@@ -8,12 +8,12 @@
   <em>Cloud-native packaging in one binary. Typed packages. Sandboxed renders. Signed by default.</em>
 </p>
 
+> Innovative teams eventually notice how much more sense cloud-native makes once they replace the bureaucratic mass of drifting YAML with high-energy, deterministic contracts.
+
 <p align="center">
-  <a href="https://github.com/cnap-tech/akua/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/cnap-tech/akua/ci.yml?branch=main&label=CI&style=flat-square"></a>
   <a href="https://github.com/cnap-tech/akua/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/cnap-tech/akua?label=release&style=flat-square"></a>
   <a href="https://www.npmjs.com/package/@akua-dev/sdk"><img alt="npm" src="https://img.shields.io/npm/v/%40akua-dev%2Fsdk?style=flat-square&label=%40akua-dev%2Fsdk"></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-blue?style=flat-square"></a>
-  <a href="#status"><img alt="Status" src="https://img.shields.io/badge/status-alpha-yellow?style=flat-square"></a>
 </p>
 
 <p align="center">
