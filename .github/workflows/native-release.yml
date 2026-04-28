@@ -61,7 +61,12 @@ jobs:
         with:
           node-version: '22'
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pin to the same rust version mise installs (`.mise.toml`) so
+      # the cross-compile target lands on the toolchain mise will
+      # later activate. With `@stable`, mise's rust 1.95.0 became the
+      # active toolchain after this step ran and cargo couldn't find
+      # the target — `note: the X target may not be installed`.
+      - uses: dtolnay/rust-toolchain@1.95.0
         with:
           targets: ${{ matrix.target }}
 
@@ -94,13 +99,20 @@ jobs:
 
       - name: Build engine wasm (Go → wasip1)
         # Per-platform `.node` ships without engines (embed-engines
-        # OFF — see #482). The bytes load at runtime from
+        # OFF). The bytes load at runtime from
         # `@akua-dev/native-engines`, but we still need the wasm
         # files on disk during the matrix build because the engine
         # crates' build.rs stages them into OUT_DIR even when
         # include_bytes! is gated off (the placeholder logic
         # tolerates a missing wasm file but the staged wasm is
         # uploaded as part of the engines artifact below).
+        #
+        # Linux only — the helm fork's `apply.sh` needs bash, which
+        # the Windows runner can't natively exec, and macOS runners
+        # don't ship the .wasm artifact anyway (only the linux jobs
+        # upload it). The Rust crates' build.rs tolerates a missing
+        # wasm under embed-engines OFF.
+        if: runner.os == 'Linux'
         run: mise exec -- task build:engines
 
       - name: Upload engine wasm artifact (linux runners — redundant)
