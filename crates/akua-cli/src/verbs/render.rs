@@ -76,6 +76,15 @@ pub struct RenderArgs<'a> {
     /// Designed for air-gapped CI runners where the `akua add` step
     /// happened elsewhere.
     pub offline: bool,
+
+    /// `--debug`: under `--json`, emit `evalResult` (the post-eval
+    /// resources list pre-YAML-normalization) alongside the summary.
+    /// Useful for inspecting what `pkg.render` / `helm.template` /
+    /// `kustomize.build` actually produced before the render writes
+    /// hit disk. Best-effort surface — schema may change between
+    /// releases. Worker-boundary changes (pre-expansion state, eval
+    /// timings, dep-trace) tracked at #480.
+    pub debug: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -298,11 +307,36 @@ pub fn run<W: Write>(
 
     let summary = render(&rendered, args.out_dir, args.dry_run)?;
 
-    emit_output(stdout, ctx, &summary, |w| {
-        write_text(w, &summary, args.dry_run)
-    })
-    .map_err(RenderError::StdoutWrite)?;
+    if args.debug {
+        // Emit summary + the post-eval resources list as a wrapper
+        // envelope. Text mode falls through to the normal rendering
+        // (the eval-result dump is JSON-only).
+        let envelope = DebugEnvelope {
+            summary: &summary,
+            eval_result: &rendered.resources,
+        };
+        emit_output(stdout, ctx, &envelope, |w| {
+            write_text(w, &summary, args.dry_run)
+        })
+        .map_err(RenderError::StdoutWrite)?;
+    } else {
+        emit_output(stdout, ctx, &summary, |w| {
+            write_text(w, &summary, args.dry_run)
+        })
+        .map_err(RenderError::StdoutWrite)?;
+    }
     Ok(ExitCode::Success)
+}
+
+/// JSON-only envelope shape under `--debug`. The CLI contract reserves
+/// `summary` as the canonical field so JSON consumers can keep their
+/// existing parser. `evalResult` is best-effort and may shift between
+/// releases — callers shouldn't lock down its schema.
+#[derive(serde::Serialize)]
+struct DebugEnvelope<'a> {
+    summary: &'a RenderSummary,
+    #[serde(rename = "evalResult")]
+    eval_result: &'a [serde_yaml::Value],
 }
 
 /// Thin adapter around `akua_core::package_k::resolve_inputs_path`

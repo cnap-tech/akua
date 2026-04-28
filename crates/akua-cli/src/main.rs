@@ -635,6 +635,14 @@ struct RenderCliArgs {
     /// `akua add`). Path + replace deps are unaffected.
     #[arg(long)]
     offline: bool,
+
+    /// Diagnostic — emit the post-eval resources list (pre-YAML
+    /// normalization) alongside the rendered manifests under `--json`.
+    /// Useful for debugging composition (`pkg.render`, `helm.template`,
+    /// `kustomize.build` outputs visible). Hidden from short-help; the
+    /// JSON shape is best-effort and may shift between releases.
+    #[arg(long, hide_short_help = true)]
+    debug: bool,
 }
 
 fn main() {
@@ -1376,6 +1384,7 @@ fn run_render(args: &UniversalArgs, render_args: &RenderCliArgs) -> ExitCode {
         stdout_mode: render_args.stdout,
         strict: render_args.strict,
         offline: render_args.offline,
+        debug: render_args.debug,
     };
     let mut stdout = io::stdout().lock();
     match render_verb::run(&ctx, &verb_args, &mut stdout) {

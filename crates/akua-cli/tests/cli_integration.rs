@@ -263,6 +263,32 @@ fn render_path_escape_emits_e_path_escape_with_remediation_suggestion() {
 }
 
 #[test]
+fn render_debug_emits_eval_result_alongside_summary() {
+    // Closes spike-1 issue #8 (minimal slice via #480). Under --json
+    // --debug, the render verb wraps its summary in an envelope that
+    // also exposes the post-eval resources list — useful for reading
+    // back what helm.template / pkg.render actually produced.
+    let dir = tempdir();
+    run(dir.path(), &["init", "app"]);
+    let app = dir.path().join("app");
+
+    let out = run(&app, &["render", "--out", "./deploy", "--debug", "--json"]);
+    assert_exit(&out, 0);
+
+    let parsed = stdout_json(&out);
+    assert!(
+        parsed["summary"].is_object(),
+        "expected `summary` field, got: {parsed}"
+    );
+    assert_eq!(parsed["summary"]["manifests"], 1);
+    let eval = parsed["evalResult"]
+        .as_array()
+        .expect("evalResult must be an array");
+    assert_eq!(eval.len(), 1, "scaffold renders one ConfigMap");
+    assert_eq!(eval[0]["kind"], "ConfigMap");
+}
+
+#[test]
 fn render_pkg_render_patched_sentinel_fails_loud() {
     // Closes spike-1 issue #1. The user's repro:
     //   _up = pkg.render({path = "./inner"})
