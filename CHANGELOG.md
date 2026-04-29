@@ -13,6 +13,35 @@ minor bump in the SDK.
 > single-file/total-package cap is incompatible with the bundled napi
 > addon (~129 MB compressed across the per-platform packages).
 
+## [0.8.1] — 2026-04-29
+
+Doc + example consistency for the alias-method form. No behavioural
+change; the change is bundled stdlib (`akua/helm.k` docstring) so the
+worker `.wasm` bytes differ.
+
+### Changed
+
+- **Helm at the call site is now alias-method** in every documented
+  example: `<chart>.template(<chart>.TemplateOpts{values =
+  <chart>.Values{...}})`. Same shape as `pkgs.<name>.render` for Akua
+  packages — synthesized per dep by the resolver, no `import akua.helm`
+  in user code. CLAUDE.md, docs/cli.md, docs/package-format.md, the
+  `akua/helm.k` stdlib docstring, and examples 02 / 03 / 05 / 06 +
+  their READMEs updated.
+- **Engine-direct callables** (`akua.kustomize`, `akua.kro`,
+  `akua.oci`) stay first-class for engines whose input isn't a typed
+  dep. Documented as the explicit non-dep surface.
+- **`akua.helm.template` retained as escape hatch** for advanced
+  Helm cases (multi-chart dynamic dispatch, post-renderer variations
+  the stub doesn't expose). Doc redirects new code to
+  `import charts.<name>` first.
+
+### Fixed
+
+- Examples 02 / 03 / 05 / 06 used `<chart>.Chart{...}` as the
+  argument to `helm.template` — a shape the chart-stub generator
+  never actually emits. They render now (alias-method form).
+
 ## [0.8.0] — 2026-04-29
 
 The observability + security round. Three big additions on top of the
