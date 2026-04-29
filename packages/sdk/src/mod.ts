@@ -197,6 +197,18 @@ export interface RenderOptions {
 	strict?: boolean;
 	/** Forbid network access during resolve; OCI deps must cache-hit. */
 	offline?: boolean;
+	/**
+	 * Wall-clock cap on the render. Go duration string —
+	 * `30s`, `5m`, `1h`, `250ms`. Mirrors the universal
+	 * `--timeout` flag; nested `pkg.render` calls inherit it.
+	 */
+	timeout?: string;
+	/**
+	 * Hard cap on `pkg.render` composition depth (default 16).
+	 * Hitting the cap surfaces `E_RENDER_BUDGET_DEPTH`. Pair with
+	 * `timeout` to harden CI / agent renders against runaways.
+	 */
+	maxDepth?: number;
 }
 
 export interface RenderSourceOptions {
@@ -223,6 +235,16 @@ export interface RenderSourceOptions {
 	 * JSON-serializable value, or omit for an empty mapping.
 	 */
 	inputs?: unknown;
+	/**
+	 * Wall-clock cap (Go duration). Same semantics as
+	 * [`RenderOptions.timeout`].
+	 */
+	timeout?: string;
+	/**
+	 * `pkg.render` composition depth cap. See
+	 * [`RenderOptions.maxDepth`].
+	 */
+	maxDepth?: number;
 }
 
 /**
@@ -342,6 +364,8 @@ export class Akua {
 						// `out` is unused in stdout-mode (no files
 						// written) but the verb arg-shape requires it.
 						out: joinPath(tmp, 'unused'),
+						timeout: opts.timeout,
+						maxDepth: opts.maxDepth,
 					}),
 				);
 			} finally {
@@ -543,6 +567,8 @@ export class Akua {
 				dryRun: opts.dryRun,
 				strict: opts.strict,
 				offline: opts.offline,
+				timeout: opts.timeout,
+				maxDepth: opts.maxDepth,
 			}),
 		);
 		return validateAs<RenderSummary>('RenderSummary', result);

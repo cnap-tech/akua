@@ -33,6 +33,8 @@ export interface NapiAddon {
 		dryRun?: boolean;
 		strict?: boolean;
 		offline?: boolean;
+		timeout?: string;
+		maxDepth?: number;
 	}): unknown;
 	renderToYaml(args: {
 		package: string;
@@ -41,6 +43,8 @@ export interface NapiAddon {
 		dryRun?: boolean;
 		strict?: boolean;
 		offline?: boolean;
+		timeout?: string;
+		maxDepth?: number;
 	}): string;
 	lint(args: { package: string }): unknown;
 	fmt(args: { package: string; check?: boolean; stdout?: boolean }): unknown;

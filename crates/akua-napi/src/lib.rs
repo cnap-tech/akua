@@ -41,10 +41,18 @@ pub struct NapiRenderArgs {
     pub dry_run: Option<bool>,
     pub strict: Option<bool>,
     pub offline: Option<bool>,
+    /// Wall-clock cap (Go duration, e.g. `"30s"`, `"5m"`). Maps to
+    /// the universal `--timeout` flag; on the SDK side, exposed as
+    /// `RenderOptions.timeout`.
+    pub timeout: Option<String>,
+    /// Hard cap on `pkg.render` composition depth. `BudgetSnapshot`
+    /// default (16) when omitted.
+    pub max_depth: Option<u32>,
 }
 
 #[napi]
 pub fn render(args: NapiRenderArgs) -> Result<serde_json::Value> {
+    let ctx = render_ctx(&args);
     let package_path = Path::new(&args.package);
     let inputs_path = args.inputs.as_deref().map(Path::new);
     let out_dir = Path::new(&args.out);
@@ -57,12 +65,22 @@ pub fn render(args: NapiRenderArgs) -> Result<serde_json::Value> {
         strict: args.strict.unwrap_or(false),
         offline: args.offline.unwrap_or(false),
         debug: false,
-        max_depth: None,
+        max_depth: args.max_depth.map(|n| n as usize),
     };
-    invoke_verb(|ctx, stdout| {
+    invoke_verb_with(&ctx, |ctx, stdout| {
         verbs::render::run(ctx, &verb_args, stdout)
             .map_err(|e| into_napi(e.to_structured(), e.exit_code()))
     })
+}
+
+/// Build the per-render Context. Forwards `timeout` from the
+/// JS-side `RenderOptions`; everything else stays at `Context::json`
+/// defaults (the SDK always wants structured output).
+fn render_ctx(args: &NapiRenderArgs) -> Context {
+    Context {
+        timeout: args.timeout.clone(),
+        ..Context::json()
+    }
 }
 
 /// Render a Package and return the multi-document YAML directly,
@@ -86,9 +104,9 @@ pub fn render_to_yaml(args: NapiRenderArgs) -> Result<String> {
         strict: args.strict.unwrap_or(false),
         offline: args.offline.unwrap_or(false),
         debug: false,
-        max_depth: None,
+        max_depth: args.max_depth.map(|n| n as usize),
     };
-    let ctx = Context::json();
+    let ctx = render_ctx(&args);
     let mut out = Cursor::new(Vec::new());
     verbs::render::run(&ctx, &verb_args, &mut out)
         .map_err(|e| into_napi(e.to_structured(), e.exit_code()))?;
@@ -322,9 +340,15 @@ fn invoke_verb<F>(run: F) -> Result<serde_json::Value>
 where
     F: FnOnce(&Context, &mut Cursor<Vec<u8>>) -> Result<ExitCode>,
 {
-    let ctx = Context::json();
+    invoke_verb_with(&Context::json(), run)
+}
+
+fn invoke_verb_with<F>(ctx: &Context, run: F) -> Result<serde_json::Value>
+where
+    F: FnOnce(&Context, &mut Cursor<Vec<u8>>) -> Result<ExitCode>,
+{
     let mut stdout = Cursor::new(Vec::new());
-    let exit = run(&ctx, &mut stdout)?;
+    let exit = run(ctx, &mut stdout)?;
     let bytes = stdout.into_inner();
     if bytes.is_empty() {
         // Every shipping verb writes a JSON envelope under
