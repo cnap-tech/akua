@@ -100,6 +100,32 @@ pub fn engine_config() -> Config {
     shared_config()
 }
 
+/// Build-script variant of [`shared_config`]. When `cargo` is cross-
+/// compiling (`TARGET != HOST`), tell wasmtime's Cranelift backend to
+/// AOT for the binary's target arch instead of the build host's.
+///
+/// Without this, the macos-latest runner (now aarch64) produces a
+/// cwasm baked for aarch64 inside an x86_64-apple-darwin binary, and
+/// runtime `Module::deserialize` rejects it: `Module was compiled for
+/// architecture 'aarch64'`. Same trap applies to any future cross-
+/// compile combination.
+pub fn build_script_config() -> Config {
+    let mut config = shared_config();
+    let target = std::env::var("TARGET").ok();
+    let host = std::env::var("HOST").ok();
+    if let (Some(t), Some(h)) = (target.as_deref(), host.as_deref()) {
+        if t != h {
+            // Cargo's TARGET is a target-triple in target_lexicon
+            // shape — wasmtime's Config::target() takes the same
+            // shape directly.
+            config
+                .target(t)
+                .expect("wasmtime: Config::target rejected cargo TARGET triple");
+        }
+    }
+    config
+}
+
 /// The single Engine shared across every akua-side wasmtime
 /// invocation. Lazy-initialized on first call; thereafter reused
 /// for the life of the process. `Engine::clone` is cheap and
@@ -114,9 +140,11 @@ pub fn shared_engine() -> &'static Engine {
 
 /// Called from each engine crate's `build.rs`. Precompiles a `.wasm`
 /// to a platform-specific `.cwasm`; deserialize at runtime is a fixup
-/// instead of a full Cranelift compile.
+/// instead of a full Cranelift compile. Uses [`build_script_config`]
+/// so cross-compiled cwasms target the binary's arch, not the build
+/// host's.
 pub fn precompile(wasm: &[u8]) -> Result<Vec<u8>, String> {
-    let engine = Engine::new(&shared_config()).map_err(|e| e.to_string())?;
+    let engine = Engine::new(&build_script_config()).map_err(|e| e.to_string())?;
     engine.precompile_module(wasm).map_err(|e| e.to_string())
 }
 

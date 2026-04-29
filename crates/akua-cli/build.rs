@@ -17,12 +17,15 @@
 
 use std::path::PathBuf;
 
-// Delegates to the workspace-wide `shared_config` so build-time and
-// runtime use byte-identical Cranelift settings. Single source of
-// truth; MUST stay in lockstep or `Module::deserialize` rejects the
-// artefact on the compat-hash check.
+// Delegates to the workspace-wide config helper. Build-time and
+// runtime use byte-identical Cranelift settings (single source of
+// truth), with the build-time variant additionally pinning Config
+// to the cargo TARGET when cross-compiling — without that, the
+// macos-aarch64 runner producing an x86_64-apple-darwin binary
+// embeds an aarch64 cwasm and `Module::deserialize` traps at
+// runtime.
 fn worker_config() -> wasmtime::Config {
-    engine_host_wasm::shared_config()
+    engine_host_wasm::build_script_config()
 }
 
 fn main() {

@@ -7,6 +7,26 @@ name: cli-release
 #
 # Outputs: one `.tar.gz` per target, uploaded as a GitHub Release
 # attachment. Shasum file included for checksum verification.
+#
+# Pipeline shape:
+#
+#   wasm-bundle  →  build (5-target matrix)  →  release / docker / homebrew-tap
+#   (~3 min)        (~10-15 min, parallel)        (<1 min)
+#
+# `wasm-bundle` builds the engine + render-worker `.wasm` artefacts
+# once on Linux. They're cross-platform (wasm32-wasip1, deterministic
+# Go/Rust output) so every matrix runner downloads the same bytes
+# instead of rebuilding them — saves ~5-10 min per matrix runner and
+# unblocks the Windows runner (which can't run the helm fork's bash
+# `apply.sh`). The matrix runner's build.rs precompiles those bytes
+# to a target-specific `.cwasm` via wasmtime AOT.
+#
+# `validate` was deleted: ci.yml runs `task ci` (which includes the
+# example golden tests) on every push to main, so by the time a tag
+# exists, main has been validated. The matrix smoke test still runs
+# `akua init && akua render` against each built binary so a "binary
+# ships without a worker" / wrong-arch cwasm regression can't slip
+# through. See memory:akua_ci_perf.md for the diagnosis.
 
 on:
   push:
@@ -23,35 +43,81 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
-  # Belt-and-braces gate: render every green example through the
-  # tagged commit and byte-diff against the committed `rendered/`
-  # goldens before any binaries ship. `task ci` already runs this on
-  # every push to main, but a stale-golden between merge and tag
-  # would silently produce a release with non-deterministic output.
-  validate:
+  # Build the engine + render-worker .wasm artefacts once. The output
+  # is wasm32-wasip1, byte-deterministic across runners — sharing it
+  # via artifact spares each matrix runner a ~5-10 min Go + Rust
+  # compile and lets Windows get real engines (the helm fork's
+  # apply.sh is bash and won't exec on the Windows runner).
+  wasm-bundle:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
       - uses: jdx/mise-action@v4
         with:
           install: true
           cache: true
+
       - uses: rui314/setup-mold@v1
+
       - name: Install wasm32-wasip1 target
-        # release:validate depends on build:render-worker, which
-        # compiles akua-render-worker to wasm32-wasip1. Without this
-        # target installed, the worker build fails with
-        # `can't find crate for core`.
         run: mise exec -- rustup target add wasm32-wasip1
+
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: validate
+          shared-key: wasm-bundle
           cache-on-failure: true
-      - name: task release:validate
-        run: mise exec -- task release:validate
+
+      # Mirror the cache shape ci.yml uses — same content-addressed
+      # keys mean the bundle job inherits hits from main-branch CI
+      # runs and skips redundant Go compiles.
+      - name: Restore helm engine wasm cache
+        uses: actions/cache@v5
+        with:
+          path: crates/helm-engine-wasm/assets/helm-engine.wasm
+          key: helm-engine-${{ runner.os }}-${{ hashFiles('.mise.toml', 'crates/helm-engine-wasm/go-src/**', 'crates/helm-engine-wasm/fork/**') }}
+
+      - name: Restore kustomize engine wasm cache
+        uses: actions/cache@v5
+        with:
+          path: crates/kustomize-engine-wasm/assets/kustomize-engine.wasm
+          key: kustomize-engine-${{ runner.os }}-${{ hashFiles('.mise.toml', 'crates/kustomize-engine-wasm/go-src/**') }}
+
+      - name: Cache Go module + build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('.mise.toml', '**/go.mod') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+
+      - name: Cache helm fork tree
+        uses: actions/cache@v5
+        with:
+          path: crates/helm-engine-wasm/third_party/helm-fork
+          key: helm-fork-${{ runner.os }}-${{ hashFiles('crates/helm-engine-wasm/fork/**') }}
+
+      - name: Build embedded engines (Go → wasip1)
+        run: mise exec -- task build:engines
+
+      - name: Build embedded render-worker (Rust → wasip1)
+        run: mise exec -- task build:render-worker
+
+      - name: Upload wasm bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-bundle
+          path: |
+            crates/helm-engine-wasm/assets/helm-engine.wasm
+            crates/kustomize-engine-wasm/assets/kustomize-engine.wasm
+            target/wasm32-wasip1/release/akua-render-worker.wasm
+          if-no-files-found: error
+          retention-days: 1
 
   build:
-    needs: validate
+    needs: wasm-bundle
     strategy:
       matrix:
         include:
@@ -89,7 +155,7 @@ jobs:
       # every tag push repaid the full cold-compile cost (~6 min
       # each for heavy git deps like kcl-lang). With it, warm runs
       # collapse to link-only time (~1-2 min). One cache per target
-      # so the 4 matrix jobs don't stomp each other under the 10 GB
+      # so the 5 matrix jobs don't stomp each other under the 10 GB
       # per-repo limit.
       - uses: Swatinem/rust-cache@v2
         with:
@@ -107,33 +173,20 @@ jobs:
       - name: Rust target
         run: mise exec -- rustup target add ${{ matrix.target }}
 
-      - name: Install wasm32-wasip1 target
-        # `task build:render-worker` below compiles akua-render-worker
-        # to wasm32-wasip1. Without this rustup target add, the worker
-        # build fails with `can't find crate for core`. The validate
-        # job already does this on its own runner; the build matrix is
-        # independent and needs its own target install.
-        run: mise exec -- rustup target add wasm32-wasip1
-
-      # Build the embedded engines + render-worker .wasm artefacts
-      # before akua-cli's own cargo build. akua-cli's build.rs
-      # `include_bytes!`s these — without this step, the matrix runner
-      # has no `target/wasm32-wasip1/...` from a prior task invocation
-      # (validate runs on a different runner) and build.rs would emit
-      # empty bytes, producing a binary that traps on first render.
-      # The ci-release profile-detect in build.rs now hard-fails when
-      # the worker is missing, so this step is load-bearing for the
-      # release matrix and a regression guard for the future.
-      - name: Build embedded wasm engines
-        # Linux-only — helm-engine-wasm's `fork/apply.sh` is bash, can't
-        # exec on Windows. Same gating native-release.yml uses. Windows
-        # binaries ship without helm + kustomize engines; the basic
-        # render path (the smoke test below) still works.
-        if: runner.os != 'Windows'
-        run: mise exec -- task build:engines
-
-      - name: Build embedded render-worker
-        run: mise exec -- task build:render-worker
+      # Pull the wasm bundle the wasm-bundle job built. Bytes land at
+      # their original paths under the workspace root — exactly where
+      # akua-cli/build.rs + helm-engine-wasm/build.rs +
+      # kustomize-engine-wasm/build.rs look for them. The matrix
+      # runner's build.rs precompiles each .wasm into a target-arch
+      # cwasm via wasmtime AOT (engine_host_wasm::build_script_config
+      # pins the cranelift target to TARGET so cross-compiling
+      # macos-aarch64 → x86_64-apple-darwin produces an x86_64 cwasm,
+      # not the host's aarch64 one).
+      - name: Download wasm bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-bundle
+          path: .
 
       - name: Build akua CLI
         # `ci-release` profile: lto off, codegen-units=16, symbols
@@ -143,10 +196,10 @@ jobs:
 
       # Smoke-test the binary the way an end-user would: `akua init`
       # + `akua render` against the scaffolded Package. Catches any
-      # future "binary ships without a worker" / "binary ships without
-      # an engine" regression before users see it. Skipped on
-      # cross-compiled targets where the runner can't execute the
-      # output (linux/arm64 on x86_64 ubuntu, windows binary on linux).
+      # future "binary ships without a worker" / wrong-arch cwasm
+      # regression before users see it. Skipped on cross-compiled
+      # targets where the runner can't execute the output (linux/arm64
+      # on x86_64 ubuntu, windows binary on linux).
       - name: Smoke-test the built binary
         if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-apple-darwin' || matrix.target == 'x86_64-apple-darwin'
         shell: bash

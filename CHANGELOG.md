@@ -13,6 +13,41 @@ minor bump in the SDK.
 > single-file/total-package cap is incompatible with the bundled napi
 > addon (~129 MB compressed across the per-platform packages).
 
+## [0.8.3] — 2026-04-29
+
+Follow-up to 0.8.2. Two fixes that surfaced when the 0.8.2 release
+attempt actually executed the matrix end-to-end.
+
+### Fixed
+
+- **Cross-compile cwasm architecture mismatch.** `macos-latest` runners
+  are now aarch64 (M-series). When the matrix cross-compiled
+  `x86_64-apple-darwin`, `akua-cli/build.rs` precompiled the worker
+  cwasm on the aarch64 host and embedded it in the x86_64 binary;
+  runtime `Module::deserialize` then trapped with `Module was
+  compiled for architecture 'aarch64'`. Fixed by passing cargo's
+  `TARGET` triple through to `wasmtime::Config::target()` at build
+  time — same path taken by every engine plugin's build.rs via the
+  shared `engine_host_wasm::build_script_config()` helper. Native
+  builds (host == target) skip the call so the cwasm hash stays
+  byte-identical to prior releases.
+
+### Changed (CI)
+
+- **cli-release: deleted the duplicate `validate` job.** `ci.yml`
+  already runs `task ci` (which exercises the example golden tests)
+  on every push to main; by the time a release tag exists, main has
+  been validated. The matrix smoke test (`init && render`) is the
+  remaining guard against ship-without-worker / wrong-arch-cwasm
+  regressions. Saves ~14 min off the release critical path.
+- **cli-release: shared wasm-bundle job.** Engines + render-worker
+  `.wasm` are wasm32-wasip1, byte-deterministic across runners.
+  Build them once on Linux, share via `actions/upload-artifact`,
+  download per matrix runner. Saves ~5-10 min × 5 matrix runners.
+  Side benefit: the Windows runner now ships with helm + kustomize
+  engines (it previously skipped them because the helm fork's
+  `apply.sh` is bash and won't exec on Windows).
+
 ## [0.8.2] — 2026-04-29
 
 Critical fix: every released CLI binary since 0.6.0 shipped without
