@@ -1,6 +1,6 @@
 {
 	"name": "@akua-dev/native-engines",
-	"version": "0.7.0",
+	"version": "0.8.1",
 	"description": "Embedded helm + kustomize wasm engines for @akua-dev/native. Platform-agnostic; one copy shared across every per-platform native addon.",
 	"license": "Apache-2.0",
 	"repository": {
