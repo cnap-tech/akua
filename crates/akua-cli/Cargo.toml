@@ -43,7 +43,7 @@ embed-engines = ["akua-core/embed-engines"]
 # OpenTelemetry export. Default on; activates only when the runtime sees
 # OTEL_EXPORTER_OTLP_ENDPOINT (or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT). Off
 # means smaller binaries (napi/sdk consumers) and no OTel deps.
-otel = ["dep:tracing-opentelemetry", "dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
+otel = ["dep:tracing-opentelemetry", "dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp", "dep:tokio"]
 # SDK type emission — off by default. `ts-export` turns on ts-rs
 # derives so the CLI contract + verb response types can be emitted
 # as TypeScript sources. `schema-export` does the same for
@@ -86,6 +86,10 @@ tracing-opentelemetry = { workspace = true, optional = true }
 opentelemetry = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }
 opentelemetry-otlp = { workspace = true, optional = true }
+# OTLP/tonic and the batch span processor both require a tokio runtime;
+# we host one current-thread Runtime for the process lifetime under the
+# `otel` feature.
+tokio = { version = "1", optional = true, default-features = false, features = ["rt", "time"] }
 
 [build-dependencies]
 # build.rs AOT-compiles the render-worker .wasm into a .cwasm. Must

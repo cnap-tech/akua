@@ -69,6 +69,7 @@ dependencies = [
  "serde_yml",
  "tempfile",
  "thiserror 2.0.18",
+ "tokio",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",

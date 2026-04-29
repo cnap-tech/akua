@@ -25,18 +25,20 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Env
 
 use crate::contract::{Context, OutputMode, UniversalArgs};
 
-/// RAII guard. Holds OTel state for shutdown on drop. Today the only
-/// resource is the OTel global tracer provider; without the `otel`
-/// feature this is a zero-sized type.
+/// RAII guard. Holds the tokio runtime that hosts the OTel batch
+/// processor; on drop, flushes the global tracer provider and shuts
+/// the runtime down. Without the `otel` feature this is zero-sized.
 pub struct ObservabilityHandle {
     #[cfg(feature = "otel")]
-    otel_active: bool,
+    _otel_runtime: Option<tokio::runtime::Runtime>,
 }
 
 impl Drop for ObservabilityHandle {
     fn drop(&mut self) {
         #[cfg(feature = "otel")]
-        if self.otel_active {
+        if self._otel_runtime.is_some() {
+            // Flush + close all batch processors. shutdown_tracer_provider
+            // blocks while the batch processor exports queued spans.
             opentelemetry::global::shutdown_tracer_provider();
         }
     }
@@ -77,7 +79,12 @@ fn apply_bridge_trace(directive: String) -> String {
 }
 
 /// Initialize the global tracing subscriber. Must be called exactly
-/// once at process start.
+/// once at process start. With the `otel` feature on AND either
+/// `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
+/// set, an OTLP exporter layer is stacked under the fmt layer. All
+/// standard `OTEL_*` env vars (endpoint, headers, protocol, timeout,
+/// `OTEL_SERVICE_NAME`, `OTEL_RESOURCE_ATTRIBUTES`) are honored
+/// natively by the underlying opentelemetry crates.
 pub fn init_subscriber(args: &UniversalArgs, ctx: &Context) -> ObservabilityHandle {
     let directive = apply_bridge_trace(resolve_filter(args));
 
@@ -91,50 +98,95 @@ pub fn init_subscriber(args: &UniversalArgs, ctx: &Context) -> ObservabilityHand
     let env_filter = EnvFilter::try_new(&directive).unwrap_or_else(|_| EnvFilter::new("warn"));
 
     let json_mode = matches!(ctx.output, OutputMode::Json);
-    let registry = tracing_subscriber::registry().with(env_filter);
-
-    if json_mode {
+    let fmt_layer = if json_mode {
         // Determinism: no timestamps in JSON / agent mode (golden tests
         // diff stderr too; an embedded clock would defeat them).
-        let layer = fmt::layer()
+        fmt::layer()
             .json()
             .with_writer(io::stderr)
             .with_current_span(true)
             .with_span_list(false)
             .with_timer(())
-            .boxed();
-        let subscriber = registry.with(layer);
-        init_with_otel(subscriber)
+            .boxed()
     } else {
-        let layer = fmt::layer()
+        fmt::layer()
             .with_writer(io::stderr)
             .with_target(false)
             .with_ansi(ctx.color)
-            .boxed();
-        let subscriber = registry.with(layer);
-        init_with_otel(subscriber)
-    }
-}
+            .boxed()
+    };
 
-/// Install the configured subscriber. With the `otel` feature on, also
-/// records whether `OTEL_EXPORTER_OTLP_ENDPOINT` is set so the handle's
-/// `Drop` can flush the global tracer provider on exit.
-fn init_with_otel<S>(subscriber: S) -> ObservabilityHandle
-where
-    S: tracing::Subscriber + Send + Sync + 'static,
-    for<'a> S: tracing_subscriber::registry::LookupSpan<'a>,
-{
-    subscriber.init();
+    let registry = tracing_subscriber::registry()
+        .with(env_filter)
+        .with(fmt_layer);
+
     #[cfg(feature = "otel")]
     {
-        let otel_active = std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").is_ok()
-            || std::env::var("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT").is_ok();
-        ObservabilityHandle { otel_active }
+        if otel_endpoint_configured() {
+            match build_otel_layer() {
+                Ok((layer, runtime)) => {
+                    registry.with(layer).init();
+                    return ObservabilityHandle {
+                        _otel_runtime: Some(runtime),
+                    };
+                }
+                Err(err) => {
+                    eprintln!("akua: OpenTelemetry init failed ({err}); continuing without OTel");
+                }
+            }
+        }
+        registry.init();
+        ObservabilityHandle {
+            _otel_runtime: None,
+        }
     }
     #[cfg(not(feature = "otel"))]
     {
+        registry.init();
         ObservabilityHandle {}
     }
+}
+
+#[cfg(feature = "otel")]
+fn otel_endpoint_configured() -> bool {
+    std::env::var_os("OTEL_EXPORTER_OTLP_ENDPOINT").is_some()
+        || std::env::var_os("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT").is_some()
+}
+
+#[cfg(feature = "otel")]
+fn build_otel_layer<S>() -> Result<
+    (
+        tracing_opentelemetry::OpenTelemetryLayer<S, opentelemetry_sdk::trace::Tracer>,
+        tokio::runtime::Runtime,
+    ),
+    Box<dyn std::error::Error>,
+>
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+{
+    use opentelemetry::trace::TracerProvider as _;
+
+    // Tonic and the batch span processor both poll inside a tokio
+    // runtime; akua is otherwise sync, so we host one current-thread
+    // Runtime that lives as long as ObservabilityHandle.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+
+    // install_batch needs a tokio context to spawn the processor's
+    // worker task. The pipeline reads endpoint, headers, timeout, and
+    // protocol from standard OTEL_* env vars.
+    let provider = runtime.block_on(async {
+        opentelemetry_otlp::new_pipeline()
+            .tracing()
+            .with_exporter(opentelemetry_otlp::new_exporter().tonic())
+            .install_batch(opentelemetry_sdk::runtime::TokioCurrentThread)
+    })?;
+
+    let tracer = provider.tracer("akua");
+    opentelemetry::global::set_tracer_provider(provider);
+    let layer = tracing_opentelemetry::layer().with_tracer(tracer);
+    Ok((layer, runtime))
 }
 
 #[cfg(test)]

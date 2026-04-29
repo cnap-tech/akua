@@ -220,9 +220,31 @@ Same data as `akua help --json` filtered to one verb. Useful for targeted intros
 ## 9. Logging
 
 - Default: human-readable text to stderr.
-- `--log=json` — JSON-lines to stderr.
-- `--log-level=<debug|info|warn|error>` — filter.
+- `--log=json` — JSON-lines to stderr; auto-enabled in agent context.
+- `--log-level=<debug|info|warn|error>` — filter; only applies to akua targets, transitive crates stay at `warn`.
+- `-v` / `--verbose` — shorthand for `--log-level=debug`.
 - Logs are separate from output. Output is the return value of the command; logs are observability.
+
+Log lines under `--log=json` are JSON objects with `level`, `target`, `message`, `fields`, and an optional parent `span` block. The `target` field is dotted: `akua`, `akua::worker`, `akua::bridge`. Timestamps are omitted in JSON / agent mode so byte-deterministic golden tests can diff stderr; under text mode timestamps are included for human readability.
+
+Structured errors (§1.2) remain a single terminal JSON object on stderr — distinguishable from log lines by the absence of a `level` field and the presence of a `code`.
+
+`RUST_LOG` is the escape hatch. When set, it overrides the resolved filter directive entirely (full `EnvFilter` syntax). `AKUA_BRIDGE_TRACE=1` is a back-compat shortcut that ORs `akua::bridge=debug` into the filter.
+
+### 9.1 OpenTelemetry export
+
+OTLP export is enabled when `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is set in the environment. No CLI flag — the OTel spec defines a standard env-var surface and akua honors it directly:
+
+- `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
+- `OTEL_EXPORTER_OTLP_HEADERS`
+- `OTEL_EXPORTER_OTLP_PROTOCOL` (gRPC over tonic; HTTP not yet wired)
+- `OTEL_EXPORTER_OTLP_TIMEOUT`
+- `OTEL_SERVICE_NAME`
+- `OTEL_RESOURCE_ATTRIBUTES`
+
+A single OTel trace covers `worker.invoke → worker.render_request → kcl eval`; bridge calls (`bridge.call`, `bridge.response`) appear as child events. Worker-side spans flow through the host's stderr-replay path so the entire pipeline shares one trace context.
+
+Build the CLI without `--features otel` (off by default in the napi distribution) to drop the OTel + tokio runtime dependency; the rest of the logging contract is unaffected.
 
 ---
 
