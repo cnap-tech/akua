@@ -107,6 +107,14 @@ jobs:
       - name: Rust target
         run: mise exec -- rustup target add ${{ matrix.target }}
 
+      - name: Install wasm32-wasip1 target
+        # `task build:render-worker` below compiles akua-render-worker
+        # to wasm32-wasip1. Without this rustup target add, the worker
+        # build fails with `can't find crate for core`. The validate
+        # job already does this on its own runner; the build matrix is
+        # independent and needs its own target install.
+        run: mise exec -- rustup target add wasm32-wasip1
+
       # Build the embedded engines + render-worker .wasm artefacts
       # before akua-cli's own cargo build. akua-cli's build.rs
       # `include_bytes!`s these — without this step, the matrix runner

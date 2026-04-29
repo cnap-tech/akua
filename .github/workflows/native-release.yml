@@ -149,6 +149,9 @@ jobs:
       # missing. The matrix runners are independent — the validate
       # runner's `task build:render-worker` doesn't reach them.
       # Build the worker on every matrix runner before `napi build`.
+      - name: Install wasm32-wasip1 target
+        run: mise exec -- rustup target add wasm32-wasip1
+
       - name: Build embedded render-worker
         run: mise exec -- task build:render-worker
 
