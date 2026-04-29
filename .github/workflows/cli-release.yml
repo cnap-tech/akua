@@ -107,11 +107,47 @@ jobs:
       - name: Rust target
         run: mise exec -- rustup target add ${{ matrix.target }}
 
+      # Build the embedded engines + render-worker .wasm artefacts
+      # before akua-cli's own cargo build. akua-cli's build.rs
+      # `include_bytes!`s these — without this step, the matrix runner
+      # has no `target/wasm32-wasip1/...` from a prior task invocation
+      # (validate runs on a different runner) and build.rs would emit
+      # empty bytes, producing a binary that traps on first render.
+      # The ci-release profile-detect in build.rs now hard-fails when
+      # the worker is missing, so this step is load-bearing for the
+      # release matrix and a regression guard for the future.
+      - name: Build embedded wasm engines
+        run: mise exec -- task build:engines
+
+      - name: Build embedded render-worker
+        run: mise exec -- task build:render-worker
+
       - name: Build akua CLI
         # `ci-release` profile: lto off, codegen-units=16, symbols
         # stripped, line-tables-only debug. Trades ~5-10% runtime
         # perf for ~25-40% compile-time reduction. See Cargo.toml.
         run: mise exec -- cargo build -p akua-cli --profile ci-release --target ${{ matrix.target }}
+
+      # Smoke-test the binary the way an end-user would: `akua init`
+      # + `akua render` against the scaffolded Package. Catches any
+      # future "binary ships without a worker" / "binary ships without
+      # an engine" regression before users see it. Skipped on
+      # cross-compiled targets where the runner can't execute the
+      # output (linux/arm64 on x86_64 ubuntu, windows binary on linux).
+      - name: Smoke-test the built binary
+        if: matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-apple-darwin' || matrix.target == 'x86_64-apple-darwin'
+        shell: bash
+        run: |
+          set -eu
+          bin="$PWD/target/${{ matrix.target }}/ci-release/akua"
+          tmp=$(mktemp -d)
+          cd "$tmp"
+          "$bin" init smoke
+          cd smoke
+          "$bin" render
+          test -d ./deploy
+          test -n "$(ls ./deploy)"
+          echo "smoke ok: $(ls ./deploy)"
 
       - name: Package (unix)
         if: matrix.archive == 'tar.gz'

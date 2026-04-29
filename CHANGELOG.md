@@ -13,6 +13,46 @@ minor bump in the SDK.
 > single-file/total-package cap is incompatible with the bundled napi
 > addon (~129 MB compressed across the per-platform packages).
 
+## [0.8.2] — 2026-04-29
+
+Critical fix: every released CLI binary since 0.6.0 shipped without
+the wasmtime render-worker embedded — `akua render` against any
+package failed with `E_RENDER_KCL` "render sandbox unavailable —
+worker module wasn't compiled into this akua binary." The cli-release
+matrix runners never invoked `task build:render-worker`, so
+`build.rs` wrote an empty `.cwasm` placeholder and the binary went
+out the door with a 0-byte sandbox.
+
+`task release:validate` (run on a separate validate runner) didn't
+catch it because `cargo test` reuses the validate runner's
+locally-built worker artefact in `target/`. The matrix runners had
+no such artefact and no test ever exercised the produced binary.
+
+### Fixed
+
+- **cli-release matrix builds the worker + engines pre-`cargo build`.**
+  Two new steps before `Build akua CLI`: `task build:engines` and
+  `task build:render-worker`. Without these, `akua-cli/build.rs`
+  has nothing to embed.
+- **Smoke test on the produced binary.** New step runs
+  `<binary> init smoke && <binary> render` against the scaffolded
+  Package and asserts `./deploy/` is non-empty. Catches future
+  ship-without-sandbox / ship-without-engine regressions before
+  users hit them. Skipped on cross-compile targets (linux/arm64
+  on x86_64, windows on ubuntu) where the runner can't execute the
+  binary.
+- **`build.rs` hard-fails in release profiles** when the worker
+  `.wasm` is missing. Dev / test profiles still get the empty-
+  sandbox fallback so unrelated unit tests can compile without a
+  full worker build first; `release` and `ci-release` now turn the
+  silent empty-bytes failure into a build error, not a runtime trap.
+
+### Action for users on 0.8.0 / 0.8.1
+
+Upgrade to 0.8.2 — `brew upgrade akua` (homebrew tap auto-bumped),
+`npm install -g @akua-dev/sdk@0.8.2`, or download the GitHub release
+tarball. The earlier binaries cannot render any package.
+
 ## [0.8.1] — 2026-04-29
 
 Doc + example consistency for the alias-method form. No behavioural

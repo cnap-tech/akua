@@ -52,6 +52,28 @@ fn main() {
     );
 
     if !worker_wasm.exists() {
+        // Hard-fail in release profiles. The previous behaviour
+        // (empty sandbox + runtime E_SANDBOX_UNAVAILABLE) shipped
+        // broken binaries through CI matrices that don't run
+        // `task build:render-worker` — the symptom only surfaces on
+        // first `akua render` post-install. Better to fail the build.
+        //
+        // dev / test profiles still get the empty-sandbox fallback
+        // so contributors who haven't run `task build:render-worker`
+        // yet aren't blocked from compiling akua-cli for unit tests
+        // that don't exercise the worker.
+        let profile = std::env::var("PROFILE").unwrap_or_default();
+        let release_like = profile == "release"
+            || profile == "ci-release"
+            || std::env::var_os("CARGO_CFG_AKUA_REQUIRE_WORKER").is_some();
+        if release_like {
+            panic!(
+                "akua-render-worker.wasm not found at {} — release profiles must ship a worker. \
+                 Run `task build:render-worker` (or set AKUA_REQUIRE_WORKER=0 to override) before \
+                 `cargo build -p akua-cli --release`.",
+                worker_wasm.display()
+            );
+        }
         println!(
             "cargo:warning=akua-render-worker.wasm not found at {} — run `task build:render-worker` first. Emitting empty sandbox module (runtime will surface E_SANDBOX_UNAVAILABLE).",
             worker_wasm.display()

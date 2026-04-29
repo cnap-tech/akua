@@ -7,9 +7,9 @@
     },
     "crates/akua-napi": {
       "name": "@akua-dev/native",
-      "version": "0.8.1",
+      "version": "0.8.2",
       "dependencies": {
-        "@akua-dev/native-engines": "0.8.1",
+        "@akua-dev/native-engines": "0.8.2",
       },
       "devDependencies": {
         "@napi-rs/cli": "^3.2.0",
@@ -17,13 +17,13 @@
     },
     "crates/akua-native-engines-npm": {
       "name": "@akua-dev/native-engines",
-      "version": "0.8.1",
+      "version": "0.8.2",
     },
     "packages/sdk": {
       "name": "@akua-dev/sdk",
-      "version": "0.8.1",
+      "version": "0.8.2",
       "dependencies": {
-        "@akua-dev/native": "0.8.1",
+        "@akua-dev/native": "0.8.2",
         "@standard-schema/spec": "^1.1.0",
         "ajv": "^8.18.0",
         "yaml": "^2.8.3",
@@ -236,7 +236,7 @@
 
     "emnapi": ["emnapi@1.10.0", "", { "peerDependencies": { "node-addon-api": ">= 6.1.0" }, "optionalPeers": ["node-addon-api"] }, "sha512-swoyZjupDvLoe/KC3HZ4SY1JUN+tviT6eOZ3Px28TZAYdBHtRIiMWWrIUUH+2/9CYY4fNTID1YhYZ+kdFHszHg=="],
 
-    "es-toolkit": ["es-toolkit@1.46.0", "", {}, "sha512-IToJ6ct9OLl5zz6WsC/1vZEwfSZ7Myil+ygl5Tf30Xjn9AEkzNB4kqp2G7VUJKF1DtTx/ra5M5KLlXvzOg51BA=="],
+    "es-toolkit": ["es-toolkit@1.46.1", "", {}, "sha512-5eNtXOs3tbfxXOj04tjjseeWkRWaoCjdEI+96DgwzZoe6c9juL49pXlzAFTI72aWC9Y8p7168g6XIKjh7k6pyQ=="],
 
     "fast-content-type-parse": ["fast-content-type-parse@3.0.0", "", {}, "sha512-ZvLdcY8P+N8mGQJahJV5G4U88CSvT1rP8ApL6uETe88MBXrBHAkZlSEySdUlyztF7ccb+Znos3TFqaepHxdhBg=="],
 
