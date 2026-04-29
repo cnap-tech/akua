@@ -116,11 +116,9 @@ pub fn init_subscriber(args: &UniversalArgs, ctx: &Context) -> ObservabilityHand
     }
 }
 
-/// Wire the OpenTelemetry layer when the `otel` feature is on AND the
-/// runtime sees `OTEL_EXPORTER_OTLP_ENDPOINT`. The actual layer
-/// construction lands in a follow-up; today this only checks
-/// activation so the handle's `Drop` flushes the global provider when
-/// it's installed externally.
+/// Install the configured subscriber. With the `otel` feature on, also
+/// records whether `OTEL_EXPORTER_OTLP_ENDPOINT` is set so the handle's
+/// `Drop` can flush the global tracer provider on exit.
 fn init_with_otel<S>(subscriber: S) -> ObservabilityHandle
 where
     S: tracing::Subscriber + Send + Sync + 'static,

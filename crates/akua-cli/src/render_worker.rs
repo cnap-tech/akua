@@ -528,26 +528,25 @@ fn emit_worker_event(rec: &WorkerLogLine<'_>) {
         .get("message")
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    // tracing's compile-time level macros require a literal level, so
-    // dispatch through a match. Fields beyond `message` are flattened
-    // into a single `fields_json` attribute — preserves all worker
-    // context without forcing a static schema here.
-    let extras = rec.fields.to_string();
+    // tracing's level macros are compile-time literals, so dispatch
+    // through a match. The full worker fields blob is forwarded via
+    // `Display` on serde_json::Value — one serialization, not two.
+    let fields_json = &rec.fields;
     match rec.level {
         "TRACE" => {
-            tracing::trace!(target: "akua::worker", worker_target = target, fields_json = %extras, "{message}")
+            tracing::trace!(target: "akua::worker", worker_target = target, fields_json = %fields_json, "{message}")
         }
         "DEBUG" => {
-            tracing::debug!(target: "akua::worker", worker_target = target, fields_json = %extras, "{message}")
+            tracing::debug!(target: "akua::worker", worker_target = target, fields_json = %fields_json, "{message}")
         }
         "WARN" => {
-            tracing::warn!(target: "akua::worker", worker_target = target, fields_json = %extras, "{message}")
+            tracing::warn!(target: "akua::worker", worker_target = target, fields_json = %fields_json, "{message}")
         }
         "ERROR" => {
-            tracing::error!(target: "akua::worker", worker_target = target, fields_json = %extras, "{message}")
+            tracing::error!(target: "akua::worker", worker_target = target, fields_json = %fields_json, "{message}")
         }
         _ => {
-            tracing::info!(target: "akua::worker", worker_target = target, fields_json = %extras, "{message}")
+            tracing::info!(target: "akua::worker", worker_target = target, fields_json = %fields_json, "{message}")
         }
     }
 }
