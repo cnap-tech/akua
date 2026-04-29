@@ -8,6 +8,12 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
-wasmtime = "43"
+# `all-arch` is load-bearing for the release matrix: Config::target()
+# at build time wants to AOT for the matrix's TARGET (e.g. aarch64-
+# unknown-linux-gnu cross-compiled from x86_64 host). Without all-arch,
+# only the host-arch cranelift backend is compiled in and the build.rs
+# trips "Support for this target is disabled". Adds ~1-2 min to every
+# wasmtime-touching crate's compile but the matrix can't ship without it.
+wasmtime = { version = "43", features = ["all-arch"] }
 wasmtime-wasi = "43"
 thiserror = { workspace = true }
