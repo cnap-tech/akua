@@ -358,14 +358,13 @@ impl ResolverOptions {
     }
 }
 
-/// `AKUA_REJECT_REPLACE=1` (any non-empty value but `0`) hard-disables
-/// `replace = { path = "..." }`. The CLI also OR's agent-context
-/// detection into this default before calling the resolver.
+/// `AKUA_REJECT_REPLACE=1` hard-disables `replace = { path = "..." }`.
+/// The CLI also OR's agent-context detection into this default before
+/// calling the resolver. Matches the `AKUA_BRIDGE_TRACE` convention
+/// (strict `"1"`, anything else is off — including `"true"` / `"yes"` —
+/// so production deployments don't silently misread a typo as enabled).
 pub fn replace_rejected_from_env() -> bool {
-    match std::env::var("AKUA_REJECT_REPLACE") {
-        Ok(v) => !v.is_empty() && v != "0",
-        Err(_) => false,
-    }
+    std::env::var("AKUA_REJECT_REPLACE").is_ok_and(|v| v == "1")
 }
 
 /// Offline resolve — path + replace only, OCI/git surface as
@@ -1770,6 +1769,11 @@ alpha = { path = "./charts/alpha" }
         std::env::set_var("AKUA_REJECT_REPLACE", "1");
         assert!(replace_rejected_from_env());
         std::env::set_var("AKUA_REJECT_REPLACE", "0");
+        assert!(!replace_rejected_from_env());
+        // Strict "1" semantics — typos / "true" / "yes" do NOT enable
+        // the gate (a permissive parser could mask a misconfigured
+        // production deployment).
+        std::env::set_var("AKUA_REJECT_REPLACE", "true");
         assert!(!replace_rejected_from_env());
         std::env::remove_var("AKUA_REJECT_REPLACE");
         assert!(!replace_rejected_from_env());
