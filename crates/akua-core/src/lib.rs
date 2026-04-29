@@ -63,6 +63,7 @@ pub mod cosign_sidecar;
 pub mod dev;
 #[cfg(feature = "engine-kcl")]
 pub mod dir_diff;
+pub mod duration_parse;
 #[cfg(feature = "engine-kcl")]
 pub mod export;
 #[cfg(feature = "git-fetch")]

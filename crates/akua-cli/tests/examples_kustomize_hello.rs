@@ -32,7 +32,13 @@ fn renders_kustomize_hello_against_golden() {
     let package = PackageK::load(&dir.join("package.k")).expect("load package.k");
     let inputs = serde_yaml::Value::Null;
 
-    let rendered = match render_in_worker(&package, &inputs, &resolved, false) {
+    let rendered = match render_in_worker(
+        &package,
+        &inputs,
+        &resolved,
+        false,
+        akua_core::kcl_plugin::BudgetSnapshot::default(),
+    ) {
         Ok(r) => r,
         Err(e) => {
             let msg = e.to_string();

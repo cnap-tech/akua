@@ -30,6 +30,11 @@ pub const E_PACKAGE_MISSING: &str = "E_PACKAGE_MISSING";
 pub const E_PACKAGE_PARSE: &str = "E_PACKAGE_PARSE";
 pub const E_INPUTS_MISSING: &str = "E_INPUTS_MISSING";
 pub const E_INPUTS_PARSE: &str = "E_INPUTS_PARSE";
+/// CLI-level flag value didn't parse — `--timeout=5min`,
+/// `--max-depth=foo`, etc. Distinct from `E_INPUTS_PARSE` (which
+/// covers `inputs.yaml` content) so agents can branch on the right
+/// thing.
+pub const E_INVALID_FLAG: &str = "E_INVALID_FLAG";
 pub const E_RENDER_KCL: &str = "E_RENDER_KCL";
 pub const E_RENDER_YAML: &str = "E_RENDER_YAML";
 /// Package called an engine plugin whose WASM backend hasn't shipped

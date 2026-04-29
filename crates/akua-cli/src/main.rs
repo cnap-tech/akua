@@ -636,6 +636,12 @@ struct RenderCliArgs {
     #[arg(long)]
     offline: bool,
 
+    /// Hard cap on the `pkg.render` composition depth. Default 16
+    /// (`BudgetSnapshot::DEFAULT_MAX_DEPTH`); lower it to harden CI
+    /// against runaway fan-out. Cycle detection is separate.
+    #[arg(long, value_name = "N")]
+    max_depth: Option<usize>,
+
     /// Diagnostic — emit the post-eval resources list (pre-YAML
     /// normalization) alongside the rendered manifests under `--json`.
     /// Useful for debugging composition (`pkg.render`, `helm.template`,
@@ -1431,6 +1437,7 @@ fn run_render(args: &UniversalArgs, render_args: &RenderCliArgs) -> ExitCode {
         strict: render_args.strict,
         offline: render_args.offline,
         debug: render_args.debug,
+        max_depth: render_args.max_depth,
     };
     let mut stdout = io::stdout().lock();
     match render_verb::run(&ctx, &verb_args, &mut stdout) {

@@ -312,6 +312,30 @@ impl RenderScope {
         Self::enter_full(package, &[], false, budget, BTreeMap::new())
     }
 
+    /// Combined entry: resolved-charts-derived allowed_roots +
+    /// pkg-alias map (like [`enter_for_render`]) **with** an explicit
+    /// budget. Used by the CLI render path so `--timeout` /
+    /// `--max-depth` propagate into nested `pkg.render` calls.
+    pub fn enter_for_render_with_budget(
+        package: &Path,
+        charts: &crate::chart_resolver::ResolvedCharts,
+        strict: bool,
+        budget: BudgetSnapshot,
+    ) -> Self {
+        let allowed_roots: Vec<PathBuf> = charts
+            .entries
+            .values()
+            .map(|c| c.abs_path.clone())
+            .collect();
+        let resolved_pkgs: BTreeMap<String, PathBuf> = charts
+            .entries
+            .iter()
+            .filter(|(_, c)| c.abs_path.join("package.k").is_file())
+            .map(|(name, c)| (name.clone(), c.abs_path.clone()))
+            .collect();
+        Self::enter_full(package, &allowed_roots, strict, budget, resolved_pkgs)
+    }
+
     fn enter_full(
         package: &Path,
         allowed_roots: &[PathBuf],

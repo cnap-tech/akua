@@ -125,6 +125,12 @@ pub struct RenderArgs<'a> {
     /// hit disk. Best-effort surface — schema may change between
     /// releases.
     pub debug: bool,
+
+    /// `--max-depth=<N>`: hard cap on the `pkg.render` composition
+    /// depth. `None` → use [`BudgetSnapshot::DEFAULT_MAX_DEPTH`] (16).
+    /// Reaching the cap yields a structured `E_RENDER_KCL` error with
+    /// the runaway target named.
+    pub max_depth: Option<usize>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -158,6 +164,9 @@ pub enum RenderError {
 
     #[error("resolving charts.*: {0}")]
     Charts(#[from] ChartResolveError),
+
+    #[error("invalid --timeout `{raw}`: {reason}")]
+    InvalidTimeout { raw: String, reason: String },
 
     #[error("reading cosign public key at {path}: {source}")]
     CosignKeyIo {
@@ -280,6 +289,13 @@ impl RenderError {
             RenderError::StdoutWrite(e) => {
                 StructuredError::new(codes::E_IO, e.to_string()).with_default_docs()
             }
+            RenderError::InvalidTimeout { raw, reason } => {
+                StructuredError::new(codes::E_INVALID_FLAG, format!("--timeout `{raw}`: {reason}"))
+                    .with_suggestion(
+                        "--timeout takes a Go-duration string: 30s, 5m, 1h, 250ms.",
+                    )
+                    .with_default_docs()
+            }
         }
     }
 
@@ -310,7 +326,8 @@ pub fn run<W: Write>(
     let resolved_inputs = resolve_inputs_path(args);
     let inputs = load_inputs(resolved_inputs.as_deref())?;
     let charts = resolve_package_charts(args.package_path, args.offline, ctx)?;
-    let rendered = render_in_worker(&package, &inputs, &charts, args.strict)?;
+    let budget = build_budget(ctx, args.max_depth)?;
+    let rendered = render_in_worker(&package, &inputs, &charts, args.strict, budget)?;
 
     if args.stdout_mode {
         write_multi_doc_yaml(stdout, &rendered.resources).map_err(RenderError::StdoutWrite)?;
@@ -434,6 +451,32 @@ fn load_cosign_public_key(
     Ok(Some(body))
 }
 
+/// Build the render's [`BudgetSnapshot`] from `--timeout` (universal
+/// flag, parsed via [`akua_core::duration_parse::parse_go_duration`])
+/// and `--max-depth` (render-specific). `None` for either field falls
+/// back to the renderer's defaults.
+fn build_budget(
+    ctx: &Context,
+    max_depth: Option<usize>,
+) -> Result<akua_core::kcl_plugin::BudgetSnapshot, RenderError> {
+    let deadline = match ctx.timeout.as_deref() {
+        None => None,
+        Some(raw) => {
+            let dur = akua_core::duration_parse::parse_go_duration(raw).map_err(|reason| {
+                RenderError::InvalidTimeout {
+                    raw: raw.to_string(),
+                    reason,
+                }
+            })?;
+            Some(std::time::Instant::now() + dur)
+        }
+    };
+    Ok(akua_core::kcl_plugin::BudgetSnapshot {
+        deadline,
+        max_depth: max_depth.unwrap_or(akua_core::kcl_plugin::BudgetSnapshot::DEFAULT_MAX_DEPTH),
+    })
+}
+
 /// Drive the sandboxed render path. A plugin panic surfaces as
 /// `WorkerError::PluginPanic(msg)` and is lifted into
 /// `PackageKError::KclEval(msg)` so the existing strict-marker
@@ -446,11 +489,16 @@ pub fn render_in_worker(
     inputs: &serde_yaml::Value,
     charts: &ResolvedCharts,
     strict: bool,
+    budget: akua_core::kcl_plugin::BudgetSnapshot,
 ) -> Result<akua_core::RenderedPackage, RenderError> {
     use crate::render_worker::{RenderHost, ResourceLimits, WorkerRequest};
 
-    let _scope =
-        akua_core::kcl_plugin::RenderScope::enter_for_render(&package.path, charts, strict);
+    let _scope = akua_core::kcl_plugin::RenderScope::enter_for_render_with_budget(
+        &package.path,
+        charts,
+        strict,
+        budget,
+    );
 
     // Helm deps go through the synthetic `charts.<name>` umbrella —
     // materialize as a single tempdir keyed at /charts.
@@ -695,6 +743,7 @@ resources = [{
             strict: false,
             offline: false,
             debug: false,
+            max_depth: None,
         }
     }
 
@@ -985,5 +1034,47 @@ resources = helm.template(helm.Template { chart = "./chart" })
         // Schema default `replicas: int = 2` wins.
         let cm = fs::read_to_string(out_dir.join("000-configmap-demo.yaml")).unwrap();
         assert!(cm.contains("count: '2'") || cm.contains("count: 2"), "{cm}");
+    }
+
+    #[test]
+    fn build_budget_no_timeout_no_max_depth_yields_default() {
+        let ctx = Context::human();
+        let budget = build_budget(&ctx, None).expect("build_budget");
+        assert!(budget.deadline.is_none());
+        assert_eq!(
+            budget.max_depth,
+            akua_core::kcl_plugin::BudgetSnapshot::DEFAULT_MAX_DEPTH
+        );
+    }
+
+    #[test]
+    fn build_budget_propagates_max_depth() {
+        let ctx = Context::human();
+        let budget = build_budget(&ctx, Some(3)).expect("build_budget");
+        assert_eq!(budget.max_depth, 3);
+    }
+
+    #[test]
+    fn build_budget_parses_timeout_into_deadline() {
+        let ctx = Context {
+            timeout: Some("100ms".to_string()),
+            ..Context::human()
+        };
+        let before = std::time::Instant::now();
+        let budget = build_budget(&ctx, None).expect("build_budget");
+        let deadline = budget.deadline.expect("deadline set");
+        // 100ms in the future, give or take a few ms for test scheduling.
+        let dur = deadline.saturating_duration_since(before);
+        assert!(dur.as_millis() >= 90 && dur.as_millis() <= 200, "{dur:?}");
+    }
+
+    #[test]
+    fn build_budget_invalid_timeout_returns_e_invalid_flag() {
+        let ctx = Context {
+            timeout: Some("5min".to_string()), // unknown unit
+            ..Context::human()
+        };
+        let err = build_budget(&ctx, None).expect_err("should reject");
+        assert_eq!(err.to_structured().code, codes::E_INVALID_FLAG);
     }
 }

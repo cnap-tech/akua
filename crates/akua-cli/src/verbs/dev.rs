@@ -112,8 +112,14 @@ fn render_once(args: &DevArgs<'_>, _changed: &[PathBuf]) -> Result<String, Strin
     // strict mode — defer both until the watch loop gets flags for
     // them. Rendering still runs in the sandbox.
     let charts = akua_core::chart_resolver::ResolvedCharts::default();
-    let rendered = crate::verbs::render::render_in_worker(&pkg, &inputs, &charts, false)
-        .map_err(|e| e.to_string())?;
+    let rendered = crate::verbs::render::render_in_worker(
+        &pkg,
+        &inputs,
+        &charts,
+        false,
+        akua_core::kcl_plugin::BudgetSnapshot::default(),
+    )
+    .map_err(|e| e.to_string())?;
     let summary = akua_core::package_render::render(&rendered, &args.out_dir, false)
         .map_err(|e| e.to_string())?;
     Ok(format!(

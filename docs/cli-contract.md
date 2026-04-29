@@ -164,11 +164,14 @@ Agents use `--plan` to reason about impact before committing. Plan output is det
 
 ## 5. Time bounds
 
-Every verb that blocks on network or reconciliation accepts `--timeout=<duration>` (Go duration format: `30s`, `5m`, `1h`). Verbs never hang indefinitely.
+Every verb that blocks on network or reconciliation accepts `--timeout=<duration>` (Go duration format: `30s`, `5m`, `1h`, `250ms`). Verbs never hang indefinitely.
 
 - Default timeout is verb-specific but never more than 5 minutes.
 - `--timeout=0` means "return immediately with current state" (for status-read ops).
 - Timeouts exit with code 6.
+- Invalid duration strings (`5min`, `2 hours`, raw integers) fail at parse time with `code=E_INVALID_FLAG`. Accepted units: `ns`, `us` / `µs`, `ms`, `s`, `m`, `h`.
+
+`akua render` additionally honors `--max-depth=<N>` to cap the `pkg.render` composition chain (default 16). Hitting the cap fails with `E_RENDER_BUDGET_DEPTH`. Pair with `--timeout` for hardened CI / agent runs.
 
 Async operations (`deploy`, `rollout`, long-running renders) return an opaque handle immediately; use `akua … wait --handle=<h>` to block.
 

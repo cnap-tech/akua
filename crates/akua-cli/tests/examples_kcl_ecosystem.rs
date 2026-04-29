@@ -73,7 +73,13 @@ fn renders_kcl_ecosystem_dep_against_golden() {
     )
     .expect("parse inputs");
 
-    let rendered = match render_in_worker(&package, &inputs, &resolved, false) {
+    let rendered = match render_in_worker(
+        &package,
+        &inputs,
+        &resolved,
+        false,
+        akua_core::kcl_plugin::BudgetSnapshot::default(),
+    ) {
         Ok(r) => r,
         Err(e) => {
             let msg = e.to_string();

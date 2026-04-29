@@ -44,7 +44,13 @@ fn renders_hello_webapp_with_resolved_chart_dep() {
     )
     .expect("parse inputs");
 
-    let rendered = match render_in_worker(&package, &inputs, &resolved, false) {
+    let rendered = match render_in_worker(
+        &package,
+        &inputs,
+        &resolved,
+        false,
+        akua_core::kcl_plugin::BudgetSnapshot::default(),
+    ) {
         Ok(r) => r,
         Err(e) => {
             let msg = e.to_string();
