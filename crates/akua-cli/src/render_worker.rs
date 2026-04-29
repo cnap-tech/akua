@@ -485,13 +485,12 @@ impl RenderHost {
 }
 
 /// Re-emit worker stderr (JSON-lines from `tracing-subscriber.json`) as
-/// host-side tracing events. Each line gets the worker's level + message
-/// + the originating target (typically `akua::worker`); the host's
-/// subscriber re-attaches them under whatever span is currently active
-/// (today: `worker.invoke`).
-///
-/// Best-effort. Lines that don't parse as JSON are emitted as a single
-/// `warn!` so nothing the worker emitted is silently dropped.
+/// host-side tracing events. Each line carries the worker's level,
+/// message, and originating target (typically `akua::worker`); the
+/// host's subscriber re-attaches them under whatever span is currently
+/// active — today the live `worker.invoke`. Best-effort: lines that
+/// don't parse as JSON surface as a single `warn!` so nothing the
+/// worker emitted is silently dropped.
 fn replay_worker_logs(bytes: &[u8]) {
     if bytes.is_empty() {
         return;
