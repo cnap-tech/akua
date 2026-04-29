@@ -970,4 +970,81 @@ resources = [{
 
         unregister("greet.hello");
     }
+
+    #[test]
+    fn resolve_pkg_alias_returns_dir_for_known_alias() {
+        let pkg = std::env::temp_dir().join("test_resolve_alias_known.k");
+        std::fs::write(&pkg, "resources = []").unwrap();
+
+        let upstream_dir = std::env::temp_dir().join("test_resolve_alias_upstream");
+        std::fs::create_dir_all(&upstream_dir).unwrap();
+        std::fs::write(
+            upstream_dir.join("akua.toml"),
+            "[package]\nname=\"u\"\nversion=\"0.1.0\"\nedition=\"akua.dev/v1alpha1\"\n",
+        )
+        .unwrap();
+        std::fs::write(upstream_dir.join("package.k"), "resources = []").unwrap();
+
+        let mut entries = std::collections::BTreeMap::new();
+        entries.insert(
+            "upstream".to_string(),
+            crate::chart_resolver::ResolvedChart {
+                name: "upstream".into(),
+                abs_path: upstream_dir.clone(),
+                sha256: "sha256:abc".into(),
+                kind: crate::chart_resolver::PackageKind::KclModule,
+                source: crate::chart_resolver::ResolvedSource::Path {
+                    declared: "./upstream".into(),
+                },
+            },
+        );
+        let charts = crate::chart_resolver::ResolvedCharts { entries };
+
+        let _scope = RenderScope::enter_for_render(&pkg, &charts, false);
+        assert_eq!(resolve_pkg_alias("upstream"), Some(upstream_dir.clone()));
+        assert_eq!(resolve_pkg_alias("missing"), None);
+        let mut aliases = current_pkg_aliases();
+        aliases.sort();
+        assert_eq!(aliases, vec!["upstream".to_string()]);
+    }
+
+    #[test]
+    fn resolve_pkg_alias_filters_to_akua_packages_only() {
+        // A KclModule entry without a package.k should NOT show up in
+        // resolved_pkgs — those are reachable via /kcl-pkgs/<alias>,
+        // not via the pkgs.* stub umbrella.
+        let pkg = std::env::temp_dir().join("test_resolve_alias_filter.k");
+        std::fs::write(&pkg, "resources = []").unwrap();
+
+        let plain_dir = std::env::temp_dir().join("test_resolve_alias_plain");
+        std::fs::create_dir_all(&plain_dir).unwrap();
+        std::fs::write(plain_dir.join("kcl.mod"), "").unwrap();
+        // No package.k!
+
+        let mut entries = std::collections::BTreeMap::new();
+        entries.insert(
+            "plain".to_string(),
+            crate::chart_resolver::ResolvedChart {
+                name: "plain".into(),
+                abs_path: plain_dir,
+                sha256: "sha256:abc".into(),
+                kind: crate::chart_resolver::PackageKind::KclModule,
+                source: crate::chart_resolver::ResolvedSource::Path {
+                    declared: "./plain".into(),
+                },
+            },
+        );
+        let charts = crate::chart_resolver::ResolvedCharts { entries };
+
+        let _scope = RenderScope::enter_for_render(&pkg, &charts, false);
+        assert_eq!(resolve_pkg_alias("plain"), None);
+        assert!(current_pkg_aliases().is_empty());
+    }
+
+    #[test]
+    fn resolve_pkg_alias_returns_none_outside_render_scope() {
+        // No scope on the stack — can't resolve anything.
+        assert_eq!(resolve_pkg_alias("anything"), None);
+        assert!(current_pkg_aliases().is_empty());
+    }
 }

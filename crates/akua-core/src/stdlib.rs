@@ -457,4 +457,85 @@ mod tests {
         assert_eq!(kcl_string_literal(r"a\b"), r#""a\\b""#);
         assert_eq!(kcl_string_literal("line1\nline2"), r#""line1\nline2""#);
     }
+
+    #[test]
+    fn materialize_pkg_stubs_emits_alias_dot_k_with_render_lambda() {
+        use crate::chart_resolver::{PackageKind, ResolvedChart, ResolvedCharts, ResolvedSource};
+        use std::collections::BTreeMap;
+
+        let upstream = tempfile::tempdir().unwrap();
+        std::fs::write(
+            upstream.path().join("akua.toml"),
+            "[package]\nname = \"upstream\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            upstream.path().join("package.k"),
+            "schema Input:\n    appName: str\n\nresources = []\n",
+        )
+        .unwrap();
+
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            "upstream".to_string(),
+            ResolvedChart {
+                name: "upstream".to_string(),
+                abs_path: upstream.path().to_path_buf(),
+                sha256: "sha256:abc".to_string(),
+                kind: PackageKind::KclModule,
+                source: ResolvedSource::Path {
+                    declared: "./upstream".to_string(),
+                },
+            },
+        );
+        let resolved = ResolvedCharts { entries };
+
+        let stub_dir = materialize_pkg_stubs_if_any(&resolved)
+            .expect("materialize")
+            .expect("Some(_)");
+        let upstream_k = std::fs::read_to_string(stub_dir.path().join("upstream.k")).unwrap();
+        assert!(upstream_k.contains("schema Input:"), "stub: {upstream_k}");
+        assert!(
+            upstream_k.contains("render = lambda inputs: Input"),
+            "stub: {upstream_k}"
+        );
+        assert!(
+            upstream_k.contains("package = \"upstream\""),
+            "stub: {upstream_k}"
+        );
+        assert!(stub_dir.path().join("kcl.mod").is_file());
+    }
+
+    #[test]
+    fn materialize_pkg_stubs_skips_plain_kcl_modules() {
+        // KclModule deps that lack a `package.k` (i.e. raw KCL ecosystem
+        // packages) must NOT appear in the pkgs umbrella — they go via
+        // /kcl-pkgs/<alias> directly.
+        use crate::chart_resolver::{PackageKind, ResolvedChart, ResolvedCharts, ResolvedSource};
+        use std::collections::BTreeMap;
+
+        let plain = tempfile::tempdir().unwrap();
+        std::fs::write(
+            plain.path().join("kcl.mod"),
+            "[package]\nname = \"plain\"\nedition = \"0.0.1\"\nversion = \"0.0.1\"\n",
+        )
+        .unwrap();
+
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            "plain".to_string(),
+            ResolvedChart {
+                name: "plain".to_string(),
+                abs_path: plain.path().to_path_buf(),
+                sha256: "sha256:abc".to_string(),
+                kind: PackageKind::KclModule,
+                source: ResolvedSource::Path {
+                    declared: "./plain".to_string(),
+                },
+            },
+        );
+        let resolved = ResolvedCharts { entries };
+
+        assert!(materialize_pkg_stubs_if_any(&resolved).unwrap().is_none());
+    }
 }

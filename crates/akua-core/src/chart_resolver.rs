@@ -1714,6 +1714,35 @@ alpha = { path = "./charts/alpha" }
     }
 
     #[test]
+    fn is_akua_package_distinguishes_kcl_module_with_package_k() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("kcl.mod"), "").unwrap();
+
+        // KclModule without package.k — plain KCL ecosystem dep.
+        let plain = ResolvedChart {
+            name: "plain".into(),
+            abs_path: dir.path().to_path_buf(),
+            sha256: "sha256:abc".into(),
+            kind: PackageKind::KclModule,
+            source: ResolvedSource::Path {
+                declared: ".".into(),
+            },
+        };
+        assert!(!plain.is_akua_package());
+
+        // KclModule WITH package.k — Akua Package.
+        std::fs::write(dir.path().join("package.k"), "resources = []\n").unwrap();
+        assert!(plain.is_akua_package());
+
+        // HelmChart kind never qualifies, even with a package.k present.
+        let helm = ResolvedChart {
+            kind: PackageKind::HelmChart,
+            ..plain
+        };
+        assert!(!helm.is_akua_package());
+    }
+
+    #[test]
     fn absolute_path_dep_is_rejected() {
         let ws = tempfile::tempdir().unwrap();
         let manifest = minimal_manifest(r#"evil = { path = "/etc" }"#);
