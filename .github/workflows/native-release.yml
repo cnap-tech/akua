@@ -144,6 +144,14 @@ jobs:
         with:
           tool: cargo-zigbuild
 
+      # akua-cli's build.rs (used transitively via akua-napi) hard-
+      # fails in release profiles when the render-worker .wasm is
+      # missing. The matrix runners are independent — the validate
+      # runner's `task build:render-worker` doesn't reach them.
+      # Build the worker on every matrix runner before `napi build`.
+      - name: Build embedded render-worker
+        run: mise exec -- task build:render-worker
+
       - name: Build native (release)
         working-directory: crates/akua-napi
         shell: bash
