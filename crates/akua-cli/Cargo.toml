@@ -75,7 +75,7 @@ schemars = { version = "1", optional = true }
 # Stores — matching the wasmtime docs' canonical pattern. Nested
 # Engines trip process-global trap-handler TLS; avoid.
 wasmtime = "43"
-wasmtime-wasi = "43"
+wasmtime-wasi = "44"
 engine-host-wasm = { path = "../engine-host-wasm" }
 
 # Observability. tracing is the universal emitter; tracing-subscriber wires
