@@ -1992,4 +1992,110 @@ mod tests {
             _ => panic!("expected fmt"),
         }
     }
+
+    // -----------------------------------------------------------
+    // Help-UX regression tests
+    //
+    // Keeps doc comments honest: short help (`-h`) lines should
+    // fit on one terminal row at 80 cols. clap auto-uses the first
+    // paragraph (before the first blank `///` line) as `help` and
+    // the full text as `long_help`. These tests assert the FIRST
+    // PARAGRAPH stays short — a future doc-comment edit that adds
+    // a long sentence to paragraph 1 will fail the test, not just
+    // wrap at runtime.
+    //
+    // The threshold (80 chars) matches the historical terminal
+    // width and clap's column-alignment headroom: at clap's 120-
+    // col default, a flag-name + value-name prefix can easily
+    // consume 30-40 cols, leaving ~80 for help text without wrap.
+    // -----------------------------------------------------------
+
+    /// Maximum first-paragraph length for short help, in chars.
+    /// Subcommand summaries also flow through `about` (one-line
+    /// listing) so the cap applies to both surfaces.
+    const SHORT_HELP_MAX_CHARS: usize = 80;
+
+    /// First paragraph of a clap doc-comment-derived help string:
+    /// everything before the first blank line, joined with spaces.
+    /// Mirrors clap's own splitting rule.
+    fn first_paragraph(s: &str) -> String {
+        s.split("\n\n")
+            .next()
+            .unwrap_or("")
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    #[test]
+    fn every_subcommand_about_fits_short_help() {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        let mut violations = Vec::new();
+        for sub in cmd.get_subcommands() {
+            let about = sub.get_about().map(|s| s.to_string()).unwrap_or_default();
+            let para = first_paragraph(&about);
+            if para.chars().count() > SHORT_HELP_MAX_CHARS {
+                violations.push(format!(
+                    "subcommand `{}` first-paragraph about is {} chars (>{}): {para}",
+                    sub.get_name(),
+                    para.chars().count(),
+                    SHORT_HELP_MAX_CHARS,
+                ));
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "{} subcommand about(s) exceed the short-help cap:\n  {}",
+            violations.len(),
+            violations.join("\n  "),
+        );
+    }
+
+    #[test]
+    fn every_universal_flag_short_help_fits() {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        // Any subcommand sees the universal flags (they're global).
+        // Pick one that has the full set; `render` works.
+        let render = cmd
+            .find_subcommand("render")
+            .expect("render subcommand exists");
+        let mut violations = Vec::new();
+        for arg in render.get_arguments() {
+            // hidden + skip-help-heading args won't render in -h.
+            if arg.is_hide_set() {
+                continue;
+            }
+            let help = arg.get_help().map(|s| s.to_string()).unwrap_or_default();
+            let para = first_paragraph(&help);
+            if para.chars().count() > SHORT_HELP_MAX_CHARS {
+                violations.push(format!(
+                    "flag `--{}` first-paragraph help is {} chars (>{}): {para}",
+                    arg.get_id(),
+                    para.chars().count(),
+                    SHORT_HELP_MAX_CHARS,
+                ));
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "{} render flag(s) exceed the short-help cap:\n  {}",
+            violations.len(),
+            violations.join("\n  "),
+        );
+    }
+
+    #[test]
+    fn first_paragraph_splits_at_blank_line() {
+        // Sanity-check the test helper itself.
+        assert_eq!(first_paragraph("short"), "short");
+        assert_eq!(
+            first_paragraph("first line\nstill first.\n\nsecond para."),
+            "first line still first."
+        );
+        assert_eq!(first_paragraph("\n\nleading blank.\nthen text."), "");
+    }
 }
