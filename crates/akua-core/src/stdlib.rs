@@ -83,7 +83,7 @@ pub fn materialize_pkg_stubs_if_any(
 ) -> std::io::Result<Option<tempfile::TempDir>> {
     let aliased: Vec<(&str, &crate::chart_resolver::ResolvedChart)> = resolved
         .kcl_pkgs()
-        .filter(|(_, c)| c.abs_path.join("package.k").is_file())
+        .filter(|(_, c)| c.is_akua_package())
         .collect();
     if aliased.is_empty() {
         return Ok(None);

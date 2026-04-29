@@ -52,6 +52,7 @@ An import brings one of four things into scope:
 |---|---|---|
 | `import akua.<engine>` | a source-engine callable (`helm`, `rgd`, `kustomize`, `oci`) | the akua CLI version |
 | `import charts.<name>` | a typed Helm chart dep previously added via `akua add` (synthetic wrapper that exposes the chart path + a pre-bound `template` callable) | `akua.toml` |
+| `import pkgs.<name>` | a typed Akua-package dep (synthetic stub re-exporting the upstream's schemas + a pre-bound `render` lambda — `pkgs.<name>.render(pkgs.<name>.Input{...})`) | `akua.toml` |
 | `import <name>` | an upstream KCL ecosystem package (e.g. `import k8s.api.apps.v1` against `oci://ghcr.io/kcl-lang/k8s`) | `akua.toml` |
 | `import <local/path>` | a local KCL module within this package | the filesystem |
 

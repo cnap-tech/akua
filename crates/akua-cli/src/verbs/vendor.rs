@@ -38,6 +38,7 @@ pub fn collect_vendor_pairs(workspace: &Path, manifest: &AkuaManifest) -> Vec<(S
         cache_root: None,
         expected_digests,
         cosign_public_key_pem: None,
+        reject_replace: chart_resolver::replace_rejected_from_env(),
     };
     let resolved = match chart_resolver::resolve_with_options(manifest, workspace, &opts) {
         Ok(r) => r,

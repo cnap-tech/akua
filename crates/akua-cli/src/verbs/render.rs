@@ -309,7 +309,7 @@ pub fn run<W: Write>(
     let package = PackageK::load(args.package_path)?;
     let resolved_inputs = resolve_inputs_path(args);
     let inputs = load_inputs(resolved_inputs.as_deref())?;
-    let charts = resolve_package_charts(args.package_path, args.offline)?;
+    let charts = resolve_package_charts(args.package_path, args.offline, ctx)?;
     let rendered = render_in_worker(&package, &inputs, &charts, args.strict)?;
 
     if args.stdout_mode {
@@ -370,6 +370,7 @@ fn resolve_inputs_path(args: &RenderArgs<'_>) -> Option<PathBuf> {
 fn resolve_package_charts(
     package_path: &Path,
     offline: bool,
+    ctx: &Context,
 ) -> Result<ResolvedCharts, RenderError> {
     let workspace = package_path.parent().unwrap_or(Path::new("."));
     let manifest = match AkuaManifest::load(workspace) {
@@ -400,6 +401,11 @@ fn resolve_package_charts(
         cache_root: None,
         expected_digests,
         cosign_public_key_pem,
+        // Production-mode replace gate: agent context auto-enables it
+        // (CI / container / agent invocation must not honor `replace =
+        // { path = "..." }`); humans can also opt in via env var. See
+        // CLAUDE.md "`replace` and `path` deps are workspace-local".
+        reject_replace: ctx.agent.detected || chart_resolver::replace_rejected_from_env(),
     };
     Ok(chart_resolver::resolve_with_options(
         &manifest, workspace, &opts,
@@ -476,7 +482,7 @@ pub fn render_in_worker(
     let mut kcl_pkgs_request: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
     for (alias, c) in charts.kcl_pkgs() {
-        if c.abs_path.join("package.k").is_file() {
+        if c.is_akua_package() {
             continue;
         }
         let guest_path = format!("/kcl-pkgs/{alias}");

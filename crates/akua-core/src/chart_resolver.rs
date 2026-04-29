@@ -76,6 +76,18 @@ pub struct ResolvedChart {
     pub source: ResolvedSource,
 }
 
+impl ResolvedChart {
+    /// `true` when the resolved tree is an Akua Package — it has both
+    /// `akua.toml` (which `oci_fetcher::detect_kind` already keyed off)
+    /// and a top-level `package.k`. Used by the render path to mount
+    /// these via the `pkgs.<alias>` stub umbrella instead of as raw
+    /// `kcl_pkgs` ExternalPkg entries (which would fire the upstream's
+    /// body at consumer-import time).
+    pub fn is_akua_package(&self) -> bool {
+        self.kind == PackageKind::KclModule && self.abs_path.join("package.k").is_file()
+    }
+}
+
 /// The source of a resolved chart in a form suitable for lockfile
 /// serialization. Distinct from `mod_file::DependencySource` because
 /// it carries the concrete identifier (path / oci ref / git URL) and
@@ -255,6 +267,41 @@ pub enum ChartResolveError {
         #[source]
         source: crate::git_fetcher::GitFetchError,
     },
+
+    /// Absolute paths in `path = "..."` / `replace.path` are rejected
+    /// — the resolver only mounts directories under the workspace.
+    /// See CLAUDE.md "`replace` and `path` deps are workspace-local".
+    #[error(
+        "dependency `{name}`: absolute path `{}` is rejected — \
+         path / replace deps must stay under the workspace root",
+        path.display()
+    )]
+    AbsolutePathRejected { name: String, path: PathBuf },
+
+    /// Relative path that canonicalizes outside the workspace
+    /// (typically via `..` segments or symlinks). Same workspace-local
+    /// invariant as [`AbsolutePathRejected`].
+    #[error(
+        "dependency `{name}`: path `{}` resolves to `{}`, which escapes the \
+         workspace root `{}`",
+        requested.display(), resolved.display(), workspace_root.display()
+    )]
+    PathEscape {
+        name: String,
+        requested: PathBuf,
+        resolved: PathBuf,
+        workspace_root: PathBuf,
+    },
+
+    /// `replace = { path = "..." }` directive present, but the
+    /// process refuses to apply replaces (production / agent
+    /// context, or `AKUA_REJECT_REPLACE=1`).
+    #[error(
+        "dependency `{name}`: `replace` directive rejected — \
+         AKUA_REJECT_REPLACE=1 (or agent context) requires unmodified \
+         dep resolution"
+    )]
+    ReplaceRejected { name: String },
 }
 
 /// Resolve every dep in `manifest` against `workspace_root` and return
@@ -286,6 +333,13 @@ pub struct ResolverOptions {
     /// the chart is unpacked. Populated from
     /// `akua.toml [signing] cosign_public_key` by the CLI.
     pub cosign_public_key_pem: Option<String>,
+
+    /// Refuse to apply `replace = { path = "..." }` directives. Set
+    /// by the CLI in agent context or whenever `AKUA_REJECT_REPLACE`
+    /// is in the env — production deployments processing third-party
+    /// Packages must run with this on. See CLAUDE.md "`replace` and
+    /// `path` deps are workspace-local".
+    pub reject_replace: bool,
 }
 
 impl ResolverOptions {
@@ -299,7 +353,18 @@ impl ResolverOptions {
             cache_root: None,
             expected_digests,
             cosign_public_key_pem: None,
+            reject_replace: replace_rejected_from_env(),
         }
+    }
+}
+
+/// `AKUA_REJECT_REPLACE=1` (any non-empty value but `0`) hard-disables
+/// `replace = { path = "..." }`. The CLI also OR's agent-context
+/// detection into this default before calling the resolver.
+pub fn replace_rejected_from_env() -> bool {
+    match std::env::var("AKUA_REJECT_REPLACE") {
+        Ok(v) => !v.is_empty() && v != "0",
+        Err(_) => false,
     }
 }
 
@@ -336,11 +401,15 @@ pub fn resolve_with_options(
         // Bare path deps don't use `replace` (rejected upstream by
         // manifest validation).
         if let Some(replace) = &dep.replace {
+            if opts.reject_replace {
+                return Err(ChartResolveError::ReplaceRejected { name: name.clone() });
+            }
             let chart = resolve_path(
                 name,
                 &replace.path,
                 workspace_root,
                 resolved_source_for_replace(name, dep, &replace.path)?,
+                PathOrigin::UserManifest,
             )?;
             entries.insert(name.clone(), chart);
             continue;
@@ -354,7 +423,10 @@ pub fn resolve_with_options(
                 let src = ResolvedSource::Path {
                     declared: path.clone(),
                 };
-                entries.insert(name.clone(), resolve_path(name, path, workspace_root, src)?);
+                entries.insert(
+                    name.clone(),
+                    resolve_path(name, path, workspace_root, src, PathOrigin::UserManifest)?,
+                );
             }
             (None, Some(oci), None) => {
                 // Vendor-first: if `akua publish` embedded this dep's
@@ -433,6 +505,7 @@ fn resolve_from_vendor(
         &vendor_path.to_string_lossy(),
         workspace_root,
         placeholder,
+        PathOrigin::Internal,
     )?;
     match &mut chart.source {
         ResolvedSource::Oci { blob_digest, .. } => {
@@ -900,17 +973,36 @@ fn source_kind_label(source: DependencySource) -> &'static str {
     }
 }
 
+/// Origin of a path string handed to [`resolve_path`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PathOrigin {
+    /// `path = "..."` or `replace.path = "..."` in user-authored
+    /// `akua.toml`. Absolute and escape paths are rejected — see
+    /// CLAUDE.md "`replace` and `path` deps are workspace-local".
+    UserManifest,
+    /// Internal akua-managed path (vendor materialization, OCI cache
+    /// extraction). Already absolute; trusted by construction.
+    Internal,
+}
+
 fn resolve_path(
     name: &str,
     requested: &str,
     workspace_root: &Path,
     source: ResolvedSource,
+    origin: PathOrigin,
 ) -> Result<ResolvedChart, ChartResolveError> {
     let rel = PathBuf::from(requested);
+    if origin == PathOrigin::UserManifest && rel.is_absolute() {
+        return Err(ChartResolveError::AbsolutePathRejected {
+            name: name.to_string(),
+            path: rel,
+        });
+    }
     let joined = if rel.is_absolute() {
-        rel
+        rel.clone()
     } else {
-        workspace_root.join(rel)
+        workspace_root.join(&rel)
     };
 
     let canon = match joined.canonicalize() {
@@ -929,6 +1021,24 @@ fn resolve_path(
             });
         }
     };
+
+    // Workspace-escape guard for user-authored paths only. Internal
+    // callers (vendor, OCI cache) hand us absolute paths that
+    // legitimately live outside the workspace at canonicalize time
+    // (e.g. `$XDG_CACHE_HOME/akua/oci/...`).
+    if origin == PathOrigin::UserManifest {
+        let workspace_canon = workspace_root
+            .canonicalize()
+            .unwrap_or_else(|_| workspace_root.to_path_buf());
+        if !canon.starts_with(&workspace_canon) {
+            return Err(ChartResolveError::PathEscape {
+                name: name.to_string(),
+                requested: rel,
+                resolved: canon,
+                workspace_root: workspace_canon,
+            });
+        }
+    }
 
     let meta = canon.metadata().map_err(|e| ChartResolveError::Io {
         name: name.to_string(),
@@ -1602,5 +1712,69 @@ alpha = { path = "./charts/alpha" }
         let manifest = minimal_manifest("");
         let resolved = resolve(&manifest, ws.path()).unwrap();
         assert!(resolved.entries.is_empty());
+    }
+
+    #[test]
+    fn absolute_path_dep_is_rejected() {
+        let ws = tempfile::tempdir().unwrap();
+        let manifest = minimal_manifest(r#"evil = { path = "/etc" }"#);
+        let err = resolve(&manifest, ws.path()).unwrap_err();
+        assert!(
+            matches!(err, ChartResolveError::AbsolutePathRejected { .. }),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn parent_escape_is_rejected() {
+        // Workspace at <tmp>/ws; dep points at <tmp>/sibling — outside ws.
+        let tmp = tempfile::tempdir().unwrap();
+        let ws = tmp.path().join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+        let sibling = tmp.path().join("sibling");
+        std::fs::create_dir_all(&sibling).unwrap();
+        std::fs::write(sibling.join("Chart.yaml"), "name: x\nversion: 0\n").unwrap();
+        let manifest = minimal_manifest(r#"escape = { path = "../sibling" }"#);
+        let err = resolve(&manifest, &ws).unwrap_err();
+        assert!(
+            matches!(err, ChartResolveError::PathEscape { .. }),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn replace_rejected_when_opt_set() {
+        let tmp = tempfile::tempdir().unwrap();
+        let chart_dir = tmp.path().join("fork");
+        std::fs::create_dir_all(&chart_dir).unwrap();
+        std::fs::write(chart_dir.join("Chart.yaml"), "name: x\nversion: 0\n").unwrap();
+        let manifest = minimal_manifest(
+            r#"locked = { oci = "oci://r/x", version = "1.0.0", replace = { path = "fork" } }"#,
+        );
+        let opts = ResolverOptions {
+            offline: true,
+            reject_replace: true,
+            ..Default::default()
+        };
+        let err = resolve_with_options(&manifest, tmp.path(), &opts).unwrap_err();
+        assert!(
+            matches!(err, ChartResolveError::ReplaceRejected { .. }),
+            "got: {err:?}"
+        );
+    }
+
+    #[test]
+    fn replace_rejected_from_env_reads_var() {
+        // Save and restore the env var; tests run in the same process.
+        let prev = std::env::var("AKUA_REJECT_REPLACE").ok();
+        std::env::set_var("AKUA_REJECT_REPLACE", "1");
+        assert!(replace_rejected_from_env());
+        std::env::set_var("AKUA_REJECT_REPLACE", "0");
+        assert!(!replace_rejected_from_env());
+        std::env::remove_var("AKUA_REJECT_REPLACE");
+        assert!(!replace_rejected_from_env());
+        if let Some(v) = prev {
+            std::env::set_var("AKUA_REJECT_REPLACE", v);
+        }
     }
 }

@@ -202,6 +202,7 @@ pub fn run<W: Write>(
         cache_root: None,
         expected_digests,
         cosign_public_key_pem: None, // akua add surfaces cosign via render / verify
+        reject_replace: akua_core::chart_resolver::replace_rejected_from_env(),
     };
     // Best-effort: a dep pointing at a path that doesn't exist yet
     // (common in "add now, write chart later" flows) shouldn't block
