@@ -70,6 +70,36 @@ pub fn materialize_charts_if_any(
     materialize_charts(resolved).map(Some)
 }
 
+/// Synthesize an import-only stub directory for Akua-package deps.
+/// Each dep with a `package.k` becomes a `<alias>.k` containing only
+/// the upstream's `import` and `schema` declarations (extracted via
+/// [`crate::pkg_stub::extract_schemas`]). The directory mounts as
+/// ExternalPkg `pkgs` so consumers write `import pkgs.<alias>` to
+/// reach the typed schemas without firing the upstream's body.
+///
+/// Returns `None` when no Akua-package deps are present.
+pub fn materialize_pkg_stubs_if_any(
+    resolved: &crate::chart_resolver::ResolvedCharts,
+) -> std::io::Result<Option<tempfile::TempDir>> {
+    let aliased: Vec<(&str, &crate::chart_resolver::ResolvedChart)> = resolved
+        .kcl_pkgs()
+        .filter(|(_, c)| c.abs_path.join("package.k").is_file())
+        .collect();
+    if aliased.is_empty() {
+        return Ok(None);
+    }
+    let dir = tempfile::Builder::new().prefix("akua-pkgs-").tempdir()?;
+    const PKGS_KCL_MOD: &str =
+        "[package]\nname = \"pkgs\"\nedition = \"0.0.1\"\nversion = \"0.0.1\"\n";
+    std::fs::write(dir.path().join("kcl.mod"), PKGS_KCL_MOD)?;
+    for (alias, chart) in aliased {
+        let source = std::fs::read_to_string(chart.abs_path.join("package.k"))?;
+        let stub = crate::pkg_stub::extract_schemas(&source);
+        std::fs::write(dir.path().join(format!("{alias}.k")), stub)?;
+    }
+    Ok(Some(dir))
+}
+
 pub fn materialize_charts(
     resolved: &crate::chart_resolver::ResolvedCharts,
 ) -> std::io::Result<tempfile::TempDir> {

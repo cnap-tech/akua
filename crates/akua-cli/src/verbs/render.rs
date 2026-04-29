@@ -454,16 +454,31 @@ pub fn render_in_worker(
         )))
     })?;
 
+    // Akua-package deps go through a stub umbrella `pkgs.<alias>` —
+    // import-only schema re-exports synthesized from upstream's
+    // `package.k`. Mirrors the `charts` shape; importing pkgs.<alias>
+    // does not run upstream's body (which would otherwise fire its
+    // ctx.input() against the consumer's option("input") and panic on
+    // schema-shape mismatch).
+    let pkgs_tmp = akua_core::stdlib::materialize_pkg_stubs_if_any(charts).map_err(|e| {
+        RenderError::PackageK(PackageKError::KclEval(format!(
+            "materializing akua-pkg stubs: {e}"
+        )))
+    })?;
+
     // KCL ecosystem deps mount as their own ExternalPkg per alias.
     // No tempdir indirection — preopen each resolved root directly at
     // `/kcl-pkgs/<alias>` and tell the worker the alias→path mapping.
-    // Single iteration of `charts.kcl_pkgs()` produces both shapes the
-    // downstream APIs need (Vec for the host preopen list, BTreeMap
-    // for the wire request).
+    // Akua-package deps are skipped here; they reach the consumer via
+    // the `pkgs.<alias>` stub umbrella above instead of their own
+    // alias mount (which would expose upstream's full body).
     let mut kcl_preopens: Vec<(std::path::PathBuf, String)> = Vec::new();
     let mut kcl_pkgs_request: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
     for (alias, c) in charts.kcl_pkgs() {
+        if c.abs_path.join("package.k").is_file() {
+            continue;
+        }
         let guest_path = format!("/kcl-pkgs/{alias}");
         kcl_preopens.push((c.abs_path.clone(), guest_path.clone()));
         kcl_pkgs_request.insert(alias.to_string(), guest_path);
@@ -484,6 +499,7 @@ pub fn render_in_worker(
         inputs: Some(inputs_json),
         charts_pkg_path: charts_tmp.as_ref().map(|_| "/charts".to_string()),
         kcl_pkgs: kcl_pkgs_request,
+        pkgs_pkg_path: pkgs_tmp.as_ref().map(|_| "/akua-pkgs".to_string()),
     };
 
     let response = host
@@ -492,6 +508,7 @@ pub fn render_in_worker(
             ResourceLimits::default(),
             charts_tmp.as_ref().map(|d| d.path()),
             &kcl_preopens,
+            pkgs_tmp.as_ref().map(|d| d.path()),
         )
         .map_err(worker_to_render_err)?;
 
@@ -529,6 +546,7 @@ pub(crate) fn eval_source_in_worker(
         inputs: None,
         charts_pkg_path: None,
         kcl_pkgs: std::collections::BTreeMap::new(),
+        pkgs_pkg_path: None,
     };
     let response = host
         .invoke(&request, ResourceLimits::default())

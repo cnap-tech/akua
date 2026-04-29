@@ -197,12 +197,15 @@ impl PackageK {
             .collect();
 
         let json = serde_json::to_string(inputs)?;
+        let pkgs_tmp = crate::stdlib::materialize_pkg_stubs_if_any(charts)
+            .map_err(|e| PackageKError::KclEval(format!("materialize akua-package stubs: {e}")))?;
         let yaml = eval_kcl(
             &self.path,
             &self.source,
             &json,
             charts_tmp.as_ref().map(|d| d.path()),
             &kcl_pkgs,
+            pkgs_tmp.as_ref().map(|d| d.path()),
         )?;
         let parsed = parse_rendered(&yaml)?;
 
@@ -514,8 +517,24 @@ pub fn eval_source_full(
     charts_pkg_dir: Option<&Path>,
     kcl_pkgs: &std::collections::BTreeMap<String, std::path::PathBuf>,
 ) -> Result<String, PackageKError> {
+    eval_source_full_with_pkgs(path, source, inputs, charts_pkg_dir, kcl_pkgs, None)
+}
+
+/// Like [`eval_source_full`] but also mounts the `pkgs` ExternalPkg
+/// for synthesized Akua-package stubs (`import pkgs.<alias>`). The
+/// extra arg is added rather than baked into [`eval_source_full`] to
+/// keep the existing crate-public surface stable for callers (akua-
+/// wasm, tests) that don't yet thread stubs.
+pub fn eval_source_full_with_pkgs(
+    path: &Path,
+    source: &str,
+    inputs: &Value,
+    charts_pkg_dir: Option<&Path>,
+    kcl_pkgs: &std::collections::BTreeMap<String, std::path::PathBuf>,
+    pkgs_pkg_dir: Option<&Path>,
+) -> Result<String, PackageKError> {
     let json = serde_json::to_string(inputs)?;
-    eval_kcl(path, source, &json, charts_pkg_dir, kcl_pkgs)
+    eval_kcl(path, source, &json, charts_pkg_dir, kcl_pkgs, pkgs_pkg_dir)
 }
 
 /// Strip akua-extension decorators (`@ui(...)`) from KCL source
@@ -642,6 +661,7 @@ fn eval_kcl(
     option_json: &str,
     charts_pkg_dir: Option<&Path>,
     kcl_pkgs: &std::collections::BTreeMap<String, std::path::PathBuf>,
+    pkgs_pkg_dir: Option<&Path>,
 ) -> Result<String, PackageKError> {
     use kcl_lang::{Argument, ExecProgramArgs, ExternalPkg, API};
 
@@ -674,6 +694,12 @@ fn eval_kcl(
     if let Some(dir) = charts_pkg_dir {
         external_pkgs.push(ExternalPkg {
             pkg_name: "charts".to_string(),
+            pkg_path: dir.to_string_lossy().into_owned(),
+        });
+    }
+    if let Some(dir) = pkgs_pkg_dir {
+        external_pkgs.push(ExternalPkg {
+            pkg_name: "pkgs".to_string(),
             pkg_path: dir.to_string_lossy().into_owned(),
         });
     }

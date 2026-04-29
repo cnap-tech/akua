@@ -90,6 +90,11 @@ enum Request {
         /// without going through the synthetic `charts.*` umbrella.
         #[serde(default)]
         kcl_pkgs: std::collections::BTreeMap<String, String>,
+        /// Guest-visible path to the preopened `pkgs` stub dir.
+        /// Absent → no Akua-package deps; consumers can't
+        /// `import pkgs.<alias>` to reach upstream's typed schemas.
+        #[serde(default)]
+        pkgs_pkg_path: Option<String>,
     },
 }
 
@@ -155,7 +160,15 @@ fn run() -> Result<(), WorkerError> {
             inputs,
             charts_pkg_path,
             kcl_pkgs,
-        } => render_request(package_filename, source, inputs, charts_pkg_path, kcl_pkgs),
+            pkgs_pkg_path,
+        } => render_request(
+            package_filename,
+            source,
+            inputs,
+            charts_pkg_path,
+            kcl_pkgs,
+            pkgs_pkg_path,
+        ),
     };
 
     let out =
@@ -175,6 +188,7 @@ fn run() -> Result<(), WorkerError> {
         source_size = source.len(),
         kcl_pkg_count = kcl_pkgs.len(),
         has_charts = charts_pkg_path.is_some(),
+        has_pkgs = pkgs_pkg_path.is_some(),
     ),
 )]
 fn render_request(
@@ -183,6 +197,7 @@ fn render_request(
     inputs: Option<serde_json::Value>,
     charts_pkg_path: Option<String>,
     kcl_pkgs: std::collections::BTreeMap<String, String>,
+    pkgs_pkg_path: Option<String>,
 ) -> Response {
     let ver = env!("CARGO_PKG_VERSION");
 
@@ -208,17 +223,21 @@ fn render_request(
     let charts_path_buf = charts_pkg_path.map(std::path::PathBuf::from);
     let charts_ref = charts_path_buf.as_deref();
 
+    let pkgs_path_buf = pkgs_pkg_path.map(std::path::PathBuf::from);
+    let pkgs_ref = pkgs_path_buf.as_deref();
+
     let kcl_pkgs_paths: std::collections::BTreeMap<String, std::path::PathBuf> = kcl_pkgs
         .into_iter()
         .map(|(alias, p)| (alias, std::path::PathBuf::from(p)))
         .collect();
 
-    match akua_core::eval_source_full(
+    match akua_core::package_k::eval_source_full_with_pkgs(
         std::path::Path::new(&package_filename),
         &source,
         &inputs_value,
         charts_ref,
         &kcl_pkgs_paths,
+        pkgs_ref,
     ) {
         Ok(yaml) => {
             tracing::debug!(target: "akua::worker", yaml_size = yaml.len(), "kcl eval ok");

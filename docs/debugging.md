@@ -121,6 +121,7 @@ Worker-side changes that need this:
 - Edits under `crates/akua-render-worker/`
 - Edits under `crates/akua-core/` (the worker depends on it)
 - Edits to bundled stdlib files under `crates/akua-core/stdlib/akua/*.k` (they're `include_str!`-embedded at compile time)
+- Edits to `crates/akua-core/src/pkg_stub.rs` (the schema extractor for synthesized `pkgs.<alias>` stubs)
 
 ## Adding new spans + events
 

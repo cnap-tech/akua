@@ -1,5 +1,6 @@
 import akua.ctx
 import akua.pkg
+import pkgs.upstream as upstream
 
 # An "install" Package: composes a third-party Akua package
 # (`upstream`) and applies tenant-specific overlay + filter + extras.
@@ -16,17 +17,17 @@ input: Input = ctx.input()
 
 # 1. Render the upstream Package with caller-supplied inputs. The
 #    `package = "upstream"` alias resolves via this Package's
-#    `[dependencies]` — no path strings here. Inputs are an explicit
-#    dict; the upstream's `Input` schema validates field names + types
-#    on the inner side via `ctx.input()`. (Reaching upstream's typed
-#    `Input` at this call site needs a synthesized stub module per
-#    dep — follow-up work.)
+#    `[dependencies]` — no path strings here. The `import pkgs.upstream`
+#    above mounts a synthesized stub of upstream's schemas (no body),
+#    so `upstream.Input { ... }` type-checks at *this* call site —
+#    field-name typos and missing required fields surface here, not
+#    inside upstream during render.
 _up = pkg.render(pkg.Render {
     package = "upstream"
-    inputs  = {
+    inputs  = {**upstream.Input {
         appName  = input.app
         replicas = input.replicas
-    }
+    }}
 })
 
 # 2. Overlay: apply a tenant label to every upstream resource.

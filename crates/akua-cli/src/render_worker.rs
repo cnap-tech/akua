@@ -101,6 +101,12 @@ pub enum WorkerRequest {
         /// KCL-OCI deps. Wire-compat with `akua-render-worker`.
         #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
         kcl_pkgs: std::collections::BTreeMap<String, String>,
+        /// Guest-visible path to the preopened `pkgs` stub dir
+        /// holding import-only schemas for Akua-package deps. Set
+        /// when the consumer has at least one Akua-package
+        /// dependency; omit otherwise. Mirrors `charts_pkg_path`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pkgs_pkg_path: Option<String>,
     },
 }
 
@@ -271,7 +277,7 @@ impl RenderHost {
         req: &WorkerRequest,
         limits: ResourceLimits,
     ) -> Result<WorkerResponse, WorkerError> {
-        self.invoke_inner(req, limits, None, &[])
+        self.invoke_inner(req, limits, None, &[], None)
     }
 
     /// As [`invoke`](Self::invoke), but preopens any extra dirs the
@@ -296,8 +302,9 @@ impl RenderHost {
         limits: ResourceLimits,
         charts_host_dir: Option<&std::path::Path>,
         kcl_pkgs: &[(std::path::PathBuf, String)],
+        pkgs_host_dir: Option<&std::path::Path>,
     ) -> Result<WorkerResponse, WorkerError> {
-        self.invoke_inner(req, limits, charts_host_dir, kcl_pkgs)
+        self.invoke_inner(req, limits, charts_host_dir, kcl_pkgs, pkgs_host_dir)
     }
 
     /// Backwards-compatible wrapper. New callers should prefer
@@ -308,7 +315,7 @@ impl RenderHost {
         limits: ResourceLimits,
         charts_host_dir: &std::path::Path,
     ) -> Result<WorkerResponse, WorkerError> {
-        self.invoke_inner(req, limits, Some(charts_host_dir), &[])
+        self.invoke_inner(req, limits, Some(charts_host_dir), &[], None)
     }
 
     fn invoke_inner(
@@ -317,6 +324,7 @@ impl RenderHost {
         limits: ResourceLimits,
         charts_preopen: Option<&std::path::Path>,
         kcl_pkg_preopens: &[(std::path::PathBuf, String)],
+        pkgs_preopen: Option<&std::path::Path>,
     ) -> Result<WorkerResponse, WorkerError> {
         let (req_kind, package_filename) = match req {
             WorkerRequest::Ping { .. } => ("ping", ""),
@@ -394,6 +402,17 @@ impl RenderHost {
                 wasmtime_wasi::FilePerms::READ,
             )
             .map_err(|e| WorkerError::Wasmtime(format!("preopen kcl pkg `{guest_path}`: {e}")))?;
+        }
+        // Akua-package stub umbrella — `pkgs.<alias>` import-only
+        // schemas synthesized by `materialize_pkg_stubs_if_any`.
+        if let Some(dir) = pkgs_preopen {
+            wasi.preopened_dir(
+                dir,
+                "/akua-pkgs",
+                wasmtime_wasi::DirPerms::READ,
+                wasmtime_wasi::FilePerms::READ,
+            )
+            .map_err(|e| WorkerError::Wasmtime(format!("preopen akua-pkgs: {e}")))?;
         }
 
         let wasi_ctx = wasi.build_p1();
@@ -803,6 +822,7 @@ mod tests {
                     inputs: None,
                     charts_pkg_path: None,
                     kcl_pkgs: std::collections::BTreeMap::new(),
+                    pkgs_pkg_path: None,
                 },
                 ResourceLimits::default(),
             )
@@ -846,6 +866,7 @@ mod tests {
                     inputs: None,
                     charts_pkg_path: None,
                     kcl_pkgs: std::collections::BTreeMap::new(),
+                    pkgs_pkg_path: None,
                 },
                 ResourceLimits::default(),
             )
@@ -893,6 +914,7 @@ mod tests {
                     inputs: None,
                     charts_pkg_path: None,
                     kcl_pkgs: std::collections::BTreeMap::new(),
+                    pkgs_pkg_path: None,
                 },
                 ResourceLimits::default(),
             )
@@ -925,6 +947,7 @@ mod tests {
                     inputs: Some(inputs),
                     charts_pkg_path: None,
                     kcl_pkgs: std::collections::BTreeMap::new(),
+                    pkgs_pkg_path: None,
                 },
                 ResourceLimits::default(),
             )
@@ -957,6 +980,7 @@ mod tests {
                     inputs: None,
                     charts_pkg_path: None,
                     kcl_pkgs: std::collections::BTreeMap::new(),
+                    pkgs_pkg_path: None,
                 },
                 ResourceLimits::default(),
             )

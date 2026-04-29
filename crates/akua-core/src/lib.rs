@@ -94,6 +94,8 @@ pub mod package_render;
 pub mod package_tar;
 #[cfg(feature = "engine-kcl")]
 pub mod pkg_render;
+#[cfg(feature = "engine-kcl")]
+pub mod pkg_stub;
 #[cfg(feature = "cosign-verify")]
 pub mod slsa;
 #[cfg(feature = "engine-kcl")]
@@ -123,9 +125,9 @@ pub use mod_file::{
 };
 #[cfg(feature = "engine-kcl")]
 pub use package_k::{
-    eval_source, eval_source_full, eval_source_with_inputs, format_kcl, lint_kcl, lint_kcl_source,
-    list_options_kcl, list_options_kcl_source, parse_rendered_yaml, LintIssue, OptionInfo,
-    PackageK, PackageKError, RenderedPackage,
+    eval_source, eval_source_full, eval_source_full_with_pkgs, eval_source_with_inputs, format_kcl,
+    lint_kcl, lint_kcl_source, list_options_kcl, list_options_kcl_source, parse_rendered_yaml,
+    LintIssue, OptionInfo, PackageK, PackageKError, RenderedPackage,
 };
 #[cfg(feature = "engine-kcl")]
 pub use package_render::{
