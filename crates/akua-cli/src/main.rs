@@ -647,8 +647,54 @@ struct RenderCliArgs {
 
 fn main() {
     let cli = Cli::parse();
+    let args = universal_args(&cli.command);
+    let ctx = resolve_ctx(args);
+    let _observability = akua_cli::observability::init_subscriber(args, &ctx);
     let exit = dispatch(cli.command);
     std::process::exit(exit.code());
+}
+
+/// Extract the `UniversalArgs` block from whichever subcommand variant
+/// was matched. Every leaf variant carries an `args: UniversalArgs`
+/// field; the two grouping variants (`Cache`, `Auth`) delegate to their
+/// own subcommand.
+fn universal_args(cmd: &Commands) -> &UniversalArgs {
+    match cmd {
+        Commands::Init { args, .. }
+        | Commands::Whoami { args }
+        | Commands::Version { args }
+        | Commands::Verify { args, .. }
+        | Commands::Render { args, .. }
+        | Commands::Add { args, .. }
+        | Commands::Dev { args, .. }
+        | Commands::Test { args, .. }
+        | Commands::Tree { args, .. }
+        | Commands::Pull { args, .. }
+        | Commands::Publish { args, .. }
+        | Commands::Sign { args, .. }
+        | Commands::Update { args, .. }
+        | Commands::Lock { args, .. }
+        | Commands::Push { args, .. }
+        | Commands::Repl { args, .. }
+        | Commands::Pack { args, .. }
+        | Commands::Remove { args, .. }
+        | Commands::Diff { args, .. }
+        | Commands::Check { args, .. }
+        | Commands::Inspect { args, .. }
+        | Commands::Export { args, .. }
+        | Commands::Lint { args, .. }
+        | Commands::Fmt { args, .. } => args,
+        Commands::Cache { sub } => match sub {
+            CacheSub::List { args } | CacheSub::Clear { args, .. } | CacheSub::Path { args } => {
+                args
+            }
+        },
+        Commands::Auth { sub } => match sub {
+            AuthSub::List { args } | AuthSub::Add { args, .. } | AuthSub::Remove { args, .. } => {
+                args
+            }
+        },
+    }
 }
 
 fn dispatch(command: Commands) -> ExitCode {

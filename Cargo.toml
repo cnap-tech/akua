@@ -31,6 +31,15 @@ thiserror = "2"
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
 
+# Observability — tracing is the universal emitter (libraries depend on it
+# only); tracing-subscriber + the opentelemetry stack live in the host (cli).
+tracing = { version = "0.1", default-features = false, features = ["std", "attributes"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "json", "env-filter", "ansi", "registry"] }
+tracing-opentelemetry = "0.27"
+opentelemetry = "0.26"
+opentelemetry_sdk = { version = "0.26", features = ["rt-tokio-current-thread"] }
+opentelemetry-otlp = { version = "0.26", features = ["grpc-tonic"] }
+
 # Patch kcl-driver to cfg-guard its `std::env::current_dir()` call on
 # wasm32 — unblocks Phase 4's per-render wasmtime sandbox for every
 # kcl-derived crate in the workspace. Single-line fix lives on the

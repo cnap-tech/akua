@@ -26,7 +26,7 @@ build = "build.rs"
 # tree `#[cfg(feature = "cosign-verify")]` their own bits (e.g. the
 # attestation chain walker in `akua verify`) rather than leaking the
 # toggle through the core-only feature.
-default = ["oci-fetch", "cosign-verify", "dev-watch", "precompile-engines", "embed-engines"]
+default = ["oci-fetch", "cosign-verify", "dev-watch", "precompile-engines", "embed-engines", "otel"]
 oci-fetch = ["akua-core/oci-fetch"]
 cosign-verify = ["akua-core/cosign-verify"]
 dev-watch = ["akua-core/dev-watch", "dep:ctrlc"]
@@ -40,6 +40,10 @@ precompile-engines = ["akua-core/precompile-engines"]
 # where the engines ship via `@akua-dev/native-engines` and the
 # loader points at them via AKUA_NATIVE_ENGINES_DIR. See cnap-tech/akua#482.
 embed-engines = ["akua-core/embed-engines"]
+# OpenTelemetry export. Default on; activates only when the runtime sees
+# OTEL_EXPORTER_OTLP_ENDPOINT (or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT). Off
+# means smaller binaries (napi/sdk consumers) and no OTel deps.
+otel = ["dep:tracing-opentelemetry", "dep:opentelemetry", "dep:opentelemetry_sdk", "dep:opentelemetry-otlp"]
 # SDK type emission — off by default. `ts-export` turns on ts-rs
 # derives so the CLI contract + verb response types can be emitted
 # as TypeScript sources. `schema-export` does the same for
@@ -73,6 +77,15 @@ schemars = { version = "1", optional = true }
 wasmtime = "43"
 wasmtime-wasi = "43"
 engine-host-wasm = { path = "../engine-host-wasm" }
+
+# Observability. tracing is the universal emitter; tracing-subscriber wires
+# the host process subscriber. The OTel layer is feature-gated.
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
 
 [build-dependencies]
 # build.rs AOT-compiles the render-worker .wasm into a .cwasm. Must
