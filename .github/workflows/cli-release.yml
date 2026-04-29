@@ -125,6 +125,11 @@ jobs:
       # the worker is missing, so this step is load-bearing for the
       # release matrix and a regression guard for the future.
       - name: Build embedded wasm engines
+        # Linux-only — helm-engine-wasm's `fork/apply.sh` is bash, can't
+        # exec on Windows. Same gating native-release.yml uses. Windows
+        # binaries ship without helm + kustomize engines; the basic
+        # render path (the smoke test below) still works.
+        if: runner.os != 'Windows'
         run: mise exec -- task build:engines
 
       - name: Build embedded render-worker
