@@ -4,10 +4,11 @@ name: sdk-release
 #
 # The SDK ships compiled JS + .d.ts (no raw TS); end users get a
 # normal npm install. The matching `@akua-dev/native@<same-version>`
-# must already be published — release it first via native-release.yml,
-# then tag `sdk-v<semver>`. SDK version floats independently of the
-# CLI's crate version: doc tweaks or wrapper-layer fixes ship without
-# rebuilding the binary.
+# must be on npm before this workflow publishes; the wait step below
+# polls for up to 20 min so you can fire `native-v0.x.y` and
+# `sdk-v0.x.y` together — sdk-release blocks until native lands. SDK
+# version floats independently of the CLI's crate version: doc tweaks
+# or wrapper-layer fixes ship without rebuilding the binary.
 
 on:
   push:
@@ -69,18 +70,28 @@ jobs:
             packages/sdk/package.json > packages/sdk/package.json.tmp
           mv packages/sdk/package.json.tmp packages/sdk/package.json
 
-      - name: Verify matching @akua-dev/native is on npm
-        # Fail fast if the user tagged the SDK before the native
-        # release landed — otherwise the published SDK would 404 on
-        # `npm install` for end users.
+      - name: Wait for matching @akua-dev/native on npm
+        # native-release.yml + sdk-release.yml are independent
+        # workflows — when both tags get pushed together, sdk-release
+        # may reach this step before native-release finishes its 7-
+        # platform matrix + publish. Poll the registry for up to
+        # 20 min (native publishes within ~12-15 min of tag in the
+        # worst case); fast path on a sequenced release is one npm
+        # view call (~1 s).
         run: |
           set -eu
           version="${GITHUB_REF_NAME#sdk-v}"
-          if ! npm view "@akua-dev/native@${version}" version > /dev/null 2>&1; then
-            echo "ERROR: @akua-dev/native@${version} is not on npm yet."
-            echo "Tag and publish native-v${version} first, then re-tag sdk-v${version}."
-            exit 1
-          fi
+          deadline=$((SECONDS + 1200))
+          while ! npm view "@akua-dev/native@${version}" version > /dev/null 2>&1; do
+            if [ "$SECONDS" -ge "$deadline" ]; then
+              echo "ERROR: @akua-dev/native@${version} did not appear on npm within 20 min."
+              echo "Either native-release.yml failed, or you forgot to push native-v${version}."
+              exit 1
+            fi
+            echo "@akua-dev/native@${version} not on npm yet — retry in 30 s..."
+            sleep 30
+          done
+          echo "@akua-dev/native@${version} is on npm — proceeding with sdk publish."
 
       - name: Build SDK (bun bundle + tsc declarations)
         run: mise exec -- task sdk:build
