@@ -52,10 +52,17 @@ fn resolve_filter(args: &UniversalArgs) -> String {
         None if args.verbose => "debug",
         None => return default_filter(),
     };
-    format!("{level},akua={level},akua_cli={level},akua_core={level},akua_render_worker={level}")
+    // Leading `warn` keeps transitive crates (wasmtime, rustc_span,
+    // salsa, kcl_*) quiet even at --log-level=debug; only akua* targets
+    // honor the requested level. RUST_LOG remains the escape hatch for
+    // anyone who needs to peek at internals.
+    format!("warn,akua={level},akua_cli={level},akua_core={level},akua_render_worker={level}")
 }
 
 fn default_filter() -> String {
+    // Leading `warn` silences transitive crates (wasmtime emits an
+    // info span per syscall; kcl/rustc_span/salsa flood at debug);
+    // only akua* targets stay at info.
     "warn,akua=info,akua_cli=info,akua_core=info,akua_render_worker=info".to_string()
 }
 
@@ -73,6 +80,14 @@ fn apply_bridge_trace(directive: String) -> String {
 /// once at process start.
 pub fn init_subscriber(args: &UniversalArgs, ctx: &Context) -> ObservabilityHandle {
     let directive = apply_bridge_trace(resolve_filter(args));
+
+    // Propagate to the worker subscriber. The render-worker
+    // wasmtime store reads this back via WasiCtxBuilder.env(...) so
+    // worker spans honor the host's --log-level / -v.
+    if std::env::var_os("AKUA_WORKER_LOG").is_none() {
+        std::env::set_var("AKUA_WORKER_LOG", &directive);
+    }
+
     let env_filter = EnvFilter::try_new(&directive).unwrap_or_else(|_| EnvFilter::new("warn"));
 
     let json_mode = matches!(ctx.output, OutputMode::Json);
@@ -144,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn verbose_forces_debug() {
+    fn verbose_forces_debug_on_akua_targets() {
         let args = UniversalArgs {
             verbose: true,
             ..Default::default()
@@ -152,6 +167,8 @@ mod tests {
         // RUST_LOG must not be set for this test; ensure it isn't.
         std::env::remove_var("RUST_LOG");
         let f = resolve_filter(&args);
-        assert!(f.starts_with("debug"));
+        assert!(f.contains("akua=debug"), "got: {f}");
+        assert!(f.contains("akua_render_worker=debug"), "got: {f}");
+        assert!(f.starts_with("warn"), "leading level should be warn: {f}");
     }
 }

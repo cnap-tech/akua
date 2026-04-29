@@ -33,6 +33,8 @@ use std::io::{Read, Write};
 
 use serde::{Deserialize, Serialize};
 
+mod observability;
+
 // Host-plugin bridge allocators — exported so the wasmtime host can
 // place the plugin response into guest linear memory, return its
 // pointer to KCL's `kcl_plugin_invoke_json_wasm` extern. C-string
@@ -114,6 +116,7 @@ enum Response {
 }
 
 fn main() {
+    observability::init();
     let code = match run() {
         Ok(()) => 0,
         Err(e) => {
@@ -163,6 +166,17 @@ fn run() -> Result<(), WorkerError> {
     Ok(())
 }
 
+#[tracing::instrument(
+    target = "akua::worker",
+    level = "info",
+    skip_all,
+    fields(
+        package_filename = %package_filename,
+        source_size = source.len(),
+        kcl_pkg_count = kcl_pkgs.len(),
+        has_charts = charts_pkg_path.is_some(),
+    ),
+)]
 fn render_request(
     package_filename: String,
     source: String,
@@ -179,6 +193,7 @@ fn render_request(
         Some(json) => match serde_json::from_value(json) {
             Ok(y) => y,
             Err(e) => {
+                tracing::error!(target: "akua::worker", error = %e, "inputs decode failed");
                 return Response::Render {
                     status: "fail",
                     yaml: String::new(),
@@ -205,18 +220,24 @@ fn render_request(
         charts_ref,
         &kcl_pkgs_paths,
     ) {
-        Ok(yaml) => Response::Render {
-            status: "ok",
-            yaml,
-            message: String::new(),
-            worker_version: ver,
-        },
-        Err(e) => Response::Render {
-            status: "fail",
-            yaml: String::new(),
-            message: e.to_string(),
-            worker_version: ver,
-        },
+        Ok(yaml) => {
+            tracing::debug!(target: "akua::worker", yaml_size = yaml.len(), "kcl eval ok");
+            Response::Render {
+                status: "ok",
+                yaml,
+                message: String::new(),
+                worker_version: ver,
+            }
+        }
+        Err(e) => {
+            tracing::error!(target: "akua::worker", error = %e, "kcl eval failed");
+            Response::Render {
+                status: "fail",
+                yaml: String::new(),
+                message: e.to_string(),
+                worker_version: ver,
+            }
+        }
     }
 }
 

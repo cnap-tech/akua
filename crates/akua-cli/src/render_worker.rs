@@ -318,6 +318,22 @@ impl RenderHost {
         charts_preopen: Option<&std::path::Path>,
         kcl_pkg_preopens: &[(std::path::PathBuf, String)],
     ) -> Result<WorkerResponse, WorkerError> {
+        let (req_kind, package_filename) = match req {
+            WorkerRequest::Ping { .. } => ("ping", ""),
+            WorkerRequest::Render {
+                package_filename, ..
+            } => ("render", package_filename.as_str()),
+        };
+        let span = tracing::info_span!(
+            target: "akua",
+            "worker.invoke",
+            kind = req_kind,
+            package_filename,
+            chart_dep_count = kcl_pkg_preopens.len(),
+        );
+        let _entered = span.enter();
+        tracing::debug!(target: "akua", "worker.invoke.start");
+
         let req_bytes = serde_json::to_vec(req).map_err(WorkerError::EncodeRequest)?;
 
         // WASI pipes as owned handles we can read back after the
@@ -331,6 +347,15 @@ impl RenderHost {
         wasi.stdout(stdout_pipe.clone());
         wasi.stderr(stderr_pipe.clone());
         wasi.arg("akua-render-worker");
+        // Carry the host's resolved tracing filter into the guest so
+        // worker.observability::init() picks the same level the user
+        // asked for. Defaults to whatever the host process saw; absent
+        // → worker subscriber falls back to `info`.
+        if let Ok(directive) = std::env::var("AKUA_WORKER_LOG") {
+            wasi.env("AKUA_WORKER_LOG", &directive);
+        } else if let Ok(rust_log) = std::env::var("RUST_LOG") {
+            wasi.env("AKUA_WORKER_LOG", &rust_log);
+        }
         // Always-on preopen: the akua KCL stdlib (`akua.helm`,
         // `akua.kustomize`, `akua.pkg`, `akua.ctx`). Materialized on
         // the host because `std::env::temp_dir()` panics on wasip1,
@@ -405,6 +430,11 @@ impl RenderHost {
         drop(store);
         let out_bytes = stdout_pipe.contents();
         let err_bytes = stderr_pipe.contents();
+
+        // Re-emit worker stderr (JSON-lines from the worker subscriber)
+        // through the host subscriber. Runs on every invocation so
+        // success and trap paths emit the same observability stream.
+        replay_worker_logs(&err_bytes);
         match trap_result {
             Ok(()) => {}
             Err(e) => match e.downcast_ref::<wasmtime_wasi::I32Exit>() {
@@ -451,6 +481,75 @@ impl RenderHost {
         let raw = String::from_utf8_lossy(&out_bytes).into_owned();
         serde_json::from_slice(&out_bytes)
             .map_err(|source| WorkerError::DecodeResponse { source, raw })
+    }
+}
+
+/// Re-emit worker stderr (JSON-lines from `tracing-subscriber.json`) as
+/// host-side tracing events. Each line gets the worker's level + message
+/// + the originating target (typically `akua::worker`); the host's
+/// subscriber re-attaches them under whatever span is currently active
+/// (today: `worker.invoke`).
+///
+/// Best-effort. Lines that don't parse as JSON are emitted as a single
+/// `warn!` so nothing the worker emitted is silently dropped.
+fn replay_worker_logs(bytes: &[u8]) {
+    if bytes.is_empty() {
+        return;
+    }
+    let text = String::from_utf8_lossy(bytes);
+    for line in text.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<WorkerLogLine<'_>>(line) {
+            Ok(rec) => emit_worker_event(&rec),
+            Err(_) => tracing::warn!(target: "akua::worker", raw = line, "non-json worker stderr"),
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct WorkerLogLine<'a> {
+    #[serde(default)]
+    level: &'a str,
+    #[serde(default)]
+    target: &'a str,
+    #[serde(default)]
+    fields: serde_json::Value,
+}
+
+fn emit_worker_event(rec: &WorkerLogLine<'_>) {
+    let target = if rec.target.is_empty() {
+        "akua::worker"
+    } else {
+        rec.target
+    };
+    let message = rec
+        .fields
+        .get("message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    // tracing's compile-time level macros require a literal level, so
+    // dispatch through a match. Fields beyond `message` are flattened
+    // into a single `fields_json` attribute — preserves all worker
+    // context without forcing a static schema here.
+    let extras = rec.fields.to_string();
+    match rec.level {
+        "TRACE" => {
+            tracing::trace!(target: "akua::worker", worker_target = target, fields_json = %extras, "{message}")
+        }
+        "DEBUG" => {
+            tracing::debug!(target: "akua::worker", worker_target = target, fields_json = %extras, "{message}")
+        }
+        "WARN" => {
+            tracing::warn!(target: "akua::worker", worker_target = target, fields_json = %extras, "{message}")
+        }
+        "ERROR" => {
+            tracing::error!(target: "akua::worker", worker_target = target, fields_json = %extras, "{message}")
+        }
+        _ => {
+            tracing::info!(target: "akua::worker", worker_target = target, fields_json = %extras, "{message}")
+        }
     }
 }
 

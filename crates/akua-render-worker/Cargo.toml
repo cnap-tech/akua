@@ -30,3 +30,8 @@ akua-core = { path = "../akua-core", default-features = false, features = ["engi
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
+# Worker emits spans + events; the host replays the JSON-lines back
+# into its own subscriber so they parent under the live `worker.invoke`
+# span. `env-filter` and `ansi` are off to keep the .wasm small.
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "json", "env-filter", "registry"] }
