@@ -85,7 +85,8 @@ pub fn shared_config() -> Config {
     // wasm `name` section preserved (see akua-render-worker's
     // build profile), `Trap::backtrace()` returns FrameInfo entries
     // whose `func_name()` resolves through the AOT address map.
-    config.wasm_backtrace(true);
+    // Backtrace capture is on by default (max 20 frames); these two
+    // turn on file/line resolution + the wasm-PC → name map.
     config.wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Enable);
     config.generate_address_map(true);
     config
