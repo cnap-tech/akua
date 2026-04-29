@@ -34,7 +34,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Scaffold a new Package (akua.toml + package.k + inputs.example.yaml).
+    /// Scaffold a new Package.
+    ///
+    /// Writes `akua.toml`, `package.k`, and `inputs.example.yaml`.
     Init {
         #[command(flatten)]
         args: UniversalArgs,
@@ -61,27 +63,33 @@ enum Commands {
         args: UniversalArgs,
     },
 
-    /// Lockfile ↔ manifest consistency check (workspace mode, default)
-    /// OR offline verify of a local tarball against its `.akuasig`
-    /// sidecar via `--tarball` (requires `cosign-verify` feature).
+    /// Lockfile ↔ manifest consistency check.
+    ///
+    /// Workspace mode by default; OR offline verify of a local
+    /// tarball against its `.akuasig` sidecar via `--tarball`
+    /// (requires the `cosign-verify` feature).
     Verify {
         #[command(flatten)]
         args: UniversalArgs,
 
-        /// Workspace root (default: current directory). Ignored when
-        /// `--tarball` is set for anything other than resolving a
-        /// default public key from `akua.toml [signing]`.
+        /// Workspace root (default: current directory).
+        ///
+        /// Ignored when `--tarball` is set for anything other than
+        /// resolving a default public key from `akua.toml [signing]`.
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
 
-        /// Verify a packed `.tar.gz` instead of a workspace. Pair
-        /// with `akua sign` for the offline / air-gap flow.
+        /// Verify a packed `.tar.gz` instead of a workspace.
+        ///
+        /// Pair with `akua sign` for the offline / air-gap flow.
         #[cfg(feature = "cosign-verify")]
         #[arg(long)]
         tarball: Option<PathBuf>,
 
-        /// Path to the `.akuasig` sidecar. Defaults to
-        /// `<tarball>.akuasig`. Only meaningful with `--tarball`.
+        /// Path to the `.akuasig` sidecar.
+        ///
+        /// Defaults to `<tarball>.akuasig`. Only meaningful with
+        /// `--tarball`.
         #[cfg(feature = "cosign-verify")]
         #[arg(long)]
         sig: Option<PathBuf>,
@@ -103,8 +111,9 @@ enum Commands {
         render_args: RenderCliArgs,
     },
 
-    /// Insert a dependency into akua.toml. Pure manifest edit — no
-    /// OCI fetch, no lockfile mutation.
+    /// Insert a dependency into akua.toml.
+    ///
+    /// Pure manifest edit — no OCI fetch, no lockfile mutation.
     #[command(group(ArgGroup::new("source")
         .required(true)
         .args(["oci", "git", "path"])))]
@@ -148,10 +157,11 @@ enum Commands {
         workspace: PathBuf,
     },
 
-    /// Watch the workspace + re-render on save. Blocks until Ctrl-C.
-    /// Each debounced save batch emits one event (JSON line when
-    /// `--json`, one-line status otherwise) carrying the render
-    /// duration + summary.
+    /// Watch the workspace and re-render on save.
+    ///
+    /// Blocks until Ctrl-C. Each debounced save batch emits one event
+    /// (JSON line under `--json`, one-line status otherwise) carrying
+    /// the render duration + summary.
     #[cfg(feature = "dev-watch")]
     Dev {
         #[command(flatten)]
@@ -161,8 +171,9 @@ enum Commands {
         #[arg(long, default_value = "./package.k")]
         package: PathBuf,
 
-        /// Inputs file (JSON or YAML). Defaults to auto-discovery
-        /// next to the Package.
+        /// Inputs file (JSON or YAML).
+        ///
+        /// Defaults to auto-discovery next to the Package.
         #[arg(long)]
         inputs: Option<PathBuf>,
 
@@ -179,8 +190,9 @@ enum Commands {
         debounce_ms: u64,
     },
 
-    /// Run `test_*.k` / `*_test.k` files in the workspace. Each
-    /// test is a standalone KCL program; `assert` / `check:`
+    /// Run `test_*.k` / `*_test.k` files in the workspace.
+    ///
+    /// Each test is a standalone KCL program; `assert` / `check:`
     /// failures are reported as test failures. `--golden` also runs
     /// snapshot diffs of every package.k against
     /// `snapshots/<pkg>/<inputs-stem>/`; `--update-snapshots`
@@ -212,8 +224,9 @@ enum Commands {
         workspace: PathBuf,
     },
 
-    /// Pull a published akua Package from an OCI registry and extract
-    /// it to a target directory.
+    /// Pull a published akua Package from OCI.
+    ///
+    /// Extracts the tarball into a target directory.
     Pull {
         #[command(flatten)]
         args: UniversalArgs,
@@ -231,9 +244,10 @@ enum Commands {
         out: PathBuf,
     },
 
-    /// Package the workspace and push it to an OCI registry as an
-    /// akua Package artifact. Uploads the tarball + writes a manifest
-    /// under `oci://<ref>:<tag>` (tag defaults to `[package].version`).
+    /// Push the workspace to OCI as an akua Package artifact.
+    ///
+    /// Uploads the tarball + writes a manifest under
+    /// `oci://<ref>:<tag>` (tag defaults to `[package].version`).
     /// Signs by default when `akua.toml [signing].cosign_private_key`
     /// is set; `--no-sign` skips signing explicitly.
     Publish {
@@ -264,11 +278,12 @@ enum Commands {
         workspace: PathBuf,
     },
 
-    /// Produce a cosign signature for a packed tarball without
-    /// touching a registry. Writes an `.akuasig` sidecar next to
-    /// the tarball for a later `akua push --sig` to upload. Unlocks
-    /// the air-gap flow: pack + sign here, transfer, push + upload-
-    /// sig there.
+    /// Produce a cosign signature for a packed tarball.
+    ///
+    /// Writes an `.akuasig` sidecar next to the tarball for a later
+    /// `akua push --sig` to upload — does not touch a registry.
+    /// Unlocks the air-gap flow: pack + sign here, transfer, push +
+    /// upload-sig there.
     #[cfg(feature = "cosign-verify")]
     Sign {
         #[command(flatten)]
@@ -303,10 +318,11 @@ enum Commands {
         out: Option<PathBuf>,
     },
 
-    /// Intentionally bump `akua.lock` against whatever upstream now
-    /// serves. Distinct from `akua lock`: where `lock` rejects OCI
-    /// digest drift (security), `update` accepts it and records the
-    /// new digest. `--dep <name>` scopes the refresh to one entry.
+    /// Bump `akua.lock` to whatever upstream now serves.
+    ///
+    /// Distinct from `akua lock`: where `lock` rejects OCI digest
+    /// drift (security), `update` accepts it and records the new
+    /// digest. `--dep <name>` scopes the refresh to one entry.
     /// Cargo analogue: `cargo update`.
     Update {
         #[command(flatten)]
@@ -320,10 +336,11 @@ enum Commands {
         dep: Option<String>,
     },
 
-    /// Regenerate `akua.lock` from `akua.toml`. Resolves every dep
-    /// (online — path, OCI, git) and writes the merged lock back.
-    /// `--check` mode diffs without writing; exits 1 on drift.
-    /// Analogue of `cargo generate-lockfile`.
+    /// Regenerate `akua.lock` from `akua.toml`.
+    ///
+    /// Resolves every dep online (path, OCI, git) and writes the
+    /// merged lock back. `--check` mode diffs without writing; exits
+    /// 1 on drift. Analogue of `cargo generate-lockfile`.
     Lock {
         #[command(flatten)]
         args: UniversalArgs,
@@ -337,10 +354,11 @@ enum Commands {
         check: bool,
     },
 
-    /// Upload a pre-packed `.tar.gz` (from `akua pack`) to an OCI
-    /// registry. The push half of `akua publish`, decomposed so
-    /// air-gap flows work: pack on one host, transfer the tarball,
-    /// push from another.
+    /// Upload a pre-packed `.tar.gz` to OCI.
+    ///
+    /// The push half of `akua publish`, decomposed so air-gap flows
+    /// work: pack on one host, transfer the tarball, push from
+    /// another.
     Push {
         #[command(flatten)]
         args: UniversalArgs,
@@ -358,8 +376,9 @@ enum Commands {
         #[arg(long)]
         tag: String,
 
-        /// Path to a `.akuasig` sidecar (from `akua sign`). When
-        /// present, the sidecar's ref/tag/manifest_digest are
+        /// Path to a `.akuasig` sidecar (from `akua sign`).
+        ///
+        /// When present, the sidecar's ref/tag/manifest_digest are
         /// matched against the push target; on match, the `.sig`
         /// is uploaded alongside the tarball.
         #[cfg(feature = "cosign-verify")]
@@ -367,21 +386,24 @@ enum Commands {
         sig: Option<PathBuf>,
     },
 
-    /// Interactive KCL shell — accumulates submitted lines into a
-    /// growing `.k` source, re-evaluates on each entry, prints the
-    /// top-level bindings. Meta commands start with `.`
-    /// (`.load <path>`, `.reset`, `.show`, `.help`, `.exit`). No
-    /// engine callables (`helm.template`, `pkg.render`, etc.) — use
-    /// `akua render` against a workspace for those.
+    /// Interactive KCL shell.
+    ///
+    /// Accumulates submitted lines into a growing `.k` source,
+    /// re-evaluates on each entry, prints the top-level bindings.
+    /// Meta commands start with `.` (`.load <path>`, `.reset`,
+    /// `.show`, `.help`, `.exit`). No engine callables
+    /// (`helm.template`, `pkg.render`, etc.) — use `akua render`
+    /// against a workspace for those.
     Repl {
         #[command(flatten)]
         args: UniversalArgs,
     },
 
-    /// Pack the workspace into a local `.tar.gz` — same shape as the
-    /// tarball `akua publish` uploads, but written to disk instead of
-    /// pushed. Use for air-gap transfers, offline signing, or
-    /// archival diff.
+    /// Pack the workspace into a local `.tar.gz`.
+    ///
+    /// Same shape as the tarball `akua publish` uploads, but written
+    /// to disk instead of pushed. Use for air-gap transfers, offline
+    /// signing, or archival diff.
     Pack {
         #[command(flatten)]
         args: UniversalArgs,
@@ -431,7 +453,9 @@ enum Commands {
         after: PathBuf,
     },
 
-    /// Fast workspace check — parses akua.toml + akua.lock + lints package.k.
+    /// Fast workspace check (parse + lint).
+    ///
+    /// Parses akua.toml + akua.lock and lints package.k.
     Check {
         #[command(flatten)]
         args: UniversalArgs,
@@ -443,10 +467,11 @@ enum Commands {
         package: PathBuf,
     },
 
-    /// Report a Package's input surface (via `--package`) OR a
-    /// packed tarball's metadata (via `--tarball`) without executing
-    /// anything. Tarball mode pairs with `akua pack` + `akua push`
-    /// for air-gap triage.
+    /// Report a Package's input surface or tarball metadata.
+    ///
+    /// `--package` reads a Package.k's input schema; `--tarball`
+    /// reads a packed artifact's manifest. Neither path executes
+    /// any KCL — air-gap triage friendly.
     #[command(group(ArgGroup::new("inspect_target").args(["package", "tarball"])))]
     Inspect {
         #[command(flatten)]
@@ -463,9 +488,11 @@ enum Commands {
         tarball: Option<PathBuf>,
     },
 
-    /// Emit the Package's `Input` schema as JSON Schema 2020-12 or
-    /// OpenAPI 3.1. Powers UI form renderers, API doc generators,
-    /// and admission-webhook schema validators.
+    /// Emit the Package's `Input` schema (JSON Schema / OpenAPI).
+    ///
+    /// Outputs JSON Schema 2020-12 or OpenAPI 3.1. Powers UI form
+    /// renderers, API doc generators, and admission-webhook schema
+    /// validators.
     Export {
         #[command(flatten)]
         args: UniversalArgs,
@@ -512,15 +539,18 @@ enum Commands {
         stdout: bool,
     },
 
-    /// List, clear, or locate the on-disk OCI + git caches under
-    /// `$XDG_CACHE_HOME/akua/`. Useful for ephemeral CI runners
-    /// and disk-pressure triage.
+    /// Manage on-disk OCI + git caches.
+    ///
+    /// List, clear, or locate the caches under
+    /// `$XDG_CACHE_HOME/akua/`. Useful for ephemeral CI runners and
+    /// disk-pressure triage.
     Cache {
         #[command(subcommand)]
         sub: CacheSub,
     },
 
     /// Manage credentials in `$XDG_CONFIG_HOME/akua/auth.toml`.
+    ///
     /// `add` reads the secret from stdin (no interactive prompt,
     /// no password on the command line — mirrors `docker login
     /// --password-stdin`).
@@ -620,33 +650,41 @@ struct RenderCliArgs {
     #[arg(long)]
     dry_run: bool,
 
-    /// Print rendered manifests as multi-doc YAML to stdout instead of writing files.
+    /// Emit rendered manifests as multi-doc YAML on stdout.
+    ///
+    /// Replaces the per-file write to `--out`.
     #[arg(long)]
     stdout: bool,
 
-    /// Reject raw-string plugin paths. Every chart must be declared in
-    /// `akua.toml` and imported as `charts.<name>`. Equivalent to
-    /// Cargo's `--locked` — CI-grade "every dep accounted for."
+    /// Reject raw-string plugin paths.
+    ///
+    /// Every chart must be declared in `akua.toml` and imported as
+    /// `charts.<name>`. Equivalent to Cargo's `--locked` — CI-grade
+    /// "every dep accounted for."
     #[arg(long)]
     strict: bool,
 
-    /// Forbid network access during resolve. OCI deps must be fully
-    /// satisfied from the local cache (populated by a prior
-    /// `akua add`). Path + replace deps are unaffected.
+    /// Forbid network access during resolve.
+    ///
+    /// OCI deps must be fully satisfied from the local cache
+    /// (populated by a prior `akua add`). Path + replace deps are
+    /// unaffected.
     #[arg(long)]
     offline: bool,
 
-    /// Hard cap on the `pkg.render` composition depth. Default 16
-    /// (`BudgetSnapshot::DEFAULT_MAX_DEPTH`); lower it to harden CI
-    /// against runaway fan-out. Cycle detection is separate.
+    /// Cap `pkg.render` composition depth (default 16).
+    ///
+    /// Lower this to harden CI against runaway fan-out. Cycle
+    /// detection is separate (`E_RENDER_CYCLE`).
     #[arg(long, value_name = "N")]
     max_depth: Option<usize>,
 
-    /// Diagnostic — emit the post-eval resources list (pre-YAML
-    /// normalization) alongside the rendered manifests under `--json`.
-    /// Useful for debugging composition (`pkg.render`, `helm.template`,
-    /// `kustomize.build` outputs visible). Hidden from short-help; the
-    /// JSON shape is best-effort and may shift between releases.
+    /// Emit post-eval resources alongside the YAML (debug).
+    ///
+    /// Under `--json`, includes the resources list before YAML
+    /// normalization — useful for inspecting `pkg.render`,
+    /// `helm.template`, `kustomize.build` output. Best-effort
+    /// surface; shape may shift between releases.
     #[arg(long, hide_short_help = true)]
     debug: bool,
 }

@@ -11,22 +11,28 @@ use clap::Args;
 /// Consumed via `#[command(flatten)]` on each per-verb Args struct.
 #[derive(Debug, Clone, Args, Default)]
 pub struct UniversalArgs {
-    /// Emit structured JSON to stdout (§1.1). Auto-enables when akua
-    /// detects an agent context unless overridden by `--no-json`.
+    /// Emit structured JSON to stdout (§1.1).
+    ///
+    /// Auto-enables when akua detects an agent context unless
+    /// overridden by `--no-json`.
     #[arg(long, global = true, group = "output_mode", action = clap::ArgAction::SetTrue)]
     pub json: bool,
 
-    /// Force human-readable text output, even in an agent context.
-    /// Explicit opt-out per cli-contract §1.5.
+    /// Force human-readable text output.
+    ///
+    /// Explicit opt-out from agent-context auto-detection
+    /// (cli-contract §1.5).
     #[arg(long, global = true, group = "output_mode", action = clap::ArgAction::SetTrue)]
     pub no_json: bool,
 
-    /// Compute the plan but do not write (§4).
+    /// Compute the plan; do not write (§4).
     #[arg(long, global = true, action = clap::ArgAction::SetTrue)]
     pub plan: bool,
 
-    /// Maximum time before the verb exits with code 6 (§5). Go-duration
-    /// format: `30s`, `5m`, `1h`.
+    /// Wall-clock cap; exits code 6 on expiry (§5).
+    ///
+    /// Go-duration format: `30s`, `5m`, `1h`, `250ms`. Invalid
+    /// values fail with `E_INVALID_FLAG`.
     #[arg(long, global = true, value_name = "DURATION")]
     pub timeout: Option<String>,
 
@@ -34,8 +40,9 @@ pub struct UniversalArgs {
     #[arg(long, global = true, value_name = "UUID")]
     pub idempotency_key: Option<String>,
 
-    /// Structured log format to stderr. Defaults to `text`; auto-
-    /// enables `json` in agent context.
+    /// Structured log format to stderr.
+    ///
+    /// Defaults to `text`; auto-enables `json` in agent context.
     #[arg(long, global = true, value_name = "FORMAT", value_parser = ["text", "json"])]
     pub log: Option<String>,
 
@@ -43,26 +50,29 @@ pub struct UniversalArgs {
     #[arg(long, global = true, value_name = "LEVEL", value_parser = ["debug", "info", "warn", "error"])]
     pub log_level: Option<String>,
 
-    /// More detail in logs. Does not change stdout format.
+    /// More detail in logs (does not change stdout format).
     #[arg(short, long, global = true, action = clap::ArgAction::SetTrue)]
     pub verbose: bool,
 
-    /// Disable color codes in human-readable output (auto-disabled
-    /// under `--json` and in agent context).
+    /// Disable color codes in human-readable output.
+    ///
+    /// Auto-disabled under `--json` and in agent context.
     #[arg(long, global = true, action = clap::ArgAction::SetTrue)]
     pub no_color: bool,
 
-    /// Suppress spinners and animated progress (auto-disabled in
-    /// agent context).
+    /// Suppress spinners and animated progress.
+    ///
+    /// Auto-disabled in agent context.
     #[arg(long, global = true, action = clap::ArgAction::SetTrue)]
     pub no_progress: bool,
 
-    /// Never block on stdin; fail with exit 1 if input is required
-    /// (auto-enabled in agent context).
+    /// Never block on stdin (fail with exit 1 if required).
+    ///
+    /// Auto-enabled in agent context.
     #[arg(long, global = true, action = clap::ArgAction::SetTrue)]
     pub no_interactive: bool,
 
-    /// Per-invocation override: disable agent-context auto-detection.
+    /// Disable agent-context auto-detection for this invocation.
     #[arg(long, global = true, action = clap::ArgAction::SetTrue)]
     pub no_agent_mode: bool,
 }
