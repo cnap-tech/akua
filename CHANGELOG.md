@@ -13,6 +13,90 @@ minor bump in the SDK.
 > single-file/total-package cap is incompatible with the bundled napi
 > addon (~129 MB compressed across the per-platform packages).
 
+## [0.8.0] — 2026-04-29
+
+The observability + security round. Three big additions on top of the
+0.7 `pkg.render` substrate: a full tracing stack (with OpenTelemetry
+export), the `pkgs.<alias>` typed-input shape that mirrors
+`charts.<name>` for Helm, and a path-escape / `replace` rejection
+guard that closes the host-side dep-resolution attack surface.
+
+### Added
+
+- **Observability stack.** Wasmtime trap symbolication
+  (`generate_address_map` + preserved `name` section in the worker
+  `.wasm`) — opaque `wasm function NNNN` traps now resolve to KCL
+  source frames. New `tracing` subscriber on the host wired to
+  `--log` / `--log-level` / `-v`; worker-side spans replay through
+  the host's stderr pipe so a single trace covers
+  `worker.invoke → bridge.call → kcl eval`. OpenTelemetry export
+  activates when any standard `OTEL_*` env var is set (no CLI flag
+  needed — the OTel spec is the contract). `AKUA_BRIDGE_TRACE=1`
+  back-compat shortcut for the legacy bridge eprintln pattern.
+- **`docs/debugging.md`** — playbook for diagnosing render-pipeline
+  failures: the three knobs (`--log=json`, `--log-level=debug`,
+  `RUST_LOG`), target taxonomy (`akua` / `akua::worker` /
+  `akua::bridge`), reading symbolicated traps, host-vs-worker
+  triage, anti-patterns (running KCL outside the worker, `eprintln!`
+  in plugin handlers).
+- **`pkg.render(package = "<alias>")`** — typed dep-alias resolution
+  replaces path strings in user-authored KCL. The alias references
+  `akua.toml [dependencies]`. Unknown alias errors list known
+  aliases for typo discovery.
+- **`import pkgs.<alias>` synthesized stubs.** Each Akua-package dep
+  gets a per-render `<alias>.k` mounting only the upstream's
+  schemas + a `render` lambda. Consumers write
+  `upstream.render(upstream.Input { ... })`, mirroring
+  `webapp.template(webapp.Values { ... })` for Helm. KCL type-checks
+  the input at the call site — typos surface as compile errors,
+  not as runtime worker traps.
+- **Path-escape guard on `chart_resolver::resolve_path`** — rejects
+  absolute paths in user-authored `path = "..."` / `replace = { path
+  = "..." }` and any post-canonicalize result that escapes the
+  workspace root. Internal vendor / OCI cache paths bypass the guard
+  by construction.
+- **`AKUA_REJECT_REPLACE=1`** — production gate that fails any
+  render whose dep graph touches a `replace` directive. Auto-on in
+  agent context; CI / agent / container invocations no longer honor
+  publisher-supplied replaces. Strict `"1"`-only (matches the
+  `AKUA_BRIDGE_TRACE` convention).
+- **`akua render --timeout=<duration>` / `--max-depth=<N>`** — wires
+  the existing `BudgetSnapshot` to the CLI surface. Go-duration parser
+  (`30s`, `5m`, `250ms`); typo'd values surface as
+  `E_INVALID_FLAG`. New `akua_core::duration_parse` crate-public.
+- **`@akua-dev/sdk` `RenderOptions.timeout` / `maxDepth`** — same
+  knobs reach the SDK; threaded through napi via
+  `Context.timeout`.
+- **CLAUDE.md invariants** — a dedicated "`replace` and `path` deps
+  are workspace-local" section captures the threat model so reviewers
+  reject violations.
+- **`docs/cli-contract.md` §9 / §9.1** — logging contract +
+  OpenTelemetry env-var surface. §5 grows the duration unit list +
+  the new `--max-depth`.
+
+### Fixed
+
+- **`PackageK::load` canonicalizes the path** — bare `--package
+  package.k` previously stored a relative path with empty parent;
+  plugin handlers fed that empty dir to `canonicalize` and reported
+  ``i/o resolving `` `` (the opaque trap that motivated the
+  observability work). Now resolves to the package's absolute
+  directory unconditionally.
+- **Wasmtime config deprecation** — drop `wasm_backtrace(true)`;
+  capture is on by default in wasmtime 43.
+
+### Internal
+
+- `engine-host-wasm::shared_config` enables symbolication.
+- Workspace `[profile.release]` strip overridden for the worker
+  build (`task build:render-worker` keeps the wasm `name` section).
+- `RenderFrame.resolved_pkgs` (alias → abs dir) propagated through
+  `RenderScope::enter_for_render`.
+- `pkg_stub::extract_schemas` + `build_stub_module` synthesize the
+  per-dep stubs.
+- Three new error variants: `ChartResolveError::AbsolutePathRejected`,
+  `PathEscape`, `ReplaceRejected`. New code `E_INVALID_FLAG`.
+
 ## [0.7.0] — 2026-04-28
 
 The `pkg.render` round: a synchronous engine plugin that mirrors
