@@ -66,6 +66,12 @@ Violations of these are architectural bugs:
 
 **No filesystem paths in user-authored KCL.** Cross-Package references go through typed dep aliases — `import <alias>` for Akua/KCL packages, `charts.<alias>.path` for Helm charts (where the resolver hands the engine a path it produced itself). User code never writes a literal path string, never concatenates path segments, never reaches across the filesystem. `akua.toml [dependencies]` is the single source of truth for what's reachable; the resolver materializes deps into the cache and the path-escape guard only has to validate paths the resolver itself produced. This shrinks the sandbox-escape attack surface to zero in user code: a malicious Package cannot construct a path-escape string because there are no path strings in the call surface to begin with.
 
+**`replace` and `path` deps are workspace-local; never cross Package boundaries.** Path-based escape hatches in `akua.toml` (`path = "..."`, `replace = { path = "..." }`) exist for fast local iteration — they must not become an attack surface when akua processes third-party Packages in production:
+- `replace.path` and bare `path = "..."` deps must canonicalize under the workspace root. Absolute paths and `..` escape are rejected at resolve time.
+- `akua publish` strips every `replace` directive from the artifact's manifest before signing — consumers never inherit a publisher's replace.
+- Production deployments (`AKUA_REJECT_REPLACE=1`, auto in agent context) fail any render whose dep graph touches a replace directive.
+- `chart_resolver` runs on the host, outside the wasmtime sandbox; the path-safety + no-replace rules are the only thing standing between a malicious `akua.toml` and the host filesystem (service-account tokens, mounted secrets, in-cluster TLS material).
+
 **`akua render` ≠ `akua export`.** `render` executes the Package's program (invokes engines, produces deploy-ready manifests). `export` converts a canonical artifact to a format view (JSON Schema, OpenAPI, YAML, Rego bundle). They are different verbs for different jobs.
 
 ## Architecture discipline
