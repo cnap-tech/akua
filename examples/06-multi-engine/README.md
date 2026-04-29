@@ -2,8 +2,8 @@
 
 Four source engines composed in one Package, with per-source output routing. Demonstrates:
 
-- `helm.template(...)` — a Helm chart consumed unchanged
-- `kustomize.build(...)` — a Kustomize overlay on a base
+- `webapp.template(...)` — a Helm chart consumed unchanged via the synthesized `charts.<name>` stub
+- `kustomize.build(...)` — a Kustomize overlay on a base (engine-direct: bases are within-Package, not deps)
 - `rgd.instantiate(...)` — a kro RGD rendered offline (no controller)
 - Inline KCL resources — just dicts, composed with the rest
 - Named outputs — static resources routed to raw manifests, runtime-late-binding resources routed to an RGD for kro to reconcile
@@ -29,14 +29,13 @@ This is the "realistic monorepo Package" shape. Most production Packages have 2�
 ### Imports
 
 ```python
-import akua.helm
 import akua.kustomize
 import akua.rgd
 import charts.webapp    as webapp
 import rgds.platform    as platform
 ```
 
-`charts.webapp` resolves to an OCI-published Helm chart via `akua.toml`. `rgds.platform` resolves to an OCI-published kro `ResourceGraphDefinition` via `akua.toml`. `akua.helm` / `akua.kustomize` / `akua.rgd` are engine callables shipped with the binary.
+`charts.webapp` resolves to an OCI-published Helm chart via `akua.toml`; the synthesized stub owns the `template` method, so `import akua.helm` doesn't appear at the call site. `rgds.platform` resolves to an OCI-published kro `ResourceGraphDefinition`. `akua.kustomize` / `akua.rgd` stay engine-direct because their inputs aren't typed deps — the kustomize base is a within-Package directory, the RGD is instantiated against an OCI artifact.
 
 ### Four sources
 
@@ -48,7 +47,7 @@ import rgds.platform    as platform
 ### Aggregation
 
 ```python
-_app     = helm.template(helm.Template { chart = webapp.Chart, values = ... })
+_app     = webapp.template(webapp.TemplateOpts { values = webapp.Values { ... } })
 _monitor = kustomize.build(kustomize.Build { path = "./overlays" })
 _netpol  = NetworkPolicy { ... }
 _glue    = kro.rgd(kro.Rgd { definition = platform.RGD, instance = { ... } })

@@ -1,6 +1,6 @@
 # Example 02 — webapp-postgres
 
-Two Helm charts composed into one Package. A webapp consumes a Postgres connection URL from a Secret the CloudNativePG operator creates — entirely by convention, no runtime late-binding required, all deterministic at CI time. Adds a `postRenderer` lambda to label every rendered resource with the owning team. Demonstrates a `test_package.k` unit-test file.
+Two Helm charts composed into one Package. A webapp consumes a Postgres connection URL from a Secret the CloudNativePG operator creates — entirely by convention, no runtime late-binding required, all deterministic at CI time. Adds a list-comprehension overlay to label every rendered resource with the owning team. Demonstrates a `test_package.k` unit-test file.
 
 ## Layout
 
@@ -8,7 +8,7 @@ Two Helm charts composed into one Package. A webapp consumes a Postgres connecti
 02-webapp-postgres/
 ├── akua.toml             declares charts.cnpg and charts.webapp
 ├── akua.lock             digest + signature ledger
-├── package.k            the Package — two helm.template() calls + aggregation
+├── package.k            the Package — two `<chart>.template()` calls (alias-method form) + aggregation
 ├── test_package.k       KCL unit tests for the schema + defaults
 ├── inputs.yaml          sample inputs
 └── README.md
@@ -16,9 +16,9 @@ Two Helm charts composed into one Package. A webapp consumes a Postgres connecti
 
 ## What's new vs 01
 
-- **Two sources in one Package.** Both are `helm.template(...)` calls returning resource lists; `resources = [*_pg, *_app]` aggregates them.
+- **Two sources in one Package.** Both are `<chart>.template(...)` calls (alias-method form, dispatched via the synthesized `charts.<name>` stub) returning resource lists; `resources = [*_pg, *_labeled]` aggregates them.
 - **Cross-source wiring by convention.** The webapp references the Postgres Secret by its predictable CloudNativePG name (`${appName}-pg-app`). No value needs to flow between the two source calls — both derive their values from `input`.
-- **`postRenderer`.** A KCL lambda that post-processes every rendered resource in the webapp source. Used here to stamp a `team` label onto everything the app chart emits.
+- **List-comprehension overlay.** `[r | {metadata.labels |= {"team": ...}} for r in _app]` stamps a `team` label onto everything the app chart emits — same effect a Helm post-renderer would have, expressed in plain KCL after the typed list returns.
 - **Unit tests.** `test_package.k` asserts schema defaults and validates that `check:` blocks catch the invariant violations.
 
 ## Run

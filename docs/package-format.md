@@ -60,12 +60,26 @@ Imports are resolved at build time against `akua.toml` (declared deps) and verif
 
 Helm-chart deps and KCL-package deps both land in `[dependencies]` with the same `{ oci = "...", version = "..." }` shape; akua tells them apart from the manifest media type + `org.kcllang.package.*` annotations and routes them to the right consumer (Helm via the synthetic `charts.*` wrapper, KCL packages as direct `ExternalPkg` entries inside the render sandbox).
 
-Engine callables live at `akua.*`:
+**For Helm charts and Akua-package deps, use the alias method on the import** — the synthesized stub owns the engine call so the consumer just states the typed args:
 
-- `akua.helm.template(chart, values, postRenderer?)` — Helm source
+```kcl
+import charts.webapp as webapp
+import pkgs.upstream as upstream
+
+resources = webapp.template(webapp.TemplateOpts {
+    values = webapp.Values { replicaCount = 3 }
+})
+_up = upstream.render(upstream.Input { appName = "x", replicas = 3 })
+```
+
+The engine import (`akua.helm`, `akua.pkg`) does not appear at the call site; the stub handles dispatch.
+
+**Engine-direct callables remain at `akua.*` for engines whose input is *not* a registered typed dep** — kustomize bases are local-to-Package file organization, not external deps, so the alias-method form doesn't apply:
+
+- `akua.kustomize.build({path = "./overlays"})` — Kustomize base (sibling directory in the same Package; the path is bounded by the workspace preopen + path-escape guard)
 - `akua.rgd.instantiate(rgd_def, instance_spec)` — kro RGD source
-- `akua.kustomize.build(path)` — Kustomize base
 - `akua.oci.fetch_manifests(ref)` — pre-rendered OCI bundle
+- `akua.helm.template(...)` — escape hatch for advanced Helm use (multi-chart dynamic dispatch, post-renderer variations the stub doesn't expose). New code should prefer `<alias>.template(...)`.
 
 Every engine callable returns `[Resource]`, a typed list of Kubernetes-shaped resource dicts.
 

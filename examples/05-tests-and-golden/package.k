@@ -1,5 +1,4 @@
 import akua.ctx
-import akua.helm
 import charts.nginx as nginx
 
 schema Input:
@@ -15,7 +14,7 @@ schema Input:
 
 input: Input = ctx.input()
 
-_app = helm.template(nginx.Chart {
+_app = nginx.template(nginx.TemplateOpts {
     values = nginx.Values {
         replicaCount      = input.replicas
         ingress.enabled   = True

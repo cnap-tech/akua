@@ -270,7 +270,7 @@ akua render [path] [flags]
 | `--stdout` | print rendered manifests as multi-doc YAML to stdout instead of writing files |
 | `--dry-run` | render but don't write files |
 
-> **Engine callables.** `pkg.render(Render)` (pure-Rust Package-of-Packages composition — see [`examples/08-pkg-compose`](../examples/08-pkg-compose)), `helm.template(Template)`, and `kustomize.build(Build)` all ship with embedded WASM backends. akua never shells out to `helm` or `kustomize` binaries — every engine runs inside the wasmtime sandbox alongside the render worker; see [`docs/security-model.md`](security-model.md) and [`docs/embedded-engines.md`](embedded-engines.md).
+> **Engines.** Helm and Akua-package composition reach the user via alias-method calls — `webapp.template(webapp.TemplateOpts{values = webapp.Values{...}})`, `upstream.render(upstream.Input{...})` — synthesized per dep from `akua.toml`. Kustomize stays engine-direct (`kustomize.build({path = "./overlays"})`) because its input is a within-Package directory, not a typed dep. All backends ship as embedded WASM modules; akua never shells out to `helm` or `kustomize` binaries — every engine runs inside the wasmtime sandbox alongside the render worker. See [`docs/security-model.md`](security-model.md) and [`docs/embedded-engines.md`](embedded-engines.md).
 >
 > **One render output.** akua writes raw YAML manifests, one file per resource. Distribution shapes like Helm charts or OCI bundles are future `akua publish --as <format>` concerns — they wrap rendered manifests at distribution time, not as a Package-declared output.
 

@@ -54,13 +54,13 @@ The other green examples (01, 08, 09, 10) follow the same pattern — `akua rend
 
 Each example adds concepts over the prior one:
 
-- **00 → 01:** adds a typed `charts.*` dep from `akua.toml` and a `helm.template` with Deployment + Service output.
+- **00 → 01:** adds a typed `charts.*` dep from `akua.toml` and switches from engine-direct `helm.template(...)` to the alias-method form `nginx.template(nginx.TemplateOpts{...})` that the resolver's per-dep stub exposes.
 - **01 → 02:** adds a second source, cross-source value wiring, and a unit-test file.
 - **02 → 03:** separates the Package (reusable, OCI-published) from the App (per-install) — the shape most production workspaces use.
 - **03 → 04:** adds the policy stack — Rego tier, compile-resolved Kyverno import, tests, fixture-driven verdicts.
 - **04 → 05:** formalizes testing — KCL unit tests, Rego policy tests, and golden render fixtures side by side.
 - **05 → 06:** demonstrates multi-engine composition — Helm + Kustomize + kro RGD + inline KCL flattened into one render.
-- **06 → 07:** introduces package-of-packages composition — `pkg.render()` consumes a pinned base Package the same way `helm.template` consumes a chart.
+- **06 → 07:** introduces package-of-packages composition — `upstream.render(upstream.Input{...})` via the synthesized `pkgs.<name>` stub, the same alias-method shape `webapp.template(webapp.TemplateOpts{...})` uses for Helm charts.
 - **07 ← 08:** drops network-dependence by replacing the OCI-pinned base with a local path. The shape cross-package reuse takes — both in local and distributed form.
 
 Beyond 07, realistic workspaces combine these patterns at scale. See the [use cases](../docs/use-cases.md) for archetypes (solo dev, small SaaS, platform team, ISV).

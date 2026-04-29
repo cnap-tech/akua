@@ -25,14 +25,16 @@ this one.
 
 ## The three regions in `package.k`
 
-1. **Imports** — `akua.ctx` (reads user inputs), `akua.helm` (engine
-   callable), `charts.nginx` (resolved from `akua.toml` — a per-render
-   module akua's chart resolver generates).
+1. **Imports** — `akua.ctx` (reads user inputs) and `charts.nginx`
+   (resolved from `akua.toml` — a per-render stub module akua's chart
+   resolver synthesizes, exposing `template`/`Values`/`TemplateOpts`).
+   No `import akua.helm` at the call site — the stub dispatches.
 2. **Schema** — `Input` with two fields. Both have defaults; docstrings
    will become UI labels once the schema-extraction path ships.
-3. **Body** — one call to `helm.template(...)` wiring public schema
-   into chart values. Resources are aggregated into top-level
-   `resources`. akua writes one YAML file per resource under `--out`.
+3. **Body** — one call to `nginx.template(nginx.TemplateOpts{...})`
+   wiring public schema into chart values. Resources are aggregated
+   into top-level `resources`. akua writes one YAML file per resource
+   under `--out`.
 
 ## Run
 

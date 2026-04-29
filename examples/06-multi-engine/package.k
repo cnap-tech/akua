@@ -11,7 +11,6 @@
 #   akua render --inputs inputs.yaml --out ./deploy
 
 import akua.ctx
-import akua.helm
 import akua.kustomize
 import akua.kro
 import charts.webapp   as webapp
@@ -31,8 +30,10 @@ schema Input:
 input: Input = ctx.input()
 
 # --- 1. Helm source ---
-_app = helm.template(helm.Template {
-    chart = webapp.Chart
+# `charts.<name>` synthesizes a `template` lambda + typed `Values`
+# schema per dep — alias-method form, mirrors `pkgs.<name>.render` for
+# Akua packages. No `import akua.helm` needed at the call site.
+_app = webapp.template(webapp.TemplateOpts {
     values = webapp.Values {
         replicaCount        = input.replicas
         ingress.hostname    = input.hostname
@@ -42,8 +43,9 @@ _app = helm.template(helm.Template {
 })
 
 # --- 2. Kustomize source ---
-# Builds ./overlays — a small overlay adding a ServiceMonitor and patching
-# a ConfigMap. Kustomize runs offline; output is deterministic.
+# Engine-direct: kustomize bases are within-Package directories, not
+# typed deps, so they don't get a `bases.<name>` alias. Same form
+# every Package uses for kro RGDs and OCI manifest fetches.
 _monitor = kustomize.build(kustomize.Build {
     path = "./overlays"
 })

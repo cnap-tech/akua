@@ -6,7 +6,6 @@
 # full cross-source-wiring walkthrough.
 
 import akua.ctx
-import akua.helm
 import akua.ui as ui
 import charts.cnpg    as cnpg
 import charts.webapp  as webapp
@@ -41,7 +40,7 @@ schema DatabaseInput:
 
 input: Input = ctx.input()
 
-_pg = helm.template(cnpg.Chart {
+_pg = cnpg.template(cnpg.TemplateOpts {
     values = cnpg.Values {
         cluster = {
             name:      "${input.appName}-pg"
@@ -54,7 +53,7 @@ _pg = helm.template(cnpg.Chart {
     }
 })
 
-_app = helm.template(webapp.Chart {
+_app = webapp.template(webapp.TemplateOpts {
     values = webapp.Values {
         replicaCount         = input.replicas
         ingress.hostname     = input.hostname
@@ -68,10 +67,11 @@ _app = helm.template(webapp.Chart {
             }
         }]
     }
-    postRenderer = lambda r: dict -> dict {
-        r.metadata.labels |= {"team": input.team}
-        r
-    }
 })
 
-resources = [*_pg, *_app]
+# Cross-cutting team label — list comprehension over the typed list
+# the alias-method returned. Same effect as a Helm postRenderer,
+# expressed in plain KCL after the chart call.
+_app_labeled = [r | {metadata.labels |= {"team": input.team}} for r in _app]
+
+resources = [*_pg, *_app_labeled]
