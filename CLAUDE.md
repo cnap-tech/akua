@@ -41,6 +41,7 @@ Plus: deploy driver (`akua deploy`), observability query (`akua query`), policy 
 | Policy authoring shape | [docs/policy-format.md](docs/policy-format.md) |
 | `akua.toml` + `akua.lock` | [docs/lockfile-format.md](docs/lockfile-format.md) |
 | Embedded engines (KCL / Helm / OPA / Regal / Kyverno / CEL / Kustomize) | [docs/embedded-engines.md](docs/embedded-engines.md) |
+| Debugging the render pipeline | [docs/debugging.md](docs/debugging.md) |
 | Agent install + skill format | [docs/agent-usage.md](docs/agent-usage.md) |
 | TypeScript SDK | [docs/sdk.md](docs/sdk.md) |
 | Roadmap + phasing | [docs/roadmap.md](docs/roadmap.md) |
