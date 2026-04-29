@@ -424,15 +424,22 @@ impl RenderHost {
                     if let Some(msg) = plugin_panic {
                         return Err(WorkerError::PluginPanic(msg));
                     }
-                    // Otherwise append captured stderr so a panic
-                    // inside the guest surfaces its message, not
-                    // just a bare wasm backtrace.
+                    // Otherwise format with anyhow's Debug repr to
+                    // walk the error chain + symbolicated backtrace
+                    // (wasmtime attaches `WasmBacktrace` as a
+                    // context that renders under `:?` only). Frame
+                    // names resolve through the AOT address map
+                    // enabled in `engine_host_wasm::shared_config`
+                    // when the worker `.wasm` carries its `name`
+                    // section (preserved via the build profile in
+                    // Taskfile.yml::build:render-worker).
                     let stderr = String::from_utf8_lossy(&err_bytes);
-                    return Err(WorkerError::Trap(if stderr.is_empty() {
-                        e.to_string()
-                    } else {
-                        format!("{e}\nworker stderr: {stderr}")
-                    }));
+                    let mut msg = format!("{e:?}");
+                    if !stderr.is_empty() {
+                        msg.push_str("\n\nworker stderr:\n");
+                        msg.push_str(&stderr);
+                    }
+                    return Err(WorkerError::Trap(msg));
                 }
             },
         }

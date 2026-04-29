@@ -188,7 +188,15 @@ tasks:
     generates:
       - "{{.RENDER_WORKER_WASM}}"
     cmds:
-      - cargo build --release -p akua-render-worker --target wasm32-wasip1
+      # `strip` + `debug` overrides preserve the wasm `name` section so
+      # wasmtime trap backtraces resolve to function names instead of
+      # `wasm function NNNN`. Workspace `[profile.release]` strips
+      # everything by default — this scopes the override to the worker
+      # only without polluting other release builds.
+      - >-
+        cargo build --release -p akua-render-worker --target wasm32-wasip1
+        --config 'profile.release.strip="none"'
+        --config 'profile.release.debug="line-tables-only"'
       - ls -lh {{.RENDER_WORKER_WASM}}
 
   build:akua-wasm:

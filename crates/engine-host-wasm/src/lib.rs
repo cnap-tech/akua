@@ -80,6 +80,14 @@ pub fn shared_config() -> Config {
     // don't set one, so they run without a tick-level cap — the
     // host Rust caller enforces whole-call timeouts above them.
     config.epoch_interruption(true);
+    // Trap symbolication. Without these, traps surface as
+    // `wasm function 9837` indices; with them, plus the worker's
+    // wasm `name` section preserved (see akua-render-worker's
+    // build profile), `Trap::backtrace()` returns FrameInfo entries
+    // whose `func_name()` resolves through the AOT address map.
+    config.wasm_backtrace(true);
+    config.wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Enable);
+    config.generate_address_map(true);
     config
 }
 
