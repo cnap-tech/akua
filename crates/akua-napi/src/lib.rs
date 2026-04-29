@@ -57,6 +57,7 @@ pub fn render(args: NapiRenderArgs) -> Result<serde_json::Value> {
         strict: args.strict.unwrap_or(false),
         offline: args.offline.unwrap_or(false),
         debug: false,
+        max_depth: None,
     };
     invoke_verb(|ctx, stdout| {
         verbs::render::run(ctx, &verb_args, stdout)
@@ -85,6 +86,7 @@ pub fn render_to_yaml(args: NapiRenderArgs) -> Result<String> {
         strict: args.strict.unwrap_or(false),
         offline: args.offline.unwrap_or(false),
         debug: false,
+        max_depth: None,
     };
     let ctx = Context::json();
     let mut out = Cursor::new(Vec::new());
