@@ -95,6 +95,7 @@ nginx = { oci = "oci://ghcr.io/acme/nginx", version = "1.2.3" }
         cache_root: None,
         expected_digests: Default::default(),
         cosign_public_key_pem: None,
+        reject_replace: false,
     };
     let resolved = chart_resolver::resolve_with_options(&manifest, pulled.path(), &opts)
         .expect("offline resolve from vendor");
