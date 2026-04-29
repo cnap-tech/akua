@@ -38,7 +38,11 @@ schema Render:
     calling Package's directory. Use `package` instead."""
 
     inputs: {str:} = {}
-    """Inputs forwarded to the inner Package's `ctx.input()`."""
+    """Inputs forwarded to the inner Package's `ctx.input()`. The
+    upstream's `Input` schema validates field names + types on the
+    inner side. Consumer-side typing (reaching upstream's `Input`
+    schema directly at the call site) needs a synthesized stub module
+    per dep — separate work."""
 
     check:
         package or path, "exactly one of `package` or `path` must be set"

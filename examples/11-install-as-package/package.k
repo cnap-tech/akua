@@ -14,11 +14,13 @@ schema Input:
 
 input: Input = ctx.input()
 
-# 1. Render the upstream Package with caller-supplied inputs. Returns
-#    the upstream's `resources` list — synchronously, in this thread.
-#    `pkg.Render.inputs` is a generic `{str:}` because plugin args
-#    cross a JSON boundary; the upstream's `Input` schema validates
-#    field names + types on the inner side.
+# 1. Render the upstream Package with caller-supplied inputs. The
+#    `package = "upstream"` alias resolves via this Package's
+#    `[dependencies]` — no path strings here. Inputs are an explicit
+#    dict; the upstream's `Input` schema validates field names + types
+#    on the inner side via `ctx.input()`. (Reaching upstream's typed
+#    `Input` at this call site needs a synthesized stub module per
+#    dep — follow-up work.)
 _up = pkg.render(pkg.Render {
     package = "upstream"
     inputs  = {
