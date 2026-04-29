@@ -99,6 +99,9 @@ pub enum PackageKError {
 impl PackageK {
     /// Read the file from disk. Maps `NotFound` to [`PackageKError::Missing`]
     /// so callers can distinguish "workspace not set up" from "disk broke."
+    /// The stored `path` is canonicalized so consumers (RenderScope, plugin
+    /// path resolution) can rely on `path.parent()` returning the package
+    /// directory, even when the caller passed a bare filename.
     pub fn load(path: &Path) -> Result<Self, PackageKError> {
         let source = match std::fs::read_to_string(path) {
             Ok(s) => s,
@@ -114,8 +117,9 @@ impl PackageK {
                 });
             }
         };
+        let canon = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         Ok(PackageK {
-            path: path.to_path_buf(),
+            path: canon,
             source,
         })
     }
@@ -789,7 +793,9 @@ resources = [{
     fn load_reads_file_content() {
         let (_tmp, path) = write_fixture(MINIMAL_FIXTURE);
         let pkg = PackageK::load(&path).expect("load");
-        assert_eq!(pkg.path, path);
+        // load canonicalizes; on macOS that prepends `/private/` to the
+        // tempdir. Compare against the canonical form.
+        assert_eq!(pkg.path, path.canonicalize().unwrap());
         assert_eq!(pkg.source, MINIMAL_FIXTURE);
     }
 
