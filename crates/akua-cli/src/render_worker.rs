@@ -522,14 +522,16 @@ fn plugin_bridge_call(
     let args = read_c_str_or_empty(caller.as_context(), memory, args_ptr, "[]");
     let kwargs = read_c_str_or_empty(caller.as_context(), memory, kwargs_ptr, "{}");
 
-    // Trace enabled via `AKUA_BRIDGE_TRACE=1` for debugging plugin-
-    // callout issues. Captures the whole round-trip in one emission —
-    // method, handler response, and the guest pointer allocated for
-    // the response bytes.
-    let trace = std::env::var("AKUA_BRIDGE_TRACE").ok().as_deref() == Some("1");
-    if trace {
-        eprintln!("[bridge] method={method} args={args} kwargs={kwargs}");
-    }
+    // Plugin-callout trace at debug; gated on the `akua::bridge` target
+    // by the host subscriber's filter. The legacy `AKUA_BRIDGE_TRACE=1`
+    // env var is honored via `apply_bridge_trace` in observability.rs.
+    tracing::debug!(
+        target: "akua::bridge",
+        method = %method,
+        args_len = args.len(),
+        kwargs_len = kwargs.len(),
+        "bridge.call",
+    );
 
     // Two envelope sources: a handler returning `Err(...)` produces
     // one via `invoke_bridge`'s `Ok(s)` (s starts with the envelope
@@ -563,9 +565,12 @@ fn plugin_bridge_call(
     // a null-terminated buffer.
     let total = response.len() + 1;
     let dest = alloc.call(&mut *caller, total as u32).ok()?;
-    if trace {
-        eprintln!("[bridge] response_len={} alloc_ptr={dest}", response.len());
-    }
+    tracing::debug!(
+        target: "akua::bridge",
+        response_len = response.len(),
+        alloc_ptr = dest,
+        "bridge.response",
+    );
     if dest <= 0 {
         return None;
     }
