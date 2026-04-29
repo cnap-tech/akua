@@ -6,11 +6,16 @@
 //! and panics inside KCL's `type_pack_and_check` when shapes diverge.
 //!
 //! Mirroring how `import charts.webapp` reaches a synthesized
-//! `Chart`/`Values` shape, we emit a stub `<alias>.k` per dep
-//! containing only the upstream's `import` and `schema` declarations.
+//! `Chart`/`Values` + `webapp.template(...)` shape, we emit a stub
+//! `<alias>.k` per Akua-package dep containing the upstream's
+//! `import` and `schema` declarations + a `render` lambda that
+//! dispatches to `kcl_plugin.pkg.render` with the alias hardcoded.
 //! Stubs mount at `/akua-pkgs` inside the worker; the consumer writes
-//! `import pkgs.<alias>` to reach the typed schemas without firing
-//! upstream's body.
+//!
+//! ```kcl
+//! import pkgs.upstream as upstream
+//! _up = upstream.render(upstream.Input { ... })
+//! ```
 //!
 //! `pkg.render` itself is unaffected — its handler still loads the
 //! real `package.k` from disk and renders it through `PackageK::render`.
@@ -78,6 +83,51 @@ pub fn extract_schemas(source: &str) -> String {
     out
 }
 
+/// Compose the full stub module body: extracted schemas + a `render`
+/// lambda hardcoded with `alias` so callers write
+/// `upstream.render(upstream.Input { ... })`. The lambda's `inputs`
+/// parameter is typed as `Input`; KCL's schema-to-dict coercion
+/// inside the lambda body is fine even though the consumer-side
+/// `pkg.Render.inputs: {str:}` rejects bare schema instances at the
+/// top-level call site.
+///
+/// When the upstream package has no `Input` schema (rare — most
+/// real Packages declare one), the lambda falls back to a
+/// `{str:}` input shape so the stub still compiles.
+pub fn build_stub_module(alias: &str, source: &str) -> String {
+    let schemas = extract_schemas(source);
+    let has_input = source_declares_input_schema(&schemas);
+    let mut out = String::new();
+    out.push_str("# Akua-package stub. Auto-generated; do not edit.\n");
+    out.push_str("import akua.pkg as _pkg\n\n");
+    out.push_str(&schemas);
+    if !out.ends_with("\n\n") {
+        out.push('\n');
+    }
+    // No default — `Input {}` would fail at lambda-definition time
+    // when upstream has required fields. Inside the lambda body, KCL
+    // coerces a typed `Input` to the `{str:}` shape that
+    // `_pkg.Render.inputs` expects (same coercion helm.template uses
+    // for typed `Values`).
+    let param_ty = if has_input { "Input" } else { "{str:}" };
+    out.push_str(&format!(
+        "render = lambda inputs: {param_ty} -> [{{str:}}] {{\n    \
+            _flat = {{**inputs}}\n    \
+            _pkg.render(_pkg.Render {{\n        \
+                package = \"{alias}\"\n        \
+                inputs = _flat\n    \
+            }})\n\
+        }}\n"
+    ));
+    out
+}
+
+fn source_declares_input_schema(stub_source: &str) -> bool {
+    stub_source
+        .lines()
+        .any(|line| line.trim_start().starts_with("schema Input"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -143,5 +193,29 @@ something = A {a = "x"}
     fn empty_or_body_only_source_yields_blank_stub() {
         let stub = extract_schemas("resources = []\n");
         assert_eq!(stub.trim(), "");
+    }
+
+    #[test]
+    fn build_stub_module_emits_render_lambda_typed_to_input() {
+        let src = r#"
+schema Input:
+    name: str
+
+input: Input = ctx.input()
+"#;
+        let stub = build_stub_module("upstream", src);
+        assert!(stub.contains("import akua.pkg as _pkg"));
+        assert!(stub.contains("schema Input:"));
+        assert!(stub.contains("render = lambda inputs: Input -> [{str:}]"));
+        assert!(stub.contains("_pkg.render(_pkg.Render {"));
+        assert!(stub.contains("package = \"upstream\""));
+        assert!(!stub.contains("ctx.input"));
+    }
+
+    #[test]
+    fn build_stub_module_falls_back_to_dict_when_no_input_schema() {
+        let src = "schema Other:\n    x: int\n";
+        let stub = build_stub_module("upstream", src);
+        assert!(stub.contains("render = lambda inputs: {str:} -> [{str:}]"));
     }
 }

@@ -94,7 +94,7 @@ pub fn materialize_pkg_stubs_if_any(
     std::fs::write(dir.path().join("kcl.mod"), PKGS_KCL_MOD)?;
     for (alias, chart) in aliased {
         let source = std::fs::read_to_string(chart.abs_path.join("package.k"))?;
-        let stub = crate::pkg_stub::extract_schemas(&source);
+        let stub = crate::pkg_stub::build_stub_module(alias, &source);
         std::fs::write(dir.path().join(format!("{alias}.k")), stub)?;
     }
     Ok(Some(dir))

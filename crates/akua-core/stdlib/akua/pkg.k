@@ -40,9 +40,10 @@ schema Render:
     inputs: {str:} = {}
     """Inputs forwarded to the inner Package's `ctx.input()`. The
     upstream's `Input` schema validates field names + types on the
-    inner side. Consumer-side typing (reaching upstream's `Input`
-    schema directly at the call site) needs a synthesized stub module
-    per dep — separate work."""
+    inner side. Inside `pkgs.<alias>.render`'s lambda body KCL also
+    coerces a typed `upstream.Input { ... }` to this shape — same
+    rule helm.template uses for `values: {str:}` accepting typed
+    `Values` schemas."""
 
     check:
         package or path, "exactly one of `package` or `path` must be set"
