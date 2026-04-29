@@ -175,14 +175,16 @@ struct RenderFrame {
     /// parent so the limits propagate through composition without
     /// every call site needing to thread it explicitly.
     budget: BudgetSnapshot,
-    /// Resolved Akua-package deps for this frame, keyed by canonical
-    /// `[package].name` (from each dep's akua.toml). The `pkg.renderById`
-    /// host plugin reads this map when an upstream's render lambda
-    /// fires — the lambda closes over `__id` (its own canonical name),
-    /// the plugin looks the path up in the *consumer's* current frame
-    /// (this map), and renders. Per-frame so deeper composition
-    /// (`outer → inner → deep`) resolves correctly: when `inner`
-    /// renders, its frame's deps map is `inner`'s deps, not outer's.
+    /// Resolved Akua-package deps for this frame, keyed by the
+    /// consumer's `akua.toml [dependencies]` alias. The future
+    /// `pkg` host plugin (Stage 2 — see
+    /// `docs/spikes/pkg-render-import-method.md`) reads this map
+    /// when an upstream's render lambda fires from the consumer's
+    /// KCL. Per-frame so deeper composition (`outer → inner → deep`)
+    /// resolves correctly: when `inner` renders, its frame's deps
+    /// map is `inner`'s deps, not outer's. `akua lint` enforces that
+    /// each dep's alias equals its `[package].name` so the lookup
+    /// key matches whatever an upstream's wrapper closes over.
     resolved_deps: HashMap<String, PathBuf>,
 }
 
@@ -313,11 +315,14 @@ impl RenderScope {
         Self::enter_full(package, &[], false, budget)
     }
 
-    /// Push a frame carrying resolved Akua-package deps. The map is
-    /// keyed by each dep's canonical `[package].name`; the
-    /// `pkg.renderById` plugin reads this map when an upstream's
-    /// render lambda fires. Inherits the parent frame's budget.
-    pub fn enter_with_deps(package: &Path, resolved_deps: HashMap<String, PathBuf>) -> Self {
+    /// Push a frame carrying resolved Akua-package deps. Inherits the
+    /// parent frame's budget. Crate-private — only the render path
+    /// has the resolver state to populate the map correctly. See
+    /// [`crate::pkg_render`] (Stage 2) for the consumer.
+    pub(crate) fn enter_with_deps(
+        package: &Path,
+        resolved_deps: HashMap<String, PathBuf>,
+    ) -> Self {
         Self::enter_full_with_deps(
             package,
             &[],
@@ -422,16 +427,13 @@ fn top_frame_budget() -> BudgetSnapshot {
     RENDER_STACK.with(|s| s.borrow().last().map(|f| f.budget).unwrap_or_default())
 }
 
-/// Resolve an Akua-package dep `id` (canonical `[package].name`) to
-/// its absolute path via the top-of-stack frame's `resolved_deps`
-/// map. Returns `None` when the id isn't declared in the consumer's
-/// `[dependencies]` (or when no render is active).
-///
-/// `pkg.renderById` reads this when an upstream's render lambda fires:
-/// the lambda closes over `__id` (the upstream's own canonical name),
-/// the plugin looks it up in the *consumer's* current frame to find
-/// the path the resolver materialized, and renders.
-pub fn resolve_dep(id: &str) -> Option<PathBuf> {
+/// Resolve an Akua-package dep alias to its absolute path via the
+/// top-of-stack frame's `resolved_deps` map. Returns `None` when the
+/// alias isn't declared in the consumer's `[dependencies]` (or when
+/// no render is active). Stage-2 plugin entry point (see
+/// `docs/spikes/pkg-render-import-method.md`); crate-private until a
+/// real consumer lands.
+pub(crate) fn resolve_dep(id: &str) -> Option<PathBuf> {
     RENDER_STACK.with(|s| {
         s.borrow()
             .last()

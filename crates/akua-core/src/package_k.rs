@@ -180,14 +180,11 @@ impl PackageK {
         // dep's `package.k` path; the future `pkg.renderById` plugin
         // (Stage 2 — see `docs/spikes/pkg-render-import-method.md`)
         // reads this when an upstream's render lambda fires.
-        // Convention: the upstream's `[package].name` (and its `__id`
-        // constant) equals the consumer's alias — `akua lint`
-        // enforces.
-        let resolved_deps = akua_package_deps(
-            charts
-                .kcl_pkgs()
-                .map(|(alias, c)| (alias.to_string(), c.abs_path.clone())),
-        );
+        let resolved_deps: std::collections::HashMap<String, PathBuf> = charts
+            .kcl_pkgs()
+            .filter(|(_, c)| is_akua_package(&c.abs_path))
+            .map(|(alias, c)| (alias.to_string(), c.abs_path.join("package.k")))
+            .collect();
 
         let _scope = crate::kcl_plugin::RenderScope::enter_with_charts_and_deps(
             &self.path,
@@ -524,28 +521,13 @@ pub fn eval_source_with_inputs(
 /// to [`eval_source_with_inputs`] — no extern resolution, bare-KCL
 /// only.
 /// `true` if `dir` is the on-disk shape of an Akua Package
-/// (both `akua.toml` and `package.k` present). Distinct from
-/// generic KCL packages (`kcl.mod`) — only Akua Packages declare a
-/// `render` lambda reachable via dep-alias resolution. Lives here
-/// (not in `oci_fetcher`) because the render path must work even
-/// when the `oci-fetch` feature is off (the wasip1 worker has it
-/// off — no network in the sandbox).
+/// (both `akua.toml` and `package.k` present). Narrower than
+/// [`crate::oci_fetcher::detect_kind`]'s `KclModule` variant, which
+/// also accepts bare `kcl.mod`-only packages — only Akua Packages
+/// expose a `render` lambda reachable via dep-alias resolution, so
+/// the render path needs the tighter predicate.
 pub fn is_akua_package(dir: &Path) -> bool {
     dir.join("akua.toml").is_file() && dir.join("package.k").is_file()
-}
-
-/// Filter an `(alias, dir)` iterator down to dirs that match the
-/// Akua-package shape, emitting `(alias, dir/package.k)` for each.
-/// Used by the render entry points to seed the per-frame
-/// `resolved_deps` map.
-fn akua_package_deps<I>(it: I) -> std::collections::HashMap<String, PathBuf>
-where
-    I: IntoIterator<Item = (String, PathBuf)>,
-{
-    it.into_iter()
-        .filter(|(_, p)| is_akua_package(p))
-        .map(|(alias, p)| (alias, p.join("package.k")))
-        .collect()
 }
 
 pub fn eval_source_full(
