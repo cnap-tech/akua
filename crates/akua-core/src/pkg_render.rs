@@ -30,6 +30,7 @@ use crate::{kcl_plugin, PackageK};
 
 pub const PLUGIN_NAME: &str = "pkg.render";
 
+const OPT_PACKAGE: &str = "package";
 const OPT_PATH: &str = "path";
 const OPT_INPUTS: &str = "inputs";
 
@@ -47,10 +48,6 @@ fn err(msg: impl std::fmt::Display) -> String {
 pub fn install() {
     kcl_plugin::register(PLUGIN_NAME, |args, _kwargs| {
         let opts = kcl_plugin::extract_options_arg(args, PLUGIN_NAME, "pkg.Render")?;
-        let path_str = opts
-            .get(OPT_PATH)
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| err(format!("options.{OPT_PATH} must be a string")))?;
         let inputs_json = opts
             .get(OPT_INPUTS)
             .cloned()
@@ -62,12 +59,23 @@ pub fn install() {
         let inputs_yaml: serde_yaml::Value =
             serde_yaml::to_value(&inputs_json).map_err(|e| err(format!("inputs: {e}")))?;
 
-        // Sandbox guard: resolve the path against the current
-        // RenderScope's package directory + reject `..` / symlink
-        // escapes. Same guard helm.template / kustomize.build use.
-        let raw = PathBuf::from(path_str);
-        let resolved = kcl_plugin::resolve_in_package(&raw).map_err(|e| err(e.to_string()))?;
-        let target = resolve_package_file(&resolved);
+        // Resolve target package: prefer `package = "<alias>"` (typed,
+        // declared in akua.toml); fall back to `path = "..."` for the
+        // legacy form. CLAUDE.md "no filesystem paths in user-authored
+        // KCL" — `path` is deprecated; lint surfaces a fix-it. One of
+        // the two must be present.
+        let target = if let Some(alias) = opts.get(OPT_PACKAGE).and_then(serde_json::Value::as_str)
+        {
+            resolve_by_alias(alias)?
+        } else if let Some(path_str) = opts.get(OPT_PATH).and_then(serde_json::Value::as_str) {
+            let raw = PathBuf::from(path_str);
+            let resolved = kcl_plugin::resolve_in_package(&raw).map_err(|e| err(e.to_string()))?;
+            resolve_package_file(&resolved)
+        } else {
+            return Err(err(format!(
+                "options must set either `{OPT_PACKAGE} = \"<dep-alias>\"` or `{OPT_PATH} = \"<dir>\"`"
+            )));
+        };
 
         // Pre-render checks — cycle, depth cap, wall-clock — in one
         // pass over the render stack. Cycle rejects re-entry of a
@@ -125,6 +133,26 @@ fn resolve_package_file(resolved: &Path) -> PathBuf {
         resolved.join("package.k")
     } else {
         resolved.to_path_buf()
+    }
+}
+
+/// Look up an Akua-package dep alias against the current render frame's
+/// resolved-deps map. Errors when the alias is missing, listing the
+/// aliases the caller could have used so typos surface immediately.
+fn resolve_by_alias(alias: &str) -> Result<PathBuf, String> {
+    match kcl_plugin::resolve_pkg_alias(alias) {
+        Some(dir) => Ok(resolve_package_file(&dir)),
+        None => {
+            let known = kcl_plugin::current_pkg_aliases();
+            let hint = if known.is_empty() {
+                String::from("none — declare it under `[dependencies]` in akua.toml")
+            } else {
+                format!("known: {}", known.join(", "))
+            };
+            Err(err(format!(
+                "package `{alias}` is not in the current Package's dependencies ({hint})"
+            )))
+        }
     }
 }
 

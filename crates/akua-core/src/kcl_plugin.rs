@@ -36,7 +36,7 @@
 //! should re-exec periodically or use a subprocess render.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::{c_char, CStr, CString};
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
@@ -175,6 +175,12 @@ struct RenderFrame {
     /// parent so the limits propagate through composition without
     /// every call site needing to thread it explicitly.
     budget: BudgetSnapshot,
+    /// Akua-package deps available to `pkg.render(package = "<alias>")`.
+    /// Alias is the dep name from this Package's `[dependencies]`;
+    /// value is the absolute directory holding the dep's `package.k`.
+    /// Empty for frames pushed without dep info (tests, inner-render
+    /// scopes — nested deps resolution is a follow-up).
+    resolved_pkgs: BTreeMap<String, PathBuf>,
 }
 
 /// Resource limits propagated through the render stack. Read by
@@ -256,7 +262,13 @@ impl RenderScope {
     /// be a security surface since the plugin-path guard defers to
     /// whatever the top-of-stack frame permits.
     pub(crate) fn enter_with(package: &Path, allowed_roots: &[PathBuf], strict: bool) -> Self {
-        Self::enter_full(package, allowed_roots, strict, top_frame_budget())
+        Self::enter_full(
+            package,
+            allowed_roots,
+            strict,
+            top_frame_budget(),
+            BTreeMap::new(),
+        )
     }
 
     /// Push a scope for the wasmtime-hosted render path. Derives the
@@ -275,7 +287,21 @@ impl RenderScope {
             .values()
             .map(|c| c.abs_path.clone())
             .collect();
-        Self::enter_with(package, &allowed_roots, strict)
+        // Akua-package deps: any dep dir that contains a `package.k` is
+        // addressable by alias via `pkg.render(package = "<alias>")`.
+        let resolved_pkgs: BTreeMap<String, PathBuf> = charts
+            .entries
+            .iter()
+            .filter(|(_, c)| c.abs_path.join("package.k").is_file())
+            .map(|(name, c)| (name.clone(), c.abs_path.clone()))
+            .collect();
+        Self::enter_full(
+            package,
+            &allowed_roots,
+            strict,
+            top_frame_budget(),
+            resolved_pkgs,
+        )
     }
 
     /// Push the outermost frame with an explicit budget. Use this at
@@ -283,7 +309,7 @@ impl RenderScope {
     /// to install a wall-clock deadline; nested `pkg.render` calls
     /// inherit it automatically.
     pub fn enter_with_budget(package: &Path, budget: BudgetSnapshot) -> Self {
-        Self::enter_full(package, &[], false, budget)
+        Self::enter_full(package, &[], false, budget, BTreeMap::new())
     }
 
     fn enter_full(
@@ -291,6 +317,7 @@ impl RenderScope {
         allowed_roots: &[PathBuf],
         strict: bool,
         budget: BudgetSnapshot,
+        resolved_pkgs: BTreeMap<String, PathBuf>,
     ) -> Self {
         RENDER_STACK.with(|s| {
             s.borrow_mut().push(RenderFrame {
@@ -298,6 +325,7 @@ impl RenderScope {
                 allowed_roots: allowed_roots.to_vec(),
                 strict,
                 budget,
+                resolved_pkgs,
             });
         });
         Self { _private: () }
@@ -324,6 +352,30 @@ pub fn current_package_dir() -> Option<PathBuf> {
         s.borrow()
             .last()
             .and_then(|f| f.package.parent().map(Path::to_path_buf))
+    })
+}
+
+/// Resolve an Akua-package dep alias (the dep name from the current
+/// frame's `[dependencies]`) to its on-disk directory. Returns `None`
+/// when the alias is unknown or the current frame has no dep map (e.g.
+/// a nested `pkg.render` whose inner Package's deps weren't resolved).
+pub fn resolve_pkg_alias(alias: &str) -> Option<PathBuf> {
+    RENDER_STACK.with(|s| {
+        s.borrow()
+            .last()
+            .and_then(|f| f.resolved_pkgs.get(alias).cloned())
+    })
+}
+
+/// Aliases reachable via `pkg.render(package = "<alias>")` in the
+/// current frame. Used for diagnostics — when a lookup misses, the
+/// error lists what was available so the user spots typos.
+pub fn current_pkg_aliases() -> Vec<String> {
+    RENDER_STACK.with(|s| {
+        s.borrow()
+            .last()
+            .map(|f| f.resolved_pkgs.keys().cloned().collect())
+            .unwrap_or_default()
     })
 }
 

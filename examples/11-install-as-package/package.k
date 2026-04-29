@@ -20,8 +20,8 @@ input: Input = ctx.input()
 #    cross a JSON boundary; the upstream's `Input` schema validates
 #    field names + types on the inner side.
 _up = pkg.render(pkg.Render {
-    path   = "./upstream"
-    inputs = {
+    package = "upstream"
+    inputs  = {
         appName  = input.app
         replicas = input.replicas
     }
