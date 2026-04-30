@@ -59,7 +59,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
 
       # Pin to the same rust version mise installs (`.mise.toml`) so
       # the cross-compile target lands on the toolchain mise will
