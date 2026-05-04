@@ -19,6 +19,16 @@ helm_tag="v4.1.4"
 
 mkdir -p "$crate_root/third_party"
 
+# Validate any cached fork tree is healthy before trusting it. CI
+# restores the helm-fork directory from actions/cache; a partial or
+# corrupted restore leaves `.git` present but `git status` exiting 128
+# (fatal), which previously crashed the patched-already check below.
+# Treat a sick `.git` as "no fork tree" — re-clone from scratch.
+if [ -d "$fork_dir/.git" ] && ! (cd "$fork_dir" && git status --porcelain >/dev/null 2>&1); then
+    echo "[fork/apply.sh] $fork_dir/.git is unhealthy (git status failed); re-cloning."
+    rm -rf "$fork_dir"
+fi
+
 # Fast path: fork tree already patched (committed by us on top of the
 # upstream v4.1.4 tag). Use `git apply --check --reverse` as the
 # idempotence test — it succeeds iff the patch is fully applied, fails

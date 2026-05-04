@@ -457,10 +457,18 @@ fn lock_rejects_helm_dep_referenced_via_import() {
     // E_DEP_KIND_MISMATCH — without this guard the lockfile writes
     // cleanly and the failure defers to `akua check`'s opaque
     // CannotFindModule.
+    //
+    // The chart is staged inside the install workspace so the
+    // path-escape guard (path / replace deps must stay under the
+    // workspace root) doesn't fire before kind-mismatch detection.
     let dir = tempdir();
 
-    // Helm chart on disk — minimal Chart.yaml + templates/.
-    let chart = dir.path().join("nginx-chart");
+    let install = dir.path().join("install");
+    std::fs::create_dir_all(&install).unwrap();
+
+    // Helm chart on disk — minimal Chart.yaml + templates/. Sibling
+    // to package.k inside the install workspace.
+    let chart = install.join("nginx-chart");
     std::fs::create_dir_all(chart.join("templates")).unwrap();
     std::fs::write(
         chart.join("Chart.yaml"),
@@ -470,12 +478,10 @@ fn lock_rejects_helm_dep_referenced_via_import() {
     std::fs::write(chart.join("templates/cm.yaml"), "kind: ConfigMap\n").unwrap();
 
     // Install Package mistakenly does `import nginx` against a Helm dep.
-    let install = dir.path().join("install");
-    std::fs::create_dir_all(&install).unwrap();
     std::fs::write(
         install.join("akua.toml"),
         "[package]\nname = \"install\"\nversion = \"0.1.0\"\nedition = \"akua.dev/v1alpha1\"\n\
-         [dependencies]\nnginx = { path = \"../nginx-chart\" }\n",
+         [dependencies]\nnginx = { path = \"./nginx-chart\" }\n",
     )
     .unwrap();
     std::fs::write(install.join("package.k"), "import nginx\nresources = []\n").unwrap();
