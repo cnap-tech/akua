@@ -393,3 +393,243 @@ fn into_napi(structured: StructuredError, exit_code: ExitCode) -> Error {
 fn into_napi_io<E: std::fmt::Display>(err: E) -> Error {
     Error::from_reason(err.to_string())
 }
+
+// ---------------------------------------------------------------------------
+// tests
+// ---------------------------------------------------------------------------
+//
+// Bindings are thin pass-throughs to `verbs::*::run`. Tests here focus
+// on what THIS layer does that the verb tests don't cover:
+//   - Napi*Args → verb args translation
+//   - JSON envelope produced by `invoke_verb` (non-empty, parseable)
+//   - structured-error envelope (`into_napi`) augmented with `exit_code`
+//
+// Run with `cargo test -p akua-napi`. Fixtures use a tempdir + the
+// minimal-workspace shape (akua.toml + package.k) the SDK tests use.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+
+    const MINIMAL_PACKAGE_K: &str = r#"
+schema Input:
+    replicas: int = 2
+
+input: Input = option("input") or Input {}
+
+resources = [{
+    apiVersion: "v1"
+    kind: "ConfigMap"
+    metadata.name: "smoke"
+    data.count: str(input.replicas)
+}]
+"#;
+
+    const MINIMAL_AKUA_TOML: &str = r#"[package]
+name = "napi-test"
+version = "0.0.1"
+edition = "akua.dev/v1alpha1"
+"#;
+
+    fn scratch_workspace() -> PathBuf {
+        let dir = tempfile::tempdir().unwrap().keep();
+        fs::write(dir.join("akua.toml"), MINIMAL_AKUA_TOML).unwrap();
+        fs::write(dir.join("package.k"), MINIMAL_PACKAGE_K).unwrap();
+        dir
+    }
+
+    #[test]
+    fn version_returns_object_with_version_field() {
+        let v = version().unwrap();
+        assert!(v.is_object(), "version must return an object envelope");
+        assert!(v.get("version").is_some(), "envelope missing `version`");
+    }
+
+    #[test]
+    fn whoami_returns_agent_context_envelope() {
+        let v = whoami().unwrap();
+        assert!(v.is_object());
+        assert!(v.get("agent_context").is_some(), "missing agent_context");
+        assert!(v.get("version").is_some(), "missing version");
+    }
+
+    #[test]
+    fn lint_returns_issues_array() {
+        let ws = scratch_workspace();
+        let v = lint(NapiPackageArgs {
+            package: ws.join("package.k").to_string_lossy().into_owned(),
+        })
+        .unwrap();
+        assert!(v.is_object());
+        assert!(
+            v.get("issues").is_some_and(|x| x.is_array()),
+            "lint envelope must carry an `issues` array"
+        );
+    }
+
+    #[test]
+    fn fmt_check_mode_does_not_modify_file() {
+        let ws = scratch_workspace();
+        let pkg = ws.join("package.k");
+        let original = fs::read_to_string(&pkg).unwrap();
+        let v = fmt(NapiFmtArgs {
+            package: pkg.to_string_lossy().into_owned(),
+            check: Some(true),
+            stdout: Some(false),
+        })
+        .unwrap();
+        assert!(v.is_object());
+        assert!(v.get("files").is_some_and(|x| x.is_array()));
+        // --check must not write back even if formatted form differs.
+        assert_eq!(fs::read_to_string(&pkg).unwrap(), original);
+    }
+
+    #[test]
+    fn check_returns_status_and_checks_array() {
+        let ws = scratch_workspace();
+        let v = check(NapiCheckArgs {
+            workspace: ws.to_string_lossy().into_owned(),
+            package: None,
+        })
+        .unwrap();
+        assert!(v.is_object());
+        let status = v.get("status").and_then(|s| s.as_str()).unwrap();
+        assert!(matches!(status, "ok" | "fail"));
+        assert!(v.get("checks").is_some_and(|x| x.is_array()));
+    }
+
+    #[test]
+    fn tree_returns_package_and_dependencies_envelope() {
+        let ws = scratch_workspace();
+        let v = tree(NapiWorkspaceArgs {
+            workspace: ws.to_string_lossy().into_owned(),
+        })
+        .unwrap();
+        assert!(v.is_object());
+        assert!(v.get("package").is_some());
+        let deps = v.get("dependencies").unwrap();
+        assert!(deps.is_array());
+        // Minimal workspace declares no deps.
+        assert_eq!(deps.as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn diff_two_empty_dirs_reports_no_changes() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let v = diff(NapiDiffArgs {
+            before: a.path().to_string_lossy().into_owned(),
+            after: b.path().to_string_lossy().into_owned(),
+        })
+        .unwrap();
+        assert!(v.is_object());
+        assert_eq!(v["added"].as_array().unwrap().len(), 0);
+        assert_eq!(v["removed"].as_array().unwrap().len(), 0);
+        assert_eq!(v["changed"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn diff_added_file_surfaces_in_added_bucket() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        fs::write(b.path().join("new.yaml"), "hi\n").unwrap();
+        let v = diff(NapiDiffArgs {
+            before: a.path().to_string_lossy().into_owned(),
+            after: b.path().to_string_lossy().into_owned(),
+        })
+        .unwrap();
+        let added: Vec<&str> = v["added"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|x| x.as_str())
+            .collect();
+        assert!(
+            added.contains(&"new.yaml"),
+            "added bucket missing new.yaml: {v}"
+        );
+    }
+
+    #[test]
+    fn export_returns_format_and_schema_envelope() {
+        let ws = scratch_workspace();
+        let v = export(NapiExportArgs {
+            package: ws.join("package.k").to_string_lossy().into_owned(),
+            format: None,
+            out: None,
+        })
+        .unwrap();
+        assert!(v.is_object());
+        assert_eq!(v["format"].as_str().unwrap(), "json-schema");
+        let schema = &v["schema"];
+        assert!(schema.is_object(), "schema must be an object");
+        // The default output is JSON Schema 2020-12.
+        assert!(
+            schema["$schema"]
+                .as_str()
+                .map(|s| s.contains("2020-12"))
+                .unwrap_or(false),
+            "expected JSON Schema 2020-12 dialect: {v}"
+        );
+    }
+
+    #[test]
+    fn export_openapi_format_yields_openapi_3_1() {
+        let ws = scratch_workspace();
+        let v = export(NapiExportArgs {
+            package: ws.join("package.k").to_string_lossy().into_owned(),
+            format: Some("openapi".to_string()),
+            out: None,
+        })
+        .unwrap();
+        assert_eq!(v["format"].as_str().unwrap(), "openapi");
+        assert_eq!(v["schema"]["openapi"].as_str().unwrap(), "3.1.0");
+    }
+
+    #[test]
+    fn inspect_package_mode_reports_kind_package() {
+        let ws = scratch_workspace();
+        let v = inspect(NapiInspectArgs {
+            package: Some(ws.join("package.k").to_string_lossy().into_owned()),
+            tarball: None,
+        })
+        .unwrap();
+        assert_eq!(v["kind"].as_str().unwrap(), "package");
+        assert!(v["options"].is_array());
+    }
+
+    #[test]
+    fn verify_missing_lockfile_returns_structured_error() {
+        let ws = scratch_workspace();
+        let result = verify(NapiWorkspaceArgs {
+            workspace: ws.to_string_lossy().into_owned(),
+        });
+        // Without a lockfile the verb returns E_LOCK_MISSING. The
+        // binding routes this through `into_napi`, which embeds the
+        // structured envelope into the napi error message and adds
+        // `exit_code`. JS-side `parseNapiError` parses it back.
+        let err = result.expect_err("expected E_LOCK_MISSING");
+        let msg = err.reason.to_string();
+        let envelope: serde_json::Value = serde_json::from_str(&msg)
+            .unwrap_or_else(|e| panic!("napi error must be JSON: {e}; raw: {msg}"));
+        assert_eq!(envelope["code"].as_str().unwrap(), "E_LOCK_MISSING");
+        // The exit_code augmentation is what `into_napi` adds on top
+        // of the verb's StructuredError — proves the binding ran.
+        assert_eq!(envelope["exit_code"].as_i64().unwrap(), 1);
+    }
+
+    #[test]
+    fn into_napi_carries_structured_envelope_plus_exit_code() {
+        let structured = StructuredError::new("E_TEST", "synthetic");
+        let err = into_napi(structured, ExitCode::UserError);
+        let body: serde_json::Value = serde_json::from_str(&err.reason).unwrap();
+        assert_eq!(body["code"].as_str().unwrap(), "E_TEST");
+        assert_eq!(body["message"].as_str().unwrap(), "synthetic");
+        assert_eq!(
+            body["exit_code"].as_i64().unwrap(),
+            ExitCode::UserError as i64
+        );
+    }
+}

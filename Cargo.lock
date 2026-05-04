@@ -120,6 +120,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yml",
+ "tempfile",
 ]
 
 [[package]]
