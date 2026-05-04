@@ -75,16 +75,18 @@ jobs:
         # workflows — when both tags get pushed together, sdk-release
         # may reach this step before native-release finishes its 7-
         # platform matrix + publish. Poll the registry for up to
-        # 20 min (native publishes within ~12-15 min of tag in the
-        # worst case); fast path on a sequenced release is one npm
-        # view call (~1 s).
+        # 45 min — native-release's full chain (Windows build + cross-
+        # compile builds + 9 sequential npm publishes) can run ~35 min
+        # cold. v0.8.5's first sdk-release run timed out at the old
+        # 20-min budget while native finished 7 min later. Fast path
+        # on a sequenced release is one npm view call (~1 s).
         run: |
           set -eu
           version="${GITHUB_REF_NAME#sdk-v}"
-          deadline=$((SECONDS + 1200))
+          deadline=$((SECONDS + 2700))
           while ! npm view "@akua-dev/native@${version}" version > /dev/null 2>&1; do
             if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "ERROR: @akua-dev/native@${version} did not appear on npm within 20 min."
+              echo "ERROR: @akua-dev/native@${version} did not appear on npm within 45 min."
               echo "Either native-release.yml failed, or you forgot to push native-v${version}."
               exit 1
             fi
