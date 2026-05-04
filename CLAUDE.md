@@ -92,7 +92,7 @@ That's it. akua does **not** specify `App`, `Environment`, `Cluster`, `Secret`, 
 **New CLI verb — one PR moves all of these together** (binary/SDK/docs are one contract):
 
 - `crates/akua-core/src/<verb>.rs` (logic) → `crates/akua-cli/src/verbs/<verb>.rs` (verb wrapper) → `main.rs` (clap dispatch)
-- `crates/akua-wasm/src/lib.rs` (`#[wasm_bindgen]` wrapper) → `packages/sdk/src/mod.ts` (`Akua.<verb>()` method + `WasmBinding` entry)
+- `crates/akua-napi/src/lib.rs` (`#[napi]` wrapper calling `verbs::<verb>::run`) → `packages/sdk/src/mod.ts` (`Akua.<verb>()` method routes through `loadNapi()` + `callNapi`)
 - Tests at every layer; integration golden under `crates/akua-cli/tests/` if the verb operates on a Package
 - `docs/cli.md` section, verb-count bump (grep for the current count across docs/README), 🚧 → ✅
 - `CHANGELOG.md` entry; `task release:validate` still green

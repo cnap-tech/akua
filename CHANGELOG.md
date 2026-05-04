@@ -13,6 +13,101 @@ minor bump in the SDK.
 > single-file/total-package cap is incompatible with the bundled napi
 > addon (~129 MB compressed across the per-platform packages).
 
+## [0.8.4] — 2026-05-04
+
+Two-headline release. Critical SDK bug fix + main-CI green again.
+
+### Fixed
+
+- **`@akua-dev/sdk` `Akua.check()` / `Akua.export()` no longer ENOENT.**
+  Published 0.8.3 SDK had a CI build-machine path baked into the
+  bundled `dist/mod.js`:
+
+      ENOENT: no such file or directory, open
+        '/home/runner/work/akua/akua/packages/sdk/wasm/nodejs/akua_wasm_bg.wasm'
+
+  Cause: `bun build --target node --format esm` substituted the
+  wasm-pack wrapper's `__dirname` reference with the build-time
+  absolute path, since ESM has no `__dirname`. `Akua.render()` was
+  unaffected (different transport).
+
+  Fix: drop the WASM transport from the SDK entirely. Every method
+  (`check`, `fmt`, `lint`, `tree`, `diff`, `export`, `inspect` package
+  mode) now routes through the napi addon — same path `render` /
+  `verify` / `version` / `whoami` already used. Napi already had all
+  the bindings since the addon was first introduced; the SDK was
+  simply still using the wasm side-channel for "browser-portability"
+  that the published Node-only package never collected on. Net dist
+  bundle: 62 KB → 38 KB; one transport, no `__dirname` bugs by
+  construction.
+
+  See PR #50 review thread for the original bug report.
+
+- **CI on main — two pre-existing failures cleared.**
+  - `lock_rejects_helm_dep_referenced_via_import` was written before
+    the path-escape guard landed; its `path = "../nginx-chart"` now
+    correctly trips `E_CHART_RESOLVE` before the kind-mismatch check.
+    Test relocated so the chart sits inside the install workspace.
+  - `crates/helm-engine-wasm/fork/apply.sh` exited 128 in CI when
+    `actions/cache` restored a partial `.git` directory, then exited
+    1 when go-task fanned out to `build:helm-engine-wasm` from two
+    dep paths concurrently. Three fixes: health-probe `.git` and
+    re-clone if `git status` fatals; commit the patched state so
+    repeat invocations hit the fast path; mkdir-mutex around the
+    apply for concurrency safety. Taskfile cleanup removed the
+    redundant `build:engines` from `sdk:test` so the race is gone
+    even before the script-level guards fire.
+
+### Removed (breaking, pre-alpha — minor at our discretion)
+
+- `Akua.renderSource(packageFilename, source, inputs?)` legacy
+  positional overload. The object form (`renderSource({source,
+  packageFilename?, inputs?})`) is the only signature now. Existing
+  callers update mechanically.
+- `crates/akua-wasm/` and `packages/sdk/wasm/` directories. Workspace
+  member dropped; build:akua-wasm / build:akua-wasm:nodejs Taskfile
+  tasks deleted; CLAUDE.md verb-shipping checklist updated to point
+  at the napi crate instead of the WASM wrapper.
+
+### Added (Taskfile — coverage + quality)
+
+New tasks for coverage-driven bug discovery and broader Rust quality:
+
+- `coverage:rust` — `cargo llvm-cov nextest` over the workspace +
+  feature-gated example pass + doctests. Auto-installs cargo-llvm-cov
+  + cargo-nextest at pinned versions. Test failures don't abort report
+  generation (`ignore_error: true`).
+- `coverage:sdk` — `bun test --coverage` with text + lcov reporters.
+- `coverage:gaps` — lists Rust + SDK files below `THRESHOLD`% line
+  coverage. Bug-discovery candidate list across both languages.
+- `coverage:rust:open`, `coverage:sdk:open`, `coverage:clean`.
+- `audit` — `cargo audit` against the RustSec advisory DB.
+- `hack` / `hack:test` — `cargo hack --feature-powerset` over 18
+  feature flags across 4 crates.
+- `deps:unused` — `cargo machete`.
+- `miri` — `cargo +nightly miri test -p engine-host-wasm` (the
+  unsafe-heavy crate hosting `Module::deserialize`).
+- `build:timings` — `cargo build --workspace --timings` HTML.
+
+Workspace baseline at the time of this release: **80.39% line
+coverage Rust / 76.82% line coverage SDK**. Bug-discovery candidates
+identified: `crates/akua-napi/src/lib.rs` at 0%, multiple CLI verbs
+(`dev`, `publish`, `pull`, `vendor`) at 0%, `oci_puller.rs` at 9.2%,
+`oci_pusher.rs` at 19.9%. Tests for these lined up in the next release.
+
+### Performance
+
+- **Test execution ~2× faster** in the dev loop. Same workspace,
+  binaries pre-warmed:
+
+      cargo test --workspace        58.6s
+      cargo nextest run --workspace 29.3s
+
+  Compile time (the dominant cost on cold CI) is unchanged; speedup
+  shows up on the inner loop. nextest's process-per-test isolation
+  also makes the integration suite immune to libtest's shared-state
+  fragility.
+
 ## [0.8.3] — 2026-04-29
 
 Follow-up to 0.8.2. Two fixes that surfaced when the 0.8.2 release

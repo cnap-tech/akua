@@ -1,6 +1,6 @@
 {
   "name": "@akua-dev/sdk",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "TypeScript SDK for akua — render Kubernetes Packages in-process. Helm + Kustomize engines, OCI fetch, cosign verify, JSON Schema export. No `akua` binary required.",
   "license": "Apache-2.0",
   "repository": {
@@ -31,7 +31,7 @@
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
-    "@akua-dev/native": "0.8.3",
+    "@akua-dev/native": "0.8.4",
     "@standard-schema/spec": "^1.1.0",
     "ajv": "^8.18.0",
     "yaml": "^2.8.3"

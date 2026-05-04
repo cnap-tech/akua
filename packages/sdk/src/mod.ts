@@ -1,8 +1,6 @@
-import { createHash } from 'node:crypto';
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, posix as posixPath, resolve as resolvePath, join as joinPath } from 'node:path';
+import { basename, dirname, resolve as resolvePath, join as joinPath } from 'node:path';
 
 import { callNapi, loadNapi } from './napi.ts';
 
@@ -24,78 +22,16 @@ import type { WhoamiOutput } from './types/WhoamiOutput.ts';
 
 import { type SchemaName, validateAs } from './validate.ts';
 
-// Lazy-load the WASM bundle (~7.6 MB) so the SDK's shell-out verbs
-// (`version`, `whoami`, `render`, `verify`) don't pay the parse
-// cost when a consumer never touches an in-process verb. Static
-// imports above cover all other dependencies.
-type WasmBinding = {
-	render: (packageFilename: string, source: string, inputsJson: string | null) => string;
-	version: () => string;
-	lint: (filename: string, source: string) => string;
-	fmt: (filename: string, source: string, checkMode: boolean) => string;
-	inspect_package: (filename: string, source: string) => string;
-	check: (
-		manifest: string | null,
-		lock: string | null,
-		packageFilename: string | null,
-		packageSource: string | null,
-	) => string;
-	tree: (manifest: string, lock: string | null) => string;
-	diff: (beforeJson: string, afterJson: string) => string;
-	export_input_schema: (filename: string, source: string) => string;
-	export_input_openapi: (filename: string, source: string) => string;
-};
-let wasmPromise: Promise<WasmBinding> | undefined;
-function loadWasm(): Promise<WasmBinding> {
-	if (!wasmPromise) {
-		wasmPromise = import('../wasm/nodejs/akua_wasm.js') as Promise<WasmBinding>;
-	}
-	return wasmPromise;
-}
-
-async function readOptional(p: string): Promise<string | undefined> {
-	try {
-		return await readFile(p, 'utf8');
-	} catch (err: unknown) {
-		const code = (err as { code?: string } | null | undefined)?.code;
-		if (code === 'ENOENT') return undefined;
-		throw err;
-	}
-}
-
-/**
- * Walk `root` recursively and return `{ relPath: "sha256-hex" }`
- * for every regular file. Used by `Akua.diff` to hand the WASM
- * bundle two comparable manifests. Siblings are hashed in
- * parallel; the outer tree walk stays recursive so deep
- * hierarchies don't blow the task-queue budget.
- */
-async function hashTree(root: string): Promise<Record<string, string>> {
-	const rootStat = await stat(root);
-	if (!rootStat.isDirectory()) {
-		throw new Error(`diff: ${root} is not a directory`);
-	}
-	const out: Record<string, string> = {};
-	async function walk(dir: string, rel: string): Promise<void> {
-		const entries = await readdir(dir, { withFileTypes: true });
-		await Promise.all(
-			entries.map(async (entry) => {
-				const absPath = posixPath.join(dir, entry.name);
-				const relPath = rel ? posixPath.join(rel, entry.name) : entry.name;
-				if (entry.isDirectory()) {
-					await walk(absPath, relPath);
-				} else if (entry.isFile()) {
-					const bytes = await readFile(absPath);
-					out[relPath] = createHash('sha256').update(bytes).digest('hex');
-				}
-				// Non-regular files (symlinks, sockets) are skipped —
-				// mirrors `akua_core::dir_diff::diff`.
-			}),
-		);
-	}
-	await walk(root, '');
-	return out;
-}
+// Every verb is dispatched through the napi addon. We previously
+// kept a wasm-bindgen path for "pure" verbs (check, fmt, lint, tree,
+// diff, export, inspect-as-package) on the theory that those methods
+// could run in the browser. The SDK package is published Node-only
+// (engines.node>=22 + a hard dep on @akua-dev/native), so that
+// optionality bought nothing — and the wasm path bundled the wasm-
+// pack wrapper's `__dirname` as a build-time absolute path that
+// broke at runtime. Dropping the second transport eliminates that
+// bug class entirely. If browser support comes back, it ships as a
+// separate `@akua-dev/sdk-wasm` package, not as a side-channel here.
 
 export * from './errors.ts';
 export { AkuaContractError, standardSchemaFor, validateAs } from './validate.ts';
@@ -248,16 +184,6 @@ export interface RenderSourceOptions {
 }
 
 /**
- * Cheap probe: does the Package source mention either engine plugin?
- * Substring scan; false positives just route to the WASI worker
- * unnecessarily (correct, just slower). False negatives surface as
- * KCL "no plugin registered under …" errors.
- */
-function needsEngineHost(source: string): boolean {
-	return source.includes('helm.') || source.includes('kustomize.');
-}
-
-/**
  * Thin wrapper around the `akua` CLI. Each method shells out to a verb,
  * parses the `--json` output, and returns a value typed by the ts-rs
  * generated types. Failures throw the right `AkuaError` subclass based
@@ -282,159 +208,82 @@ export class Akua {
 
 	/**
 	 * Evaluate a Package against optional inputs and return the
-	 * rendered top-level YAML. Runs entirely in-process via the
-	 * sandboxed `akua-render-worker.wasm` hosted under Node WASI —
-	 * no `akua` binary required. Helm + Kustomize engine callouts
-	 * (`helm.template`, `kustomize.build`) work transparently when
-	 * `packageDir` is provided so relative chart / overlay paths
-	 * resolve.
-	 *
-	 * Two argument shapes:
-	 * - **Object form (preferred):** `renderSource({ package, source,
-	 *   inputs, packageFilename, packageDir })`. Mix `package` (path
-	 *   on disk) + `inputs` together for the common case.
-	 * - **Legacy form:** `renderSource(packageFilename, source,
-	 *   inputs)` — kept for backwards-compat with the pre-engine
-	 *   pure-KCL helper. Cannot resolve `helm.template` paths;
-	 *   prefer the object form for new code.
+	 * rendered top-level YAML. Runs in-process via the napi addon.
+	 * Helm + Kustomize engine callouts (`helm.template`,
+	 * `kustomize.build`) resolve against the package's directory.
 	 */
-	renderSource(opts: RenderSourceOptions): Promise<string>;
-	renderSource(packageFilename: string, source: string, inputs?: unknown): Promise<string>;
-	async renderSource(
-		optsOrFilename: RenderSourceOptions | string,
-		legacySource?: string,
-		legacyInputs?: unknown,
-	): Promise<string> {
-		const opts =
-			typeof optsOrFilename === 'string'
-				? {
-						source: legacySource ?? '',
-						packageFilename: optsOrFilename,
-						inputs: legacyInputs,
-					}
-				: optsOrFilename;
-
+	async renderSource(opts: RenderSourceOptions): Promise<string> {
 		let source: string;
 		let packageFilename: string;
-		let packageDir: string | undefined;
 		if (opts.source !== undefined) {
 			source = opts.source;
 			packageFilename = opts.packageFilename ?? 'package.k';
-			packageDir = opts.packageDir;
 		} else if (opts.package !== undefined) {
-			const abs = resolvePath(opts.package);
-			source = await readFile(abs, 'utf8');
-			packageFilename = opts.packageFilename ?? basename(abs);
-			packageDir = opts.packageDir ?? dirname(abs);
+			source = await readFile(resolvePath(opts.package), 'utf8');
+			packageFilename = opts.packageFilename ?? basename(opts.package);
 		} else {
 			throw new Error('renderSource: provide either `source` or `package`');
 		}
 
-		// Dispatch:
-		// - Pure-KCL goes through `akua-wasm` (~30ms warm, runtime-
-		//   portable: Node, Bun, browsers, no native binary required).
-		// - Packages that invoke `helm.template` / `kustomize.build`
-		//   route through the napi addon. `napi.render` takes a
-		//   filesystem path — when the caller passes raw `source`, we
-		//   write it to a tempdir alongside the requested
-		//   `packageFilename` so KCL diagnostics still reference the
-		//   intended span. The temp directory becomes the implicit
-		//   `packageDir` for chart-path resolution unless the caller
-		//   set one explicitly.
-		if (needsEngineHost(source)) {
-			const napi = loadNapi();
-			// `napi.renderToYaml` mirrors `akua render --stdout` — emits
-			// raw multi-doc YAML instead of writing files + returning a
-			// summary. The caller wants the YAML bytes directly.
-			//
-			// When the caller hands us raw source we materialize it
-			// into a scratch dir so KCL spans + chart-path resolution
-			// work the same as a path-mode render. Otherwise we use the
-			// caller's path verbatim.
-			const tmp = await mkdtemp(joinPath(tmpdir(), 'akua-sdk-render-'));
-			const sourcePath =
-				opts.package !== undefined ? resolvePath(opts.package) : joinPath(tmp, packageFilename);
-			try {
-				if (opts.package === undefined) {
-					await writeFile(sourcePath, source, 'utf8');
-				}
-				return callNapi<string>(() =>
-					napi.renderToYaml({
-						package: sourcePath,
-						// `out` is unused in stdout-mode (no files
-						// written) but the verb arg-shape requires it.
-						out: joinPath(tmp, 'unused'),
-						timeout: opts.timeout,
-						maxDepth: opts.maxDepth,
-					}),
-				);
-			} finally {
-				await rm(tmp, { recursive: true, force: true });
-			}
+		const napi = loadNapi();
+		// `napi.renderToYaml` mirrors `akua render --stdout` — emits
+		// raw multi-doc YAML directly. When the caller hands us raw
+		// source we materialize it into a scratch dir so KCL spans +
+		// chart-path resolution work the same as a path-mode render.
+		// Otherwise we use the caller's path verbatim. `packageDir`
+		// is implicit (dirname of `sourcePath`).
+		const tmp = await mkdtemp(joinPath(tmpdir(), 'akua-sdk-render-'));
+		const sourcePath =
+			opts.package !== undefined ? resolvePath(opts.package) : joinPath(tmp, packageFilename);
+		// `napi.renderToYaml` reads `inputs` as a filesystem path, so
+		// stage inline values into a sibling file before invoking it.
+		let inputsPath: string | undefined;
+		if (opts.inputs !== undefined) {
+			inputsPath = joinPath(tmp, 'inputs.json');
+			await writeFile(inputsPath, JSON.stringify(opts.inputs), 'utf8');
 		}
-
-		const wasm = await loadWasm();
-		const inputsJson = opts.inputs === undefined ? null : JSON.stringify(opts.inputs);
-		return wasm.render(packageFilename, source, inputsJson);
+		try {
+			if (opts.package === undefined) {
+				await writeFile(sourcePath, source, 'utf8');
+			}
+			return callNapi<string>(() =>
+				napi.renderToYaml({
+					package: sourcePath,
+					// `out` is unused in stdout-mode (no files written) but
+					// the verb arg-shape requires it.
+					out: joinPath(tmp, 'unused'),
+					inputs: inputsPath,
+					timeout: opts.timeout,
+					maxDepth: opts.maxDepth,
+				}),
+			);
+		} finally {
+			await rm(tmp, { recursive: true, force: true });
+		}
 	}
 
-	/**
-	 * Render a Package on disk through the `akua` CLI, returning the
-	 * typed summary (output path, manifest count, sha256 digest, file
-	 * list). Shell-out transport — the CLI holds the filesystem state,
-	 * dep resolution, and the embedded helm/kustomize engines.
-	 * `renderSource` is the in-process counterpart for pure-KCL
-	 * Packages that don't need any of that.
-	 *
-	 * Every field of `opts` maps to a `--` flag of `akua render`; see
-	 * [`docs/cli.md#akua-render`](../../../docs/cli.md#akua-render).
-	 */
 	/**
 	 * Fast syntax / type / dep check over the workspace. Runs
-	 * entirely in-process via the bundled `akua-wasm` module — no
-	 * `akua` binary required.
+	 * in-process via the napi addon. Mirrors `akua check`.
 	 */
 	async check(opts: CheckOptions = {}): Promise<CheckOutput> {
-		const ws = opts.workspace ?? '.';
-		const manifestPath = posixPath.join(ws, 'akua.toml');
-		const lockPath = posixPath.join(ws, 'akua.lock');
-		const pkgPath = opts.package ?? posixPath.join(ws, 'package.k');
-
-		const [manifest, lock, pkgSource] = await Promise.all([
-			readOptional(manifestPath),
-			readOptional(lockPath),
-			readOptional(pkgPath),
-		]);
-
-		const wasm = await loadWasm();
-		const coreOutput = JSON.parse(
-			wasm.check(manifest ?? null, lock ?? null, pkgPath, pkgSource ?? null),
-		) as CheckOutput;
-
-		// CLI-parity: required-file failures the pure-compute core
-		// doesn't gate on its own. Mirrors the CLI envelope so
-		// CLI-JSON and SDK-JSON agree on scratch workspaces.
-		const checks: CheckResult[] = [];
-		if (manifest === undefined) {
-			checks.push({ name: 'manifest', ok: false, error: `${manifestPath} not found`, issues: [] });
-		}
-		checks.push(...coreOutput.checks);
-		if (pkgSource === undefined) {
-			checks.push({ name: 'package', ok: false, error: `${pkgPath} not found`, issues: [] });
-		}
-		const status = checks.every((c) => c.ok) ? 'ok' : 'fail';
-		return validateAs<CheckOutput>('CheckOutput', { status, checks });
+		const napi = loadNapi();
+		const result = callNapi<unknown>(() =>
+			napi.check({ workspace: opts.workspace ?? '.', package: opts.package }),
+		);
+		return validateAs<CheckOutput>('CheckOutput', result);
 	}
 
 	/**
-	 * Run the KCL linter against the Package. In-process via WASM —
-	 * no binary required.
+	 * Run the KCL linter against the Package. In-process via the
+	 * napi addon. Mirrors `akua lint`.
 	 */
 	async lint(opts: LintOptions = {}): Promise<LintOutput> {
-		const pkg = opts.package ?? './package.k';
-		const source = await readFile(pkg, 'utf8');
-		const wasm = await loadWasm();
-		return validateAs<LintOutput>('LintOutput', JSON.parse(wasm.lint(pkg, source)));
+		const napi = loadNapi();
+		const result = callNapi<unknown>(() =>
+			napi.lint({ package: opts.package ?? './package.k' }),
+		);
+		return validateAs<LintOutput>('LintOutput', result);
 	}
 
 	/**
@@ -449,37 +298,42 @@ export class Akua {
 	 * for the full schema contract.
 	 */
 	async export(opts: ExportOptions = {}): Promise<Record<string, unknown>> {
-		const pkg = opts.package ?? './package.k';
-		const source = await readFile(pkg, 'utf8');
-		const wasm = await loadWasm();
-		const raw =
-			opts.format === 'openapi'
-				? wasm.export_input_openapi(pkg, source)
-				: wasm.export_input_schema(pkg, source);
-		return JSON.parse(raw) as Record<string, unknown>;
+		const napi = loadNapi();
+		// napi.export returns the verb's `{format, schema}` envelope;
+		// the SDK contract has always been the bare schema document
+		// (the WASM path called `export_input_schema` / `_openapi`
+		// directly, which return just the schema). Unwrap.
+		const envelope = callNapi<{ format: string; schema: Record<string, unknown> }>(() =>
+			napi.export({
+				package: opts.package ?? './package.k',
+				format: opts.format ?? 'json-schema',
+			}),
+		);
+		return envelope.schema;
 	}
 
 	/**
-	 * Format KCL sources. In-process via WASM — no binary required.
+	 * Format KCL sources. In-process via the napi addon.
 	 * With `check=true`, reports which files would change without
 	 * touching disk. Without `check`, the formatted text is written
 	 * back to the file (mirroring `akua fmt`'s in-place behavior).
+	 *
+	 * `opts.stdout` is honored by reading the (now-formatted) file
+	 * and writing it to `process.stdout`. The file write happens
+	 * either way because napi's fmt verb performs the write before
+	 * returning; restoring the original on stdout-mode would race
+	 * with concurrent readers.
 	 */
 	async fmt(opts: FmtOptions = {}): Promise<FmtOutput> {
 		const pkg = opts.package ?? './package.k';
-		const source = await readFile(pkg, 'utf8');
-		const wasm = await loadWasm();
-		const raw = JSON.parse(wasm.fmt(pkg, source, opts.check ?? false)) as {
-			files: FmtFile[];
-			formatted: string;
-		};
-		const shouldEmit = !opts.check && (raw.files[0]?.changed ?? false);
-		if (shouldEmit && opts.stdout) {
-			process.stdout.write(raw.formatted);
-		} else if (shouldEmit) {
-			await writeFile(pkg, raw.formatted, 'utf8');
+		const napi = loadNapi();
+		const result = callNapi<{ files: FmtFile[] }>(() =>
+			napi.fmt({ package: pkg, check: opts.check ?? false }),
+		);
+		if (opts.stdout && !opts.check && (result.files[0]?.changed ?? false)) {
+			process.stdout.write(await readFile(pkg, 'utf8'));
 		}
-		return validateAs<FmtOutput>('FmtOutput', { files: raw.files });
+		return validateAs<FmtOutput>('FmtOutput', result);
 	}
 
 	/**
@@ -492,36 +346,23 @@ export class Akua {
 		if (opts.package && opts.tarball) {
 			throw new Error('inspect: pass either `package` or `tarball`, not both');
 		}
-		// Tarball mode requires the napi addon (tar reader + cosign +
-		// OCI manifest parsing). Package mode is pure-KCL and stays on
-		// the akua-wasm fast path so it works on browsers + Bun
-		// without the native binary loaded.
-		if (opts.tarball) {
-			const napi = loadNapi();
-			const result = callNapi<unknown>(() => napi.inspect({ tarball: opts.tarball }));
-			return validateAs<InspectOutput>('InspectOutput', result);
-		}
-		const pkg = opts.package ?? './package.k';
-		const source = await readFile(pkg, 'utf8');
-		const wasm = await loadWasm();
-		return validateAs<InspectOutput>(
-			'InspectOutput',
-			JSON.parse(wasm.inspect_package(pkg, source)),
+		const napi = loadNapi();
+		const result = callNapi<unknown>(() =>
+			napi.inspect(
+				opts.tarball ? { tarball: opts.tarball } : { package: opts.package ?? './package.k' },
+			),
 		);
+		return validateAs<InspectOutput>('InspectOutput', result);
 	}
 
 	/**
 	 * Print the workspace's declared deps + lockfile entries.
-	 * In-process via WASM — no binary required.
+	 * In-process via the napi addon.
 	 */
 	async tree(opts: TreeOptions = {}): Promise<TreeOutput> {
-		const ws = opts.workspace ?? '.';
-		const [manifest, lock] = await Promise.all([
-			readFile(posixPath.join(ws, 'akua.toml'), 'utf8'),
-			readOptional(posixPath.join(ws, 'akua.lock')),
-		]);
-		const wasm = await loadWasm();
-		return validateAs<TreeOutput>('TreeOutput', JSON.parse(wasm.tree(manifest, lock ?? null)));
+		const napi = loadNapi();
+		const result = callNapi<unknown>(() => napi.tree({ workspace: opts.workspace ?? '.' }));
+		return validateAs<TreeOutput>('TreeOutput', result);
 	}
 
 	/**
@@ -544,17 +385,13 @@ export class Akua {
 
 	/**
 	 * Structural diff between two directory trees of rendered
-	 * manifests. JS side walks both trees + computes sha256 per
-	 * file; akua-wasm compares the two `{path: hash}` manifests.
-	 * No binary required.
+	 * manifests. The napi addon walks both trees server-side and
+	 * compares hashes; no JS-side hashing.
 	 */
 	async diff(before: string, after: string): Promise<DirDiff> {
-		const [beforeMap, afterMap] = await Promise.all([hashTree(before), hashTree(after)]);
-		const wasm = await loadWasm();
-		return validateAs<DirDiff>(
-			'DirDiff',
-			JSON.parse(wasm.diff(JSON.stringify(beforeMap), JSON.stringify(afterMap))),
-		);
+		const napi = loadNapi();
+		const result = callNapi<unknown>(() => napi.diff({ before, after }));
+		return validateAs<DirDiff>('DirDiff', result);
 	}
 
 	async render(opts: RenderOptions = {}): Promise<RenderSummary> {

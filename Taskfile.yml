@@ -13,8 +13,6 @@ vars:
   # matching the runtime wasmtime Config hash so per-render
   # Module::deserialize is a memcpy, not a Cranelift pass.
   RENDER_WORKER_WASM: target/wasm32-wasip1/release/akua-render-worker.wasm
-  AKUA_WASM_RAW: target/wasm32-unknown-unknown/release/akua_wasm.wasm
-  AKUA_WASM_PKG: crates/akua-wasm/pkg
   SDK_TYPES_DIR: packages/sdk/src/types
 
 tasks:
@@ -198,41 +196,6 @@ tasks:
         --config 'profile.release.strip="none"'
         --config 'profile.release.debug="line-tables-only"'
       - ls -lh {{.RENDER_WORKER_WASM}}
-
-  build:akua-wasm:
-    desc: Build the @akua-dev/sdk WASM bundle (wasm32-unknown-unknown + wasm-bindgen)
-    sources:
-      - crates/akua-wasm/**/*.rs
-      - crates/akua-wasm/Cargo.toml
-    generates:
-      - "{{.AKUA_WASM_PKG}}/akua_wasm_bg.wasm"
-      - "{{.AKUA_WASM_PKG}}/akua_wasm.js"
-      - "{{.AKUA_WASM_PKG}}/akua_wasm.d.ts"
-    cmds:
-      # `--target bundler` leaves the import shape neutral — the
-      # eventual `@akua-dev/sdk` wrapper adds the runtime-aware loader
-      # (Node fs.readFile vs fetch() in the browser). `web`/`nodejs`
-      # targets lock in one runtime; we want one artifact for all.
-      - wasm-pack build crates/akua-wasm --target bundler --release --out-dir pkg
-      - ls -lh {{.AKUA_WASM_PKG}}
-
-  build:akua-wasm:nodejs:
-    desc: Build a Node-loadable copy of akua-wasm + stage it into @akua-dev/sdk
-    sources:
-      - crates/akua-wasm/**/*.rs
-      - crates/akua-wasm/Cargo.toml
-    generates:
-      - packages/sdk/wasm/nodejs/akua_wasm.js
-      - packages/sdk/wasm/nodejs/akua_wasm_bg.wasm
-    cmds:
-      - wasm-pack build crates/akua-wasm --target nodejs --release --out-dir pkg-nodejs
-      # Stage into the SDK package so JSR publishes the .wasm
-      # alongside the TS source + types. Separate from the bundler
-      # build — different instantiation shapes.
-      - mkdir -p packages/sdk/wasm/nodejs
-      - cp crates/akua-wasm/pkg-nodejs/akua_wasm.js packages/sdk/wasm/nodejs/
-      - cp crates/akua-wasm/pkg-nodejs/akua_wasm_bg.wasm packages/sdk/wasm/nodejs/
-      - cp crates/akua-wasm/pkg-nodejs/akua_wasm.d.ts packages/sdk/wasm/nodejs/
 
   sdk:gen:
     desc: Regenerate packages/sdk/src/types/*.ts and src/schemas/akua.json from Rust serde types
@@ -445,13 +408,6 @@ tasks:
       - task: native:publish:check
       - task: sdk:publish:check
 
-  test:akua-wasm:
-    desc: Smoke test — call akua-wasm `render()` from Node, assert YAML output
-    deps:
-      - build:akua-wasm:nodejs
-    cmds:
-      - node crates/akua-wasm/smoke.mjs
-
   # ---- Sandbox test harness (Phase 4+) -------------------------------------
 
   test:sandbox:
@@ -461,6 +417,171 @@ tasks:
     cmds:
       - echo "TODO (Phase 4 of docs/roadmap.md) — not yet implemented"
       - exit 1
+
+  # ---- Coverage (Rust + SDK) ----------------------------------------------
+  # The goal is coverage-driven bug discovery: every uncovered branch is a
+  # latent test gap, which empirically correlates with bugs that ship.
+  # `task coverage` prints workspace-wide line/branch numbers; the gap report
+  # lists files under threshold so you know where to add tests next.
+
+  coverage:rust:
+    desc: Rust coverage — runs full workspace test suite under cargo-llvm-cov + nextest
+    deps:
+      - sandbox-artifacts                # tests need engines + render-worker .wasm on disk
+    cmds:
+      # cargo-llvm-cov compiles the workspace with profile-instrumented
+      # codegen and merges per-test profiles into a single report.
+      # cargo-nextest replaces libtest as the runner — process-per-test
+      # isolation + default parallelism, ~2-3× faster on our 622-test
+      # suite. `cargo llvm-cov nextest` is a first-class integration.
+      # Auto-install both if missing; pinned versions keep CI reproducible.
+      - command -v cargo-llvm-cov >/dev/null 2>&1 || cargo install cargo-llvm-cov --locked --version 0.6.16
+      - command -v cargo-nextest >/dev/null 2>&1 || cargo install cargo-nextest --locked --version 0.9.86
+      - cargo llvm-cov clean --workspace
+      # Default features cover the cli + core + napi paths. Example
+      # golden tests live behind cosign-verify + dev-watch in akua-cli;
+      # run them in a second instrumented pass so their lines count.
+      # Test failures don't abort report generation — coverage of a
+      # partially-failing run is still informative, and the report
+      # itself surfaces what wasn't exercised. Run `cargo nextest run
+      # --workspace` separately to fail-the-build on real test breakage.
+      - cmd: cargo llvm-cov nextest --no-report --workspace --no-fail-fast
+        ignore_error: true
+      - cmd: cargo llvm-cov nextest --no-report -p akua-cli --features cosign-verify,dev-watch --no-fail-fast
+        ignore_error: true
+      # Doc tests aren't covered by nextest; bring them in via libtest.
+      # Small impact (~32 fence blocks across the workspace) but counted.
+      - cmd: cargo llvm-cov --no-report --workspace --doctests
+        ignore_error: true
+      - cargo llvm-cov report --html --output-dir target/llvm-cov/html
+      - cargo llvm-cov report --json --output-path target/llvm-cov/coverage.json
+      - cargo llvm-cov report --summary-only
+
+  coverage:rust:open:
+    desc: Open the Rust coverage HTML report in the default browser
+    cmds:
+      - open target/llvm-cov/html/index.html
+
+  coverage:sdk:
+    desc: SDK coverage — bun test --coverage with text + lcov reporters
+    dir: packages/sdk
+    deps:
+      - sdk:install
+      - native:build                     # napi addon must exist; tests load it
+      - build:render-worker              # render-worker .wasm needed by render tests
+    cmds:
+      - mkdir -p coverage
+      - bun test --coverage --coverage-reporter=text --coverage-reporter=lcov --coverage-dir=coverage
+
+  coverage:sdk:open:
+    desc: Open the SDK coverage HTML report (renders lcov → html via genhtml)
+    dir: packages/sdk
+    cmds:
+      - |
+        if ! command -v genhtml >/dev/null 2>&1; then
+          echo "Install lcov first (brew install lcov, or apt install lcov)" >&2
+          exit 1
+        fi
+        genhtml coverage/lcov.info --output-directory coverage/html --quiet
+        open coverage/html/index.html
+
+  coverage:
+    desc: Run both Rust + SDK coverage; total runtime ~5–10 min cold
+    deps:
+      - coverage:rust
+      - coverage:sdk
+    cmds:
+      - |
+        echo
+        echo '=== Coverage summary ==='
+        echo 'Rust HTML report:  target/llvm-cov/html/index.html'
+        echo 'Rust JSON summary: target/llvm-cov/coverage.json'
+        echo 'SDK lcov:          packages/sdk/coverage/lcov.info'
+        echo 'Run `task coverage:gaps` to list files below threshold.'
+
+  coverage:gaps:
+    desc: 'List files below {{.THRESHOLD | default "60"}}% line coverage as bug-discovery candidates. Override with THRESHOLD=80.'
+    vars:
+      THRESHOLD: '{{.THRESHOLD | default "60"}}'
+    cmds:
+      - |
+        if [ ! -f target/llvm-cov/coverage.json ]; then
+          echo "No coverage data. Run \`task coverage:rust\` first." >&2
+          exit 1
+        fi
+        echo "=== Rust files under {{.THRESHOLD}}% line coverage ==="
+        cargo llvm-cov report --json | jq -r --argjson t {{.THRESHOLD}} '
+          .data[0].files[]
+          | select(.summary.lines.percent < $t)
+          | "\(.summary.lines.percent | (. * 10 | floor) / 10)\t\(.filename | sub(".*/akua/"; ""))"
+        ' | sort -n | column -t -s $'\t' || echo "(none)"
+      - |
+        if [ ! -f packages/sdk/coverage/lcov.info ]; then
+          echo
+          echo "No SDK coverage data. Run \`task coverage:sdk\` first to include SDK files." >&2
+        else
+          echo
+          echo "=== SDK files under {{.THRESHOLD}}% line coverage ==="
+          # parse lcov: SF:<file>; LF:<lines found>; LH:<lines hit>
+          awk -v t={{.THRESHOLD}} '
+            /^SF:/ { f=substr($0,4); lf=0; lh=0 }
+            /^LF:/ { lf=substr($0,4) }
+            /^LH:/ { lh=substr($0,4) }
+            /^end_of_record$/ {
+              if (lf > 0) {
+                p = lh*100/lf
+                if (p < t) printf "%.1f\t%s\n", p, f
+              }
+            }
+          ' packages/sdk/coverage/lcov.info | sort -n | column -t -s $'\t' || echo "(none)"
+        fi
+
+  coverage:clean:
+    desc: Wipe all coverage artifacts
+    cmds:
+      - rm -rf target/llvm-cov packages/sdk/coverage
+
+  # ---- Quality gates (security audit, feature combinatorics, dead deps) ---
+
+  audit:
+    desc: Scan Cargo.lock against the RustSec advisory DB (cargo-audit)
+    cmds:
+      - command -v cargo-audit >/dev/null 2>&1 || cargo install cargo-audit --locked --version 0.21.2
+      - cargo audit
+
+  hack:
+    desc: 'Test every feature combination across the workspace (cargo-hack). 18 feature flags = many combos; this catches feature-gated bugs before they ship.'
+    cmds:
+      - command -v cargo-hack >/dev/null 2>&1 || cargo install cargo-hack --locked --version 0.6.40
+      # check is faster than test; we just want to catch compile-time
+      # feature breakage. Run test-feature-combinations less often.
+      - cargo hack check --feature-powerset --workspace --no-dev-deps
+
+  hack:test:
+    desc: 'Run tests across every feature combination (slower than `hack`; for pre-release).'
+    deps:
+      - sandbox-artifacts
+    cmds:
+      - command -v cargo-hack >/dev/null 2>&1 || cargo install cargo-hack --locked --version 0.6.40
+      - cargo hack test --feature-powerset --workspace --no-fail-fast
+
+  deps:unused:
+    desc: Find unused workspace dependencies (cargo-machete)
+    cmds:
+      - command -v cargo-machete >/dev/null 2>&1 || cargo install cargo-machete --locked --version 0.7.1
+      - cargo machete
+
+  miri:
+    desc: 'Run miri on the unsafe-heavy crate (engine-host-wasm has 15 unsafe blocks; Module::deserialize is the load-bearing one). Slow — keep out of default CI.'
+    cmds:
+      - rustup +nightly component add miri
+      - cargo +nightly miri test -p engine-host-wasm
+
+  build:timings:
+    desc: 'Generate cargo build --timings HTML to diagnose slow compile bottlenecks (kcl-lang transitives are the usual suspect).'
+    cmds:
+      - cargo build --workspace --timings
+      - 'echo "Open: target/cargo-timings/cargo-timing.html"'
 
   # ---- Clean ---------------------------------------------------------------
 

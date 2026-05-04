@@ -5,14 +5,13 @@ members = [
 	"crates/akua-cli",
 	"crates/akua-napi",
 	"crates/akua-render-worker",
-	"crates/akua-wasm",
 	"crates/engine-host-wasm",
 	"crates/helm-engine-wasm",
 	"crates/kustomize-engine-wasm",
 ]
 
 [workspace.package]
-version = "0.8.3"
+version = "0.8.4"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/cnap-tech/akua"

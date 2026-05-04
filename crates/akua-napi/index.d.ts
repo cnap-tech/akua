@@ -66,6 +66,17 @@ export interface NapiRenderArgs {
   dryRun?: boolean
   strict?: boolean
   offline?: boolean
+  /**
+   * Wall-clock cap (Go duration, e.g. `"30s"`, `"5m"`). Maps to
+   * the universal `--timeout` flag; on the SDK side, exposed as
+   * `RenderOptions.timeout`.
+   */
+  timeout?: string
+  /**
+   * Hard cap on `pkg.render` composition depth. `BudgetSnapshot`
+   * default (16) when omitted.
+   */
+  maxDepth?: number
 }
 
 export interface NapiWorkspaceArgs {

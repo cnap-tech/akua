@@ -51,7 +51,7 @@ dependencies = [
 
 [[package]]
 name = "akua-cli"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "akua-core",
  "clap",
@@ -80,7 +80,7 @@ dependencies = [
 
 [[package]]
 name = "akua-core"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "base64 0.22.1",
  "flate2",
@@ -110,7 +110,7 @@ dependencies = [
 
 [[package]]
 name = "akua-napi"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "akua-cli",
  "akua-core",
@@ -124,7 +124,7 @@ dependencies = [
 
 [[package]]
 name = "akua-render-worker"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "akua-core",
  "serde",
@@ -132,22 +132,6 @@ dependencies = [
  "serde_yml",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "akua-wasm"
-version = "0.8.3"
-dependencies = [
- "akua-core",
- "chrono",
- "getrandom 0.2.17",
- "instant",
- "serde",
- "serde_json",
- "serde_yml",
- "thiserror 2.0.18",
- "uuid",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -1411,7 +1395,7 @@ dependencies = [
 
 [[package]]
 name = "engine-host-wasm"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "thiserror 2.0.18",
  "wasmtime",
@@ -2715,7 +2699,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "helm-engine-wasm"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "base64 0.22.1",
  "engine-host-wasm",
@@ -3116,9 +3100,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e0242819d153cba4b4b05a5a8f2a7e9bbf97b6055b2a002b395c96b5ff3c0222"
 dependencies = [
  "cfg-if 1.0.4",
- "js-sys",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -3873,7 +3854,7 @@ dependencies = [
 
 [[package]]
 name = "kustomize-engine-wasm"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "base64 0.22.1",
  "engine-host-wasm",

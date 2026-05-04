@@ -76,8 +76,9 @@ const akua = new Akua();
 const samples: number[] = [];
 for (let i = 0; i < ITERATIONS; i++) {
 	const t0 = performance.now();
-	await akua.renderSource('package.k', SOURCE, {
-		appName: `bench-${i}`,
+	await akua.renderSource({
+		source: SOURCE,
+		inputs: { appName: `bench-${i}` },
 	});
 	samples.push(performance.now() - t0);
 }

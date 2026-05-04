@@ -1,6 +1,6 @@
 {
 	"name": "@akua-dev/native",
-	"version": "0.8.3",
+	"version": "0.8.4",
 	"description": "Native Node.js + Bun + Deno addon for akua-core. Loaded by @akua-dev/sdk; not a public surface.",
 	"main": "loader.js",
 	"types": "index.d.ts",
@@ -47,7 +47,7 @@
 		"version": "napi version"
 	},
 	"dependencies": {
-		"@akua-dev/native-engines": "0.8.3"
+		"@akua-dev/native-engines": "0.8.4"
 	},
 	"devDependencies": {
 		"@napi-rs/cli": "^3.2.0"
