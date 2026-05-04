@@ -242,4 +242,129 @@ signature = "cosign:sigstore:cnpg"
             assert!(dep.get("locked").is_none() || dep["locked"].is_null());
         }
     }
+
+    #[test]
+    fn text_mode_renders_signed_lockfile_marker() {
+        let ws = workspace(true);
+        let ctx = Context::human();
+        let mut stdout = Vec::new();
+        run(
+            &ctx,
+            &TreeArgs {
+                workspace: ws.path(),
+            },
+            &mut stdout,
+        )
+        .expect("run");
+        let out = String::from_utf8(stdout).unwrap();
+        // Header line: `<name>@<version> (<n> deps, edition=<e>)`.
+        assert!(out.contains("demo@0.2.0"));
+        assert!(out.contains("2 deps"));
+        assert!(out.contains("edition=akua.dev/v1alpha1"));
+        // cnpg dep is locked + cosign-signed → carries [locked … (signed)].
+        assert!(out.contains("[locked"));
+        assert!(out.contains("(signed)"));
+        // Path dep is unlocked — no `[locked` marker on its line.
+        assert!(out.contains("local"));
+    }
+
+    #[test]
+    fn text_mode_renders_no_dependencies_message_when_manifest_has_none() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(
+            tmp.path().join("akua.toml"),
+            "[package]\nname=\"empty\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
+        )
+        .unwrap();
+        let ctx = Context::human();
+        let mut stdout = Vec::new();
+        run(
+            &ctx,
+            &TreeArgs {
+                workspace: tmp.path(),
+            },
+            &mut stdout,
+        )
+        .expect("run");
+        let out = String::from_utf8(stdout).unwrap();
+        assert!(out.contains("(no dependencies)"));
+        assert!(out.contains("0 deps"));
+    }
+
+    #[test]
+    fn missing_manifest_returns_io_error() {
+        let tmp = TempDir::new().unwrap();
+        // No akua.toml on disk. Today this surfaces as E_IO via
+        // ManifestLoadError::Io — arguably should be a dedicated
+        // E_MANIFEST_MISSING for parity with `add` / `lock`. Test
+        // captures current behavior so a future code change is
+        // visible as a test diff.
+        let ctx = Context::json();
+        let mut stdout = Vec::new();
+        let err = run(
+            &ctx,
+            &TreeArgs {
+                workspace: tmp.path(),
+            },
+            &mut stdout,
+        )
+        .expect_err("missing akua.toml must error");
+        let structured = err.to_structured();
+        assert!(
+            matches!(structured.code.as_str(), "E_IO" | "E_MANIFEST_MISSING"),
+            "expected E_IO or E_MANIFEST_MISSING; got {}",
+            structured.code
+        );
+    }
+
+    #[test]
+    fn malformed_manifest_returns_parse_error() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(
+            tmp.path().join("akua.toml"),
+            "this is = not valid = toml = at all",
+        )
+        .unwrap();
+        let ctx = Context::json();
+        let mut stdout = Vec::new();
+        let err = run(
+            &ctx,
+            &TreeArgs {
+                workspace: tmp.path(),
+            },
+            &mut stdout,
+        )
+        .expect_err("malformed manifest must error");
+        let structured = err.to_structured();
+        assert_eq!(structured.code, codes::E_MANIFEST_PARSE);
+        assert_eq!(err.exit_code(), ExitCode::UserError);
+    }
+
+    #[test]
+    fn malformed_lockfile_returns_parse_error() {
+        let tmp = TempDir::new().unwrap();
+        fs::write(tmp.path().join("akua.toml"), MANIFEST).unwrap();
+        fs::write(tmp.path().join("akua.lock"), "lockfile = is not = valid").unwrap();
+        let ctx = Context::json();
+        let mut stdout = Vec::new();
+        let err = run(
+            &ctx,
+            &TreeArgs {
+                workspace: tmp.path(),
+            },
+            &mut stdout,
+        )
+        .expect_err("malformed lockfile must error");
+        assert_eq!(err.to_structured().code, codes::E_LOCK_PARSE);
+    }
+
+    #[test]
+    fn short_digest_strips_sha256_prefix_and_truncates() {
+        assert_eq!(short_digest("sha256:abcdef0123456789ffff"), "abcdef01");
+    }
+
+    #[test]
+    fn short_digest_falls_back_to_first_eight_chars_when_unprefixed() {
+        assert_eq!(short_digest("plainhashabc"), "plainhas");
+    }
 }

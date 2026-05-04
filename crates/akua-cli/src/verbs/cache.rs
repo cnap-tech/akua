@@ -242,4 +242,95 @@ mod tests {
         assert_eq!(human_bytes(2048), "2.0 KiB");
         assert_eq!(human_bytes(5 * 1024 * 1024), "5.0 MiB");
     }
+
+    #[test]
+    fn human_bytes_handles_giant_values_capped_at_top_unit() {
+        // Top unit is TiB; values above that still render as TiB.
+        assert_eq!(human_bytes(1024 * 1024 * 1024), "1.0 GiB");
+        assert_eq!(human_bytes(2 * 1024_u64.pow(4)), "2.0 TiB");
+        assert_eq!(human_bytes(5 * 1024_u64.pow(5)), "5120.0 TiB");
+    }
+
+    #[test]
+    fn human_bytes_renders_one_byte_below_kib_threshold_as_bytes() {
+        // The unit-pick loop's boundary: 1023 stays in B, 1024 promotes.
+        assert_eq!(human_bytes(1023), "1023 B");
+        assert_eq!(human_bytes(1024), "1.0 KiB");
+    }
+
+    #[test]
+    fn write_text_path_renders_both_roots() {
+        let body = PathOutputBody {
+            oci_root: PathBuf::from("/cache/oci"),
+            git_root: PathBuf::from("/cache/git"),
+        };
+        let mut buf = Vec::new();
+        write_text(&mut buf, &CacheOutput::Path(body)).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("oci: /cache/oci"));
+        assert!(s.contains("git: /cache/git"));
+    }
+
+    #[test]
+    fn write_text_clear_includes_scope_and_freed_bytes() {
+        let body = ClearOutputBody {
+            scope: "oci",
+            oci_root: PathBuf::from("/cache/oci"),
+            git_root: PathBuf::from("/cache/git"),
+            removed: 17,
+            freed_bytes: 5 * 1024 * 1024,
+        };
+        let mut buf = Vec::new();
+        write_text(&mut buf, &CacheOutput::Clear(body)).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("cleared oci cache"));
+        assert!(s.contains("17 entries"));
+        assert!(s.contains("5.0 MiB freed"));
+    }
+
+    #[test]
+    fn write_text_list_empty_inventory_announces_no_entries_and_roots() {
+        let inv = CacheInventory {
+            oci_root: PathBuf::from("/c/oci"),
+            git_root: PathBuf::from("/c/git"),
+            entries: Vec::new(),
+            total_bytes: 0,
+        };
+        let mut buf = Vec::new();
+        write_text(&mut buf, &CacheOutput::List(inv)).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("no cache entries"));
+        assert!(s.contains("oci: /c/oci"));
+        assert!(s.contains("git: /c/git"));
+    }
+
+    #[test]
+    fn write_text_list_with_entries_includes_summary_and_per_entry_lines() {
+        let inv = CacheInventory {
+            oci_root: PathBuf::from("/c/oci"),
+            git_root: PathBuf::from("/c/git"),
+            entries: vec![
+                CacheEntry {
+                    kind: "oci-blob",
+                    id: "sha256:abc".to_string(),
+                    path: PathBuf::from("/c/oci/sha256/abc"),
+                    size_bytes: 4096,
+                },
+                CacheEntry {
+                    kind: "git-repo",
+                    id: "github.com/x/y@main".to_string(),
+                    path: PathBuf::from("/c/git/github.com/x/y/main"),
+                    size_bytes: 2048,
+                },
+            ],
+            total_bytes: 6144,
+        };
+        let mut buf = Vec::new();
+        write_text(&mut buf, &CacheOutput::List(inv)).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("2 entries"));
+        assert!(s.contains("6.0 KiB total"));
+        assert!(s.contains("[oci-blob] sha256:abc"));
+        assert!(s.contains("[git-repo] github.com/x/y@main"));
+    }
 }

@@ -64,3 +64,75 @@ pub fn collect_vendor_pairs(workspace: &Path, manifest: &AkuaManifest) -> Vec<(S
     }
     pairs
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    /// Build a minimal workspace with the supplied `akua.toml` body
+    /// and an empty `package.k`. The path-escape guard requires any
+    /// `path = "./..."` deps to live inside the workspace.
+    fn workspace_with(toml_body: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("akua.toml"), toml_body).unwrap();
+        fs::write(dir.path().join("package.k"), "resources = []\n").unwrap();
+        dir
+    }
+
+    const NO_DEPS: &str = r#"[package]
+name = "vendor-test"
+version = "0.0.1"
+edition = "akua.dev/v1alpha1"
+"#;
+
+    #[test]
+    fn empty_manifest_yields_empty_vendor_pairs() {
+        let ws = workspace_with(NO_DEPS);
+        let manifest = AkuaManifest::load(ws.path()).unwrap();
+        let pairs = collect_vendor_pairs(ws.path(), &manifest);
+        assert!(pairs.is_empty(), "no deps → no vendor pairs");
+    }
+
+    #[test]
+    fn path_dep_is_excluded_from_vendor_pairs() {
+        // Path deps live inside the workspace tree and are picked up
+        // by the workspace walk in `akua publish` / `akua pack`.
+        // Re-vendoring would duplicate them in the output tarball.
+        let ws = workspace_with(&format!(
+            "{NO_DEPS}\n[dependencies]\nlocal = {{ path = \"./local-chart\" }}\n"
+        ));
+        let chart_dir = ws.path().join("local-chart");
+        fs::create_dir(&chart_dir).unwrap();
+        fs::create_dir(chart_dir.join("templates")).unwrap();
+        fs::write(
+            chart_dir.join("Chart.yaml"),
+            "apiVersion: v2\nname: local\nversion: 0.0.1\n",
+        )
+        .unwrap();
+        fs::write(chart_dir.join("templates/cm.yaml"), "kind: ConfigMap\n").unwrap();
+
+        let manifest = AkuaManifest::load(ws.path()).unwrap();
+        let pairs = collect_vendor_pairs(ws.path(), &manifest);
+        assert!(
+            pairs.is_empty(),
+            "path dep must NOT appear in vendor pairs, got: {pairs:?}"
+        );
+    }
+
+    #[test]
+    fn resolver_failure_returns_empty_vec_after_warning() {
+        // Path that doesn't exist → resolver fails. The function emits
+        // a stderr warning and returns Vec::new() so packing can
+        // proceed with whatever it has, rather than aborting.
+        let ws = workspace_with(&format!(
+            "{NO_DEPS}\n[dependencies]\nbroken = {{ path = \"./does-not-exist\" }}\n"
+        ));
+        let manifest = AkuaManifest::load(ws.path()).unwrap();
+        let pairs = collect_vendor_pairs(ws.path(), &manifest);
+        assert!(
+            pairs.is_empty(),
+            "resolver-failure path returns empty Vec, got: {pairs:?}"
+        );
+    }
+}
