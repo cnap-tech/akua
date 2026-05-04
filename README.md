@@ -54,29 +54,56 @@ akua render --inputs inputs.yaml --out ./deploy
 
 ## Quick start
 
-A `package.k` is plain KCL — typed inputs, typed outputs, plain functions over them:
+A real Package: typed inputs, an OCI-fetched Helm chart with **typed values**, and a KCL overlay across every rendered resource. No `helm` binary on the machine; no shell-out anywhere.
+
+```toml
+# akua.toml — deps are typed; resolver pins them in akua.lock with cosign verification
+[package]
+name    = "blog"
+version = "0.1.0"
+edition = "akua.dev/v1alpha1"
+
+[dependencies]
+nginx = { oci = "oci://registry-1.docker.io/bitnamicharts/nginx", version = "18.2.0" }
+```
 
 ```kcl
-import akua.helm
+# package.k
+import akua.ctx
+import charts.nginx as nginx
 
 schema Input:
-    name: str = "hello"
+    name:     str = "blog"
     replicas: int = 2
+    tenant:   str
 
-input: Input = option("input") or Input {}
+    check:
+        replicas >= 1, "replicas must be >= 1"
 
-resources = helm.template(helm.Template {
-    chart   = "./chart"
-    values  = {fullnameOverride = input.name, replicaCount = input.replicas}
+input: Input = ctx.input()
+
+# Helm chart called as an alias-method. `nginx.Values` is a generated
+# schema, not an untyped dict — typos surface as KCL compile errors.
+_workload = nginx.template(nginx.TemplateOpts {
+    values = nginx.Values {
+        replicaCount     = input.replicas
+        fullnameOverride = input.name
+    }
     release = input.name
 })
+
+# Overlay every rendered resource with a tenant label.
+resources = [r | {
+    metadata.labels = { "app.cnap.tech/tenant" = input.tenant }
+} for r in _workload]
 ```
 
 ```sh
-akua render --package ./package.k --inputs inputs.yaml --out ./deploy
+akua render --inputs prod.yaml --out ./deploy   # sandboxed render → raw manifests
+akua publish .                                  # cosign-signed OCI artifact + SLSA attestation
 ```
 
-Ten worked examples (Helm, Kustomize, multi-engine, Package composition, KCL ecosystem) live in [`examples/`](examples/). Each green example commits its `rendered/` golden output and is byte-checked by CI.
+For cross-Package composition (install one Akua package on top of another, with overlays / filters / extras), see [`examples/11-install-as-package/`](examples/11-install-as-package/). Twelve worked examples — Helm, Kustomize, multi-engine, package composition, KCL ecosystem, install-as-Package — each commit `rendered/` goldens byte-checked in CI.
 
 ## Why akua
 
@@ -125,7 +152,7 @@ Prebuilt binaries: [Releases](https://github.com/cnap-tech/akua/releases). Conta
 
 ## Status
 
-**Alpha** — v0.1.0 is the first tagged release. Stable contracts: the 26-verb CLI surface, the universal flag/exit-code contract, the WASM-backed SDK methods, the sandbox invariant. Anything in [`docs/roadmap.md`](docs/roadmap.md) under Phase 5+ may change before v0.2.0. Safe for CI and agent workflows today; pin akua versions for production rollouts.
+**Alpha.** Stable contracts: the 26-verb CLI surface, the universal flag/exit-code contract, the WASM-backed SDK methods, the sandbox invariant. Anything in [`docs/roadmap.md`](docs/roadmap.md) under Phase 5+ may change before v1.0. Safe for CI and agent workflows today; pin akua versions for production rollouts.
 
 ## Security
 
