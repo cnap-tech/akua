@@ -13,6 +13,29 @@ minor bump in the SDK.
 > single-file/total-package cap is incompatible with the bundled napi
 > addon (~129 MB compressed across the per-platform packages).
 
+## [0.8.5] — 2026-05-05
+
+Republish of 0.8.4 — the npm publish step on `native-release` 401'd
+mid-loop on v0.8.4, leaving `@akua-dev/native-engines@0.8.4` and
+`@akua-dev/native-darwin-arm64@0.8.4` published but the other 6
+per-platform packages + the `@akua-dev/native` meta + `@akua-dev/sdk`
+missing from npm. v0.8.4 stays partial-published as a graveyard
+version; install `@akua-dev/sdk@0.8.5` to get the SDK `__dirname`
+fix described under 0.8.4.
+
+### Fixed
+
+- **`native-release.yml` publish step is now idempotent.** Probes
+  `npm view <pkg>@<v>` before each publish and skips packages
+  already on the registry. A future partial-publish failure (network
+  blip, OIDC hiccup) can be recovered by re-running the workflow
+  rather than bumping the version. The 0.8.4 → 0.8.5 surgery
+  yesterday is the kind of dance this avoids.
+
+No code changes vs 0.8.4. SDK contract identical (all-napi, no
+WASM transport, no `__dirname` bug class, the same `requires`-block
+discussion etc. that landed in 0.8.4 stays valid).
+
 ## [0.8.4] — 2026-05-04
 
 Two-headline release. Critical SDK bug fix + main-CI green again.

@@ -248,17 +248,37 @@ jobs:
         # platform `.node` packages, then the meta which declares
         # optionalDependencies on all of them + a regular dep on
         # engines.
+        #
+        # Idempotency: if a previous run partially published this
+        # version (e.g. the v0.8.4 publish step 401'd mid-loop and
+        # 2/9 packages landed on npm), retrying must not abort on
+        # "cannot publish over previously published version". The
+        # `publish_one` shim probes npm first and skips already-
+        # published packages, so a recovery rerun finishes the
+        # remaining packages without manual surgery.
         if: github.event_name == 'push' || inputs.dry-run == false
         run: |
           set -eu
+
+          publish_one() {
+            local dir="$1" name version
+            name=$(jq -r '.name'    "$dir/package.json")
+            version=$(jq -r '.version' "$dir/package.json")
+            if npm view "${name}@${version}" version > /dev/null 2>&1; then
+              echo "Skipping ${name}@${version} — already on npm"
+              return 0
+            fi
+            (cd "$dir" && npm publish --access public --provenance)
+          }
+
           echo "Publishing @akua-dev/native-engines"
-          (cd crates/akua-native-engines-npm && npm publish --access public --provenance)
+          publish_one crates/akua-native-engines-npm
           for dir in crates/akua-napi/npm/*/; do
             echo "Publishing ${dir}"
-            (cd "$dir" && npm publish --access public --provenance)
+            publish_one "${dir%/}"
           done
           echo "Publishing meta @akua-dev/native"
-          (cd crates/akua-napi && npm publish --access public --provenance)
+          publish_one crates/akua-napi
 
       - name: Pack only (dry-run)
         if: github.event_name == 'workflow_dispatch' && inputs.dry-run == true

@@ -7,9 +7,9 @@
     },
     "crates/akua-napi": {
       "name": "@akua-dev/native",
-      "version": "0.8.4",
+      "version": "0.8.5",
       "dependencies": {
-        "@akua-dev/native-engines": "0.8.4",
+        "@akua-dev/native-engines": "0.8.5",
       },
       "devDependencies": {
         "@napi-rs/cli": "^3.2.0",
@@ -17,13 +17,13 @@
     },
     "crates/akua-native-engines-npm": {
       "name": "@akua-dev/native-engines",
-      "version": "0.8.4",
+      "version": "0.8.5",
     },
     "packages/sdk": {
       "name": "@akua-dev/sdk",
-      "version": "0.8.4",
+      "version": "0.8.5",
       "dependencies": {
-        "@akua-dev/native": "0.8.4",
+        "@akua-dev/native": "0.8.5",
         "@standard-schema/spec": "^1.1.0",
         "ajv": "^8.18.0",
         "yaml": "^2.8.3",
