@@ -19,6 +19,18 @@ helm_tag="v4.1.4"
 
 mkdir -p "$crate_root/third_party"
 
+# Concurrency guard: serialize parallel apply.sh invocations. The
+# Taskfile graph already converges on a single call after the
+# build:engines→sdk:test cleanup, but defending here too keeps the
+# script safe to invoke directly (e.g. local task fan-out, future
+# additions). mkdir is atomic across POSIX, so the lock-acquire
+# loop is portable without flock(1).
+lock="$crate_root/third_party/.apply.lock"
+while ! mkdir "$lock" 2>/dev/null; do
+    sleep 0.5
+done
+trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+
 # Validate any cached fork tree is healthy before trusting it. CI
 # restores the helm-fork directory from actions/cache; a partial or
 # corrupted restore leaves `.git` present but `git status` exiting 128
@@ -55,6 +67,17 @@ fi
 
 echo "[fork/apply.sh] applying $patch"
 (cd "$fork_dir" && patch -p1 < "$patch")
+
+# Commit the patched state. Without this, the working tree stays dirty
+# forever and a second concurrent invocation (e.g. fan-in from multiple
+# `task` deps reaching `build:helm-engine-wasm` at once) trips the
+# "refusing to modify" guard on `git diff --quiet` and exits 1. With
+# the commit, `git apply --check --reverse` correctly detects the
+# patched-and-committed state on every subsequent call.
+(cd "$fork_dir" \
+    && git add -A \
+    && git -c user.email=akua-fork@local -c user.name=akua-fork \
+           commit -q -m "akua: client-go strip patch")
 
 # Rewrite go-src to use the forked path.
 go_src="$crate_root/go-src"

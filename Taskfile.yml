@@ -281,7 +281,12 @@ tasks:
 
   sdk:test:
     desc: Run @akua-dev/sdk TS unit tests (bun + Node — engine-bridge tests gate on Node WASI)
-    deps: [sdk:install, native:build, build:render-worker, build:engines]
+    # `build:engines` was redundant — `native:build` already triggers
+    # both engines via `native-engines:stage`. Listing it twice meant
+    # `build:helm-engine-wasm` was reachable via two dep paths and got
+    # invoked concurrently in CI, racing on the helm-fork tree. The
+    # remaining deps converge on a single helm-engine-wasm invocation.
+    deps: [sdk:install, native:build, build:render-worker]
     dir: packages/sdk
     cmds:
       - bun test
