@@ -156,6 +156,29 @@ mod tests {
         assert!(validate_release_name("-release").is_err());
     }
 
+    /// Empty + > 53 chars are the length-based rejections; both go
+    /// through the same branch in the validator.
+    #[test]
+    fn release_name_rejects_length_violations() {
+        assert!(validate_release_name("").is_err());
+        let too_long: String = "a".repeat(54);
+        assert!(validate_release_name(&too_long).is_err());
+        // Boundary: exactly 53 is OK.
+        let max_ok: String = "a".repeat(53);
+        assert!(validate_release_name(&max_ok).is_ok());
+    }
+
+    /// Uppercase + non-alphanumeric chars (other than `-`) are
+    /// rejected. Catches Package authors who tried `MyRelease` or
+    /// `my_release`.
+    #[test]
+    fn release_name_rejects_uppercase_and_underscore() {
+        let err = validate_release_name("MyRelease").unwrap_err();
+        assert!(err.contains("must start with"), "got: {err}");
+        let err = validate_release_name("my_release").unwrap_err();
+        assert!(err.contains("may contain only"), "got: {err}");
+    }
+
     #[test]
     fn namespace_valid() {
         assert!(validate_namespace("default").is_ok());
@@ -169,5 +192,36 @@ mod tests {
         assert!(validate_namespace("-leading").is_err());
         assert!(validate_namespace("trailing-").is_err());
         assert!(validate_namespace("UPPER").is_err());
+    }
+
+    /// DNS-1123 length rule: 1..=63. Boundary check.
+    #[test]
+    fn namespace_length_boundaries() {
+        let max_ok: String = "a".repeat(63);
+        assert!(validate_namespace(&max_ok).is_ok());
+        let too_long: String = "a".repeat(64);
+        assert!(validate_namespace(&too_long).is_err());
+    }
+
+    /// Internal char that's not [a-z0-9-] (e.g. `.`, `_`). The edge-
+    /// chars are valid here so the rejection comes from the body
+    /// scan — different code path than the leading-dash rejection.
+    #[test]
+    fn namespace_rejects_internal_invalid_char() {
+        let err = validate_namespace("ab.cd").unwrap_err();
+        assert!(err.contains("may contain only"), "got: {err}");
+    }
+
+    /// Pulls last path component as the chart name. Falls back to
+    /// `"chart"` when the input has no terminal name (root path).
+    #[test]
+    fn chart_dir_name_uses_last_component() {
+        assert_eq!(chart_dir_name(Path::new("/charts/nginx")), "nginx");
+        assert_eq!(chart_dir_name(Path::new("foo/bar/baz")), "baz");
+    }
+
+    #[test]
+    fn chart_dir_name_falls_back_when_no_basename() {
+        assert_eq!(chart_dir_name(Path::new("/")), "chart");
     }
 }
