@@ -72,14 +72,33 @@ pub fn run<W: Write>(
         stop_for_handler.store(true, Ordering::SeqCst);
     })?;
 
+    run_loop(ctx, args, stdout, stop, |changed| {
+        render_once(args, changed)
+    })
+}
+
+/// The watch+emit body, factored out from [`run`] so tests can pass a
+/// custom render closure + drive `stop` themselves without owning the
+/// process-global ctrlc handler. `stop` is shared with the broken-pipe
+/// detector below — a single source of truth for "exit cleanly".
+pub(crate) fn run_loop<W, R>(
+    ctx: &Context,
+    args: &DevArgs<'_>,
+    stdout: &mut W,
+    stop: Arc<AtomicBool>,
+    mut render: R,
+) -> Result<ExitCode, DevError>
+where
+    W: Write,
+    R: FnMut(&[PathBuf]) -> Result<String, String>,
+{
     let emit_json = matches!(ctx.output, OutputMode::Json);
-    let mut stdout_ref = stdout;
     let stop_for_loop = stop.clone();
 
     akua_core::dev::watch_and_render(
         args.workspace,
         args.debounce,
-        |changed| render_once(args, changed),
+        |changed| render(changed),
         |event| {
             // Broken-pipe handling: if the user pipes `akua dev |
             // head`, the first failed write must stop the loop —
@@ -88,11 +107,11 @@ pub fn run<W: Write>(
             // check unwind cleanly.
             let write_result = if emit_json {
                 let line = serde_json::to_string(event).unwrap_or_default();
-                writeln!(&mut stdout_ref, "{line}")
+                writeln!(stdout, "{line}")
             } else {
-                write_human(&mut stdout_ref, event)
+                write_human(stdout, event)
             };
-            if write_result.is_err() || stdout_ref.flush().is_err() {
+            if write_result.is_err() || stdout.flush().is_err() {
                 stop.store(true, Ordering::SeqCst);
             }
         },
@@ -347,5 +366,92 @@ mod tests {
             DevError::StdoutWrite(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "EPIPE"));
         assert_eq!(err.to_structured().code, codes::E_IO);
         assert!(matches!(err.exit_code(), ExitCode::SystemError));
+    }
+
+    /// Drive `run_loop` against a real workspace with a *stub* render
+    /// closure (skips the kcl wasm worker, but exercises every other
+    /// line: watcher setup, seed render, emit closure, broken-pipe
+    /// stop, exit). The stop flag is pre-set so the loop exits after
+    /// emitting `Started` + `Stopped` — no debouncer ticks needed.
+    #[test]
+    fn run_loop_emits_started_and_stopped_with_stub_render() {
+        let ws = workspace_with(
+            "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
+        );
+        let args = args_with_inputs(ws.path(), None);
+
+        // Pre-set stop so `watch_and_render` exits the loop on its
+        // first `should_stop()` poll, after the seed render emits
+        // Started.
+        let stop = Arc::new(AtomicBool::new(true));
+
+        let ctx = Context::json();
+        let mut stdout = Vec::new();
+        let exit = run_loop(&ctx, &args, &mut stdout, stop, |_changed| {
+            Ok("0 manifest(s) → /tmp/deploy (sha256:test)".into())
+        })
+        .expect("run_loop must not error on a clean workspace");
+        assert!(matches!(exit, ExitCode::Success));
+
+        // JSON-line output: first line is `Started`, second is `Stopped`.
+        let text = String::from_utf8(stdout).unwrap();
+        let mut lines = text.lines();
+        let first: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
+        assert_eq!(first["event"], "started");
+        assert_eq!(
+            first["summary"],
+            "0 manifest(s) → /tmp/deploy (sha256:test)"
+        );
+        let last: serde_json::Value = serde_json::from_str(lines.last().unwrap()).unwrap();
+        assert_eq!(last["event"], "stopped");
+    }
+
+    /// Render closure returns Err on the seed call → loop emits a
+    /// `RenderError` for the initial render (with empty `changed`)
+    /// and still proceeds to `Stopped` — authors can fix the package
+    /// + the next iteration would re-render.
+    #[test]
+    fn run_loop_seed_render_error_emits_render_error_event() {
+        let ws = workspace_with(
+            "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
+        );
+        let args = args_with_inputs(ws.path(), None);
+        let stop = Arc::new(AtomicBool::new(true));
+
+        let mut stdout = Vec::new();
+        run_loop(&Context::json(), &args, &mut stdout, stop, |_| {
+            Err("kcl: parse error at package.k:3".into())
+        })
+        .unwrap();
+
+        let text = String::from_utf8(stdout).unwrap();
+        let first: serde_json::Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
+        assert_eq!(first["event"], "render-error");
+        assert_eq!(first["message"], "kcl: parse error at package.k:3");
+        // `changed` is empty for the seed render — nothing triggered it.
+        assert_eq!(first["changed"].as_array().unwrap().len(), 0);
+    }
+
+    /// Human-mode emits text the `write_human` tests cover, exercised
+    /// here through the full `run_loop` to catch any wiring drift
+    /// between `OutputMode::Text` and the human writer.
+    #[test]
+    fn run_loop_human_mode_emits_watching_header() {
+        let ws = workspace_with(
+            "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
+        );
+        let args = args_with_inputs(ws.path(), None);
+        let stop = Arc::new(AtomicBool::new(true));
+
+        let mut stdout = Vec::new();
+        run_loop(&Context::human(), &args, &mut stdout, stop, |_| {
+            Ok("seeded".into())
+        })
+        .unwrap();
+
+        let text = String::from_utf8(stdout).unwrap();
+        assert!(text.contains("watching "));
+        assert!(text.contains("initial render: seeded"));
+        assert!(text.contains("stopped."));
     }
 }
