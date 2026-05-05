@@ -1129,7 +1129,7 @@ mod tests {
                 "digest": layer_digest,
             }],
         });
-        (serde_json::to_vec(&manifest).unwrap(), layer_digest.clone())
+        (serde_json::to_vec(&manifest).unwrap(), layer_digest)
     }
 
     fn mock_oci_ref(server: &MockServer, repo: &str) -> String {

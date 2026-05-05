@@ -410,8 +410,13 @@ mod tests {
     /// Encrypted PKCS#8 private key + correct passphrase → sign
     /// succeeds and the sidecar verifies. Exercises the new
     /// `run_with` injection seam without `std::env::set_var`.
-    #[test]
-    fn run_with_correct_passphrase_signs_encrypted_key() {
+    /// Stand up a minimal workspace + a fresh tarball + an
+    /// encrypted PKCS#8 PEM keyfile under `passphrase`. Returns
+    /// `(tmp_dir, workspace, tarball_path, key_path)` — the
+    /// `tmp_dir` keeps every other path alive for the test.
+    fn encrypted_keypair_setup(
+        passphrase: &[u8],
+    ) -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
         use pkcs8::EncodePrivateKey as PkcsEncode;
 
         let tmp = tempfile::tempdir().unwrap();
@@ -420,16 +425,23 @@ mod tests {
         let tar_path = tmp.path().join("p.tgz");
         pack_minimal_tarball(&workspace, &tar_path);
 
-        // Encrypt the private key with `hunter2`. Cosign accepts any
-        // PBES2-encoded PKCS#8 PEM under that scheme.
+        // PBES2-encoded PKCS#8 PEM — what cosign emits for an encrypted
+        // signing key, accepted by `cosign::sign_keyed` when the right
+        // passphrase is supplied.
         let sk = SigningKey::random(&mut OsRng);
-        let passphrase = "hunter2";
         let key_pem = sk
-            .to_pkcs8_encrypted_pem(&mut OsRng, passphrase.as_bytes(), LineEnding::LF)
+            .to_pkcs8_encrypted_pem(&mut OsRng, passphrase, LineEnding::LF)
             .unwrap()
             .to_string();
         let key_path = tmp.path().join("priv-encrypted.pem");
         std::fs::write(&key_path, &key_pem).unwrap();
+        (tmp, workspace, tar_path, key_path)
+    }
+
+    #[test]
+    fn run_with_correct_passphrase_signs_encrypted_key() {
+        let passphrase = "hunter2";
+        let (tmp, workspace, tar_path, key_path) = encrypted_keypair_setup(passphrase.as_bytes());
 
         run_with(
             &ctx_json(),
@@ -455,21 +467,7 @@ mod tests {
     /// unreachable from a unit test.
     #[test]
     fn run_with_wrong_passphrase_surfaces_crypto_error() {
-        use pkcs8::EncodePrivateKey as PkcsEncode;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let workspace = tmp.path().join("ws");
-        std::fs::create_dir_all(&workspace).unwrap();
-        let tar_path = tmp.path().join("p.tgz");
-        pack_minimal_tarball(&workspace, &tar_path);
-
-        let sk = SigningKey::random(&mut OsRng);
-        let key_pem = sk
-            .to_pkcs8_encrypted_pem(&mut OsRng, b"hunter2", LineEnding::LF)
-            .unwrap()
-            .to_string();
-        let key_path = tmp.path().join("priv-encrypted.pem");
-        std::fs::write(&key_path, &key_pem).unwrap();
+        let (_tmp, workspace, tar_path, key_path) = encrypted_keypair_setup(b"hunter2");
 
         let err = run_with(
             &ctx_json(),

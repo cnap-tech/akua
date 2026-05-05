@@ -209,6 +209,11 @@ mod tests {
     use super::*;
     use crate::test_helpers::workspace_with;
 
+    /// Smallest valid akua.toml that satisfies `AkuaManifest::load`.
+    /// Inlining this in every test made unrelated edits noisy.
+    const MINIMAL_PACKAGE_TOML: &str =
+        "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n";
+
     fn args_with_inputs(workspace: &Path, inputs: Option<PathBuf>) -> DevArgs<'_> {
         DevArgs {
             workspace,
@@ -305,9 +310,7 @@ mod tests {
     /// `akua render` and `akua dev` share this fallback behavior.
     #[test]
     fn load_inputs_returns_empty_mapping_when_no_inputs_resolved() {
-        let ws = workspace_with(
-            "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
-        );
+        let ws = workspace_with(MINIMAL_PACKAGE_TOML);
         let args = args_with_inputs(ws.path(), None);
         let v = load_inputs(&args).expect("empty inputs is not an error");
         assert!(matches!(v, serde_yaml::Value::Mapping(ref m) if m.is_empty()));
@@ -317,9 +320,7 @@ mod tests {
     /// straight through.
     #[test]
     fn load_inputs_parses_explicit_yaml() {
-        let ws = workspace_with(
-            "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
-        );
+        let ws = workspace_with(MINIMAL_PACKAGE_TOML);
         let inputs_path = ws.path().join("inputs.yaml");
         std::fs::write(&inputs_path, "name: hello\nreplicas: 3\n").unwrap();
         let args = args_with_inputs(ws.path(), Some(inputs_path));
@@ -333,9 +334,7 @@ mod tests {
     /// keeps editing.
     #[test]
     fn load_inputs_surfaces_parse_error() {
-        let ws = workspace_with(
-            "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
-        );
+        let ws = workspace_with(MINIMAL_PACKAGE_TOML);
         let inputs_path = ws.path().join("inputs.yaml");
         std::fs::write(&inputs_path, "{ unbalanced: [").unwrap();
         let args = args_with_inputs(ws.path(), Some(inputs_path.clone()));
@@ -347,9 +346,7 @@ mod tests {
     /// Explicit path that doesn't exist → IO error string.
     #[test]
     fn load_inputs_surfaces_missing_file() {
-        let ws = workspace_with(
-            "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
-        );
+        let ws = workspace_with(MINIMAL_PACKAGE_TOML);
         let missing = ws.path().join("nope.yaml");
         let args = args_with_inputs(ws.path(), Some(missing.clone()));
         let err = load_inputs(&args).unwrap_err();
@@ -375,9 +372,7 @@ mod tests {
     /// emitting `Started` + `Stopped` — no debouncer ticks needed.
     #[test]
     fn run_loop_emits_started_and_stopped_with_stub_render() {
-        let ws = workspace_with(
-            "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
-        );
+        let ws = workspace_with(MINIMAL_PACKAGE_TOML);
         let args = args_with_inputs(ws.path(), None);
 
         // Pre-set stop so `watch_and_render` exits the loop on its
@@ -412,9 +407,7 @@ mod tests {
     /// + the next iteration would re-render.
     #[test]
     fn run_loop_seed_render_error_emits_render_error_event() {
-        let ws = workspace_with(
-            "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
-        );
+        let ws = workspace_with(MINIMAL_PACKAGE_TOML);
         let args = args_with_inputs(ws.path(), None);
         let stop = Arc::new(AtomicBool::new(true));
 
@@ -437,9 +430,7 @@ mod tests {
     /// between `OutputMode::Text` and the human writer.
     #[test]
     fn run_loop_human_mode_emits_watching_header() {
-        let ws = workspace_with(
-            "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
-        );
+        let ws = workspace_with(MINIMAL_PACKAGE_TOML);
         let args = args_with_inputs(ws.path(), None);
         let stop = Arc::new(AtomicBool::new(true));
 
