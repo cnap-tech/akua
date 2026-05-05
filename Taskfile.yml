@@ -104,6 +104,10 @@ tasks:
       # tests already byte-diff every render against the golden, so this
       # task is the canonical pre-tag confidence check: if it's green,
       # render output is byte-identical to what shipped on main.
+      # `--include-ignored` runs `examples_kcl_ecosystem`, which is
+      # `#[ignore]`-gated by default (live ghcr.io pull + wasmtime
+      # epoch budget make it flaky in `cargo test --workspace`).
+      # Pre-tag we WANT it to run.
       - cargo test -p akua-cli --features cosign-verify,dev-watch
           --test examples_helm_hello
           --test examples_hello_webapp
@@ -112,6 +116,7 @@ tasks:
           --test examples_kcl_ecosystem
           --test examples_install_as_package
           --test examples_export
+          -- --include-ignored
 
   # ---- Release builds ------------------------------------------------------
 

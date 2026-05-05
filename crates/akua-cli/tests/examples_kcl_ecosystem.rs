@@ -29,6 +29,12 @@ fn example_dir() -> PathBuf {
 }
 
 #[test]
+// Live network pull + wasmtime epoch budget: cold runs trip
+// `wasm trap: interrupt` inside the kcl loader if ghcr.io / cargo cache
+// are slow. Skipped from `cargo test --workspace` so flakes don't
+// shadow real failures; run explicitly via `cargo test -- --include-ignored`
+// or `task release:validate` (which already passes that flag).
+#[ignore = "online: pulls oci://ghcr.io/kcl-lang/k8s; sensitive to wasmtime epoch budget"]
 fn renders_kcl_ecosystem_dep_against_golden() {
     let dir = example_dir();
 
