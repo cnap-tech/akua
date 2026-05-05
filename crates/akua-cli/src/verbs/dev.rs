@@ -130,7 +130,7 @@ fn render_once(args: &DevArgs<'_>, _changed: &[PathBuf]) -> Result<String, Strin
     ))
 }
 
-fn load_inputs(args: &DevArgs<'_>) -> Result<serde_yaml::Value, String> {
+pub(crate) fn load_inputs(args: &DevArgs<'_>) -> Result<serde_yaml::Value, String> {
     let path = match resolve_inputs_path(args) {
         Some(p) => p,
         None => return Ok(serde_yaml::Value::Mapping(Default::default())),
@@ -144,7 +144,7 @@ fn resolve_inputs_path(args: &DevArgs<'_>) -> Option<PathBuf> {
     akua_core::package_k::resolve_inputs_path(&args.package_path, args.inputs_path.as_deref())
 }
 
-fn write_human<W: Write>(w: &mut W, event: &DevEvent) -> std::io::Result<()> {
+pub(crate) fn write_human<W: Write>(w: &mut W, event: &DevEvent) -> std::io::Result<()> {
     match event {
         DevEvent::Started { workspace, summary } => {
             writeln!(w, "watching {} ...", workspace.display())?;
@@ -183,4 +183,169 @@ fn write_human<W: Write>(w: &mut W, event: &DevEvent) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_helpers::workspace_with;
+
+    fn args_with_inputs(workspace: &Path, inputs: Option<PathBuf>) -> DevArgs<'_> {
+        DevArgs {
+            workspace,
+            package_path: workspace.join("package.k"),
+            inputs_path: inputs,
+            out_dir: workspace.join("deploy"),
+            debounce: Duration::from_millis(50),
+        }
+    }
+
+    /// `Started` writes a header + initial-render summary line.
+    #[test]
+    fn write_human_started_renders_header_and_summary() {
+        let mut buf = Vec::new();
+        write_human(
+            &mut buf,
+            &DevEvent::Started {
+                workspace: PathBuf::from("/ws"),
+                summary: "0 manifest(s) → /ws/deploy (sha256:abc)".into(),
+            },
+        )
+        .unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("watching /ws"));
+        assert!(s.contains("initial render"));
+        assert!(s.contains("sha256:abc"));
+    }
+
+    /// `Rendered` joins changed paths into the trigger line.
+    #[test]
+    fn write_human_rendered_lists_triggers() {
+        let mut buf = Vec::new();
+        write_human(
+            &mut buf,
+            &DevEvent::Rendered {
+                changed: vec![PathBuf::from("a.k"), PathBuf::from("b.k")],
+                took_ms: 12,
+                summary: "1 manifest(s) → ./deploy (sha256:def)".into(),
+            },
+        )
+        .unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("re-render (a.k, b.k)"));
+        assert!(s.contains("[12ms]"));
+        assert!(s.contains("sha256:def"));
+    }
+
+    /// `RenderError` with empty `changed` (initial-render failure)
+    /// uses the no-trigger header.
+    #[test]
+    fn write_human_render_error_no_changed_uses_plain_header() {
+        let mut buf = Vec::new();
+        write_human(
+            &mut buf,
+            &DevEvent::RenderError {
+                changed: vec![],
+                message: "kcl: parse error\nat package.k:3".into(),
+            },
+        )
+        .unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.starts_with("render error:"));
+        assert!(s.contains("  kcl: parse error"));
+        assert!(s.contains("  at package.k:3"));
+    }
+
+    /// `RenderError` with `changed` populated includes them in the
+    /// header (mid-edit failure mode).
+    #[test]
+    fn write_human_render_error_with_changed_lists_triggers() {
+        let mut buf = Vec::new();
+        write_human(
+            &mut buf,
+            &DevEvent::RenderError {
+                changed: vec![PathBuf::from("inputs.yaml")],
+                message: "boom".into(),
+            },
+        )
+        .unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.starts_with("render error (inputs.yaml):"));
+        assert!(s.contains("  boom"));
+    }
+
+    /// `Stopped` writes the final marker.
+    #[test]
+    fn write_human_stopped_writes_marker() {
+        let mut buf = Vec::new();
+        write_human(&mut buf, &DevEvent::Stopped).unwrap();
+        assert_eq!(String::from_utf8(buf).unwrap(), "stopped.\n");
+    }
+
+    /// No `inputs_path` set + no auto-discovered file → empty mapping.
+    /// `akua render` and `akua dev` share this fallback behavior.
+    #[test]
+    fn load_inputs_returns_empty_mapping_when_no_inputs_resolved() {
+        let ws = workspace_with(
+            "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
+        );
+        let args = args_with_inputs(ws.path(), None);
+        let v = load_inputs(&args).expect("empty inputs is not an error");
+        assert!(matches!(v, serde_yaml::Value::Mapping(ref m) if m.is_empty()));
+    }
+
+    /// Explicit `inputs_path` pointing at a valid YAML doc parses
+    /// straight through.
+    #[test]
+    fn load_inputs_parses_explicit_yaml() {
+        let ws = workspace_with(
+            "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
+        );
+        let inputs_path = ws.path().join("inputs.yaml");
+        std::fs::write(&inputs_path, "name: hello\nreplicas: 3\n").unwrap();
+        let args = args_with_inputs(ws.path(), Some(inputs_path));
+        let v = load_inputs(&args).unwrap();
+        assert_eq!(v["name"], "hello");
+        assert_eq!(v["replicas"], 3);
+    }
+
+    /// Malformed YAML at an explicit path → parse error string,
+    /// surfaced to the watch loop as a RenderError so the author
+    /// keeps editing.
+    #[test]
+    fn load_inputs_surfaces_parse_error() {
+        let ws = workspace_with(
+            "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
+        );
+        let inputs_path = ws.path().join("inputs.yaml");
+        std::fs::write(&inputs_path, "{ unbalanced: [").unwrap();
+        let args = args_with_inputs(ws.path(), Some(inputs_path.clone()));
+        let err = load_inputs(&args).unwrap_err();
+        assert!(err.contains(&inputs_path.display().to_string()));
+        assert!(err.starts_with("parsing"));
+    }
+
+    /// Explicit path that doesn't exist → IO error string.
+    #[test]
+    fn load_inputs_surfaces_missing_file() {
+        let ws = workspace_with(
+            "[package]\nname=\"d\"\nversion=\"0.0.1\"\nedition=\"akua.dev/v1alpha1\"\n",
+        );
+        let missing = ws.path().join("nope.yaml");
+        let args = args_with_inputs(ws.path(), Some(missing.clone()));
+        let err = load_inputs(&args).unwrap_err();
+        assert!(err.starts_with("reading"));
+        assert!(err.contains(&missing.display().to_string()));
+    }
+
+    /// `StdoutWrite` (broken-pipe variant) maps to `E_IO` + the
+    /// `SystemError` exit. Spot-checked so a future refactor that
+    /// diverges the codes gets caught at test time.
+    #[test]
+    fn dev_error_maps_stdout_write_to_io_system_error() {
+        let err =
+            DevError::StdoutWrite(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "EPIPE"));
+        assert_eq!(err.to_structured().code, codes::E_IO);
+        assert!(matches!(err.exit_code(), ExitCode::SystemError));
+    }
 }
