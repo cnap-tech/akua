@@ -102,7 +102,7 @@ engine-host-wasm = { path = "../engine-host-wasm" }
 [dev-dependencies]
 tempfile = "3"
 p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std", "pem"] }
-rand = "0.8"
+rand = "0.10"
 # For tests/sandbox_nested_wasmtime.rs — call helm directly to
 # verify the direct path works, then through the bridge to verify
 # the nested path. Only pulled in for test builds.
@@ -111,4 +111,4 @@ helm-engine-wasm = { path = "../helm-engine-wasm" }
 # oci_pusher/oci_puller tests, applied at the verb layer so
 # `verbs::publish::run` and `verbs::pull::run` exercise the full
 # tarball + push/pull path without a real registry.
-httpmock = "0.7"
+httpmock = "0.8"
