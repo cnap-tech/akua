@@ -17,3 +17,9 @@ authors.workspace = true
 wasmtime = { version = "43", features = ["all-arch"] }
 wasmtime-wasi = "43"
 thiserror = { workspace = true }
+
+[dev-dependencies]
+# WAT → wasm bytes for unit tests that exercise the host's
+# missing-export error branches without depending on the real Go
+# engine artefacts.
+wat = "1"

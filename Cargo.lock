@@ -1648,6 +1648,7 @@ dependencies = [
  "thiserror 2.0.18",
  "wasmtime",
  "wasmtime-wasi",
+ "wat",
 ]
 
 [[package]]

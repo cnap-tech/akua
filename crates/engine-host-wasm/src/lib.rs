@@ -426,3 +426,146 @@ fn copy_out<T>(store: &Store<T>, memory: Memory, ptr: i32, len: i32) -> Vec<u8> 
     let end = start + len as usize;
     data[start..end].to_vec()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_SPEC: EngineSpec = EngineSpec {
+        name: "fake",
+        prefix: "fake",
+        entry: "fake_entry",
+    };
+
+    /// Empty `cwasm` slice → typed `EngineHostError::Engine` whose
+    /// message points at the Taskfile target. This is the "engine
+    /// artifact wasn't built" hint surface.
+    #[test]
+    fn init_rejects_empty_cwasm_with_taskfile_hint() {
+        let err = Session::init(&[], TEST_SPEC).err().expect("must error");
+        match err {
+            EngineHostError::Engine(msg) => {
+                assert!(msg.contains("fake.wasm not built"), "got: {msg}");
+                assert!(msg.contains("task build:fake-wasm"), "got: {msg}");
+            }
+            other => panic!("expected Engine variant, got {other:?}"),
+        }
+    }
+
+    /// `init_from_wasm` (JIT path) shares the same empty-bytes guard.
+    #[test]
+    fn init_from_wasm_rejects_empty_bytes() {
+        let err = Session::init_from_wasm(&[], TEST_SPEC)
+            .err()
+            .expect("must error");
+        assert!(matches!(err, EngineHostError::Engine(_)));
+    }
+
+    /// `thread_local_call_with` propagates init failure: the
+    /// `SessionSlot` stays empty so the next call retries (rather than
+    /// caching the error or panicking on a half-initialized slot).
+    #[test]
+    fn thread_local_call_propagates_init_error_and_leaves_slot_empty() {
+        let slot: SessionSlot = RefCell::new(None);
+        let err = thread_local_call(&slot, &[], TEST_SPEC, b"input").unwrap_err();
+        assert!(matches!(err, EngineHostError::Engine(_)));
+        assert!(slot.borrow().is_none(), "slot must remain None on error");
+    }
+
+    /// `shared_engine` lazy-inits once and returns the same `&Engine`
+    /// thereafter. The single-Engine invariant is load-bearing for the
+    /// "many Stores, one Engine" pattern that lets the render worker
+    /// host engine plugins inside its own wasmtime.
+    #[test]
+    fn shared_engine_returns_same_instance_across_calls() {
+        let a: *const Engine = shared_engine();
+        let b: *const Engine = shared_engine();
+        assert_eq!(a, b, "shared_engine must reuse the OnceLock-ed Engine");
+    }
+
+    /// `EngineHostError::Wasm` and `Engine` Display surface their
+    /// inner message verbatim — agents grep these for typed errors.
+    #[test]
+    fn engine_host_error_display_includes_inner_message() {
+        let w = EngineHostError::Wasm("trap at 0x1234".into());
+        assert_eq!(w.to_string(), "wasmtime: trap at 0x1234");
+        let e = EngineHostError::Engine("missing artifact".into());
+        assert_eq!(e.to_string(), "engine: missing artifact");
+    }
+
+    /// `wasm_err` wraps any Display-able error into the `Wasm`
+    /// variant. The conversion is what every wasmtime-bubbling
+    /// `.map_err(wasm_err)` call site relies on.
+    #[test]
+    fn wasm_err_wraps_into_wasm_variant() {
+        let e = wasm_err("boom");
+        assert!(matches!(e, EngineHostError::Wasm(s) if s == "boom"));
+    }
+
+    /// `engine_config` is a deprecated alias kept for back-compat with
+    /// existing engine crates' `build.rs`. It must still produce the
+    /// same Config the runtime + precompile path uses.
+    #[test]
+    #[allow(deprecated)]
+    fn engine_config_alias_runs_and_builds_an_engine() {
+        let cfg = engine_config();
+        // The `Config` type lacks an equality check; smoke-test by
+        // confirming an Engine builds from it without panicking.
+        let _engine = Engine::new(&cfg).expect("engine_config must produce a valid Config");
+    }
+
+    /// `build_script_config` with TARGET unset (or equal to HOST) skips
+    /// the Cranelift target override and returns the same shape as
+    /// `shared_config`. This exercises the no-cross-compile branch.
+    #[test]
+    fn build_script_config_no_cross_compile_branch() {
+        // SAFETY: tests run single-threaded under nextest's
+        // process-per-test isolation, so the env mutation here doesn't
+        // race with another test reading TARGET/HOST.
+        unsafe {
+            std::env::remove_var("TARGET");
+            std::env::remove_var("HOST");
+        }
+        let cfg = build_script_config();
+        // Same Config the runtime uses; deserialization is a memcpy
+        // when this matches.
+        let _engine = Engine::new(&cfg).expect("no-cross-compile config must be valid");
+    }
+
+    /// `Session::init` against a wasm that parses but lacks the
+    /// `memory` export → `Wasm` variant naming the missing export.
+    /// Real-world failure: an engine `.wasm` produced with a Go
+    /// linker config that strips memory exports.
+    #[test]
+    fn init_surfaces_missing_memory_export() {
+        // Minimal valid module — no memory, no funcs.
+        let wasm = wat::parse_str("(module)").unwrap();
+        let err = Session::init_from_wasm(&wasm, TEST_SPEC)
+            .err()
+            .expect("must error");
+        match err {
+            EngineHostError::Wasm(msg) => {
+                assert!(msg.contains("missing `memory` export"), "got: {msg}");
+                assert!(msg.contains("fake"), "name surfaced: {msg}");
+            }
+            other => panic!("expected Wasm variant, got {other:?}"),
+        }
+    }
+
+    /// Module exports `memory` but not the allocator funcs → typed
+    /// `Wasm` error from wasmtime's `get_typed_func` lookup. Catches
+    /// agents shipping a Go module that forgot the `//export` pragma.
+    #[test]
+    fn init_surfaces_missing_allocator_export() {
+        let wasm = wat::parse_str(
+            r#"(module
+                (memory (export "memory") 1)
+            )"#,
+        )
+        .unwrap();
+        let err = Session::init_from_wasm(&wasm, TEST_SPEC)
+            .err()
+            .expect("must error");
+        assert!(matches!(err, EngineHostError::Wasm(_)));
+    }
+}
