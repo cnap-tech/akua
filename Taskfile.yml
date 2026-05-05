@@ -207,6 +207,18 @@ tasks:
         --config 'profile.release.strip="none"'
         --config 'profile.release.debug="line-tables-only"'
       - ls -lh {{.RENDER_WORKER_WASM}}
+      # Record the content hash of the sources the .wasm was just built
+      # from. akua-cli's build.rs reads this on next consumer build —
+      # mismatch means host/worker drift (a release-quality bug).
+      # Authoritative over mtime; not perturbed by `git checkout`.
+      - >-
+        cargo run --quiet -p source-hash --
+        "{{.TASKFILE_DIR}}"
+        "{{.RENDER_WORKER_WASM}}.sources.sha256"
+        crates/akua-render-worker/src
+        crates/akua-render-worker/Cargo.toml
+        crates/akua-core/src
+        crates/akua-core/Cargo.toml
 
   sdk:gen:
     desc: Regenerate packages/sdk/src/types/*.ts and src/schemas/akua.json from Rust serde types

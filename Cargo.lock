@@ -69,6 +69,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yml",
+ "source-hash",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -6665,6 +6666,14 @@ checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "source-hash"
+version = "0.8.5"
+dependencies = [
+ "sha2 0.10.9",
+ "tempfile",
 ]
 
 [[package]]

@@ -86,42 +86,42 @@ fn main() {
         return;
     }
 
-    // Freshness check: if any source file under the watched trees is
-    // newer than the staged `.wasm`, the worker drifted away from the
-    // host code that's about to embed it. Catching this matters because
-    // host + worker share types and parsers — a stale worker silently
-    // runs old logic against new manifests.
+    // Freshness check: verify that the embedded worker .wasm was built
+    // from the same akua-core sources akua-cli is currently compiling
+    // against. Mismatch = host/worker drift = release-quality bug.
     //
-    // Dev profiles get a `cargo:warning=` (mtime is a heuristic; false
-    // positives shouldn't block compiling unit tests). Release profiles
-    // — `release`, `ci-release`, or `AKUA_REQUIRE_WORKER` set — hard-
-    // fail with the same gating the missing-worker case uses below: a
-    // shipped binary whose worker drifted is the same kind of bug as
-    // a binary with no worker at all.
-    if let Some(stale) = source_newer_than(
-        &worker_wasm,
-        &[
-            root.join("crates/akua-render-worker/src"),
-            root.join("crates/akua-core/src"),
-        ],
-    ) {
+    // Two signals, in order:
+    //   1. Content hash via `<wasm>.sources.sha256` written by
+    //      `task build:render-worker`. Authoritative when present —
+    //      not affected by `git checkout`'s mtime resets.
+    //   2. mtime fallback if the hash file is missing (e.g. someone ran
+    //      `cargo build -p akua-render-worker --target wasm32-wasip1`
+    //      directly, skipping the Taskfile).
+    //
+    // Dev profiles get a `cargo:warning=` (don't block unit-test
+    // compilation). Release profiles — `release`, `ci-release`, or
+    // `AKUA_REQUIRE_WORKER` set — hard-fail with the same gating the
+    // missing-worker case uses below: a shipped binary whose worker
+    // drifted is the same kind of bug as a binary with no worker.
+    let source_roots = vec![
+        root.join("crates/akua-render-worker/src"),
+        root.join("crates/akua-render-worker/Cargo.toml"),
+        root.join("crates/akua-core/src"),
+        root.join("crates/akua-core/Cargo.toml"),
+    ];
+    let staleness = check_worker_freshness(&worker_wasm, &source_roots, &root);
+    if let Some(reason) = staleness {
         let profile = std::env::var("PROFILE").unwrap_or_default();
         let release_like = profile == "release"
             || profile == "ci-release"
             || std::env::var_os("CARGO_CFG_AKUA_REQUIRE_WORKER").is_some();
-        let msg = format!(
-            "akua-render-worker.wasm is older than {} — run `task build:render-worker` to rebuild it before re-running cargo build.",
-            stale.display()
-        );
         if release_like {
             panic!(
-                "{msg}\nRelease profiles refuse stale workers because host + worker drift is a \
-                 release-quality bug. If you're certain the mtime signal is a false positive \
-                 (e.g. CI cross-job artifact transfer setting fresh source mtimes), build under \
-                 a non-release profile or `touch` the worker after restoring it."
+                "{reason}\nRelease profiles refuse stale workers because host + worker drift is \
+                 a release-quality bug. Run `task build:render-worker` to rebuild."
             );
         }
-        println!("cargo:warning={msg}");
+        println!("cargo:warning={reason}");
     }
 
     let wasm = std::fs::read(&worker_wasm)
@@ -152,33 +152,88 @@ fn main() {
     }
 }
 
-/// Walk each tree under `roots` and return the first `.rs` file with
-/// an mtime newer than `target`'s — or `None` if none is. Best-effort:
-/// any I/O error is treated as "can't tell," skipped silently. The
-/// caller turns the result into a `cargo:warning=`.
-fn source_newer_than(target: &std::path::Path, roots: &[PathBuf]) -> Option<PathBuf> {
-    let target_mtime = std::fs::metadata(target).ok()?.modified().ok()?;
-    for root in roots {
-        if let Some(stale) = walk_for_newer_rs(root, target_mtime) {
-            return Some(stale);
+/// Verify the worker .wasm was built from the current source tree.
+/// Returns `Some(reason)` describing the drift, or `None` when the
+/// worker is fresh (or can't tell — best-effort signals only).
+///
+/// Authoritative path: a `<wasm>.sources.sha256` file written by
+/// `task build:render-worker` records the SHA-256 of source content
+/// at .wasm production time. We recompute the hash here; mismatch
+/// means an akua-core/akua-render-worker source changed since the
+/// .wasm was built.
+///
+/// Fallback path (no hash file): mtime comparison. Best-effort —
+/// suffers a false positive after `git checkout` resets file mtimes
+/// without changing content, which is exactly why the hash file
+/// exists. CI workflows always go through the Taskfile; the
+/// fallback only applies if a contributor invoked
+/// `cargo build -p akua-render-worker --target wasm32-wasip1`
+/// directly.
+fn check_worker_freshness(
+    worker_wasm: &std::path::Path,
+    source_roots: &[PathBuf],
+    workspace_root: &std::path::Path,
+) -> Option<String> {
+    // Append rather than replace the extension — the file lives next
+    // to `<basename>.wasm` as `<basename>.wasm.sources.sha256`. Matches
+    // how `task build:render-worker` writes it.
+    let hash_file = {
+        let mut p = worker_wasm.as_os_str().to_owned();
+        p.push(".sources.sha256");
+        std::path::PathBuf::from(p)
+    };
+    if hash_file.exists() {
+        let recorded = std::fs::read_to_string(&hash_file).ok()?;
+        let recorded = recorded.trim();
+        let actual = source_hash::compute(source_roots, workspace_root);
+        if actual != recorded {
+            return Some(format!(
+                "akua-render-worker.wasm sources hash mismatch (recorded {}, current {}) — \
+                 run `task build:render-worker` to rebuild it.",
+                recorded, actual
+            ));
+        }
+        return None;
+    }
+    // Fallback: mtime comparison. Catches the common "edit then
+    // forgot to rebuild" case but suffers false positives after
+    // git checkout. The hash file path above eliminates that.
+    let target_mtime = std::fs::metadata(worker_wasm).ok()?.modified().ok()?;
+    for root in source_roots {
+        if let Some(stale) = walk_for_newer_source(root, target_mtime) {
+            return Some(format!(
+                "akua-render-worker.wasm is older than {} — run `task build:render-worker` to \
+                 rebuild it before re-running cargo build.",
+                stale.display()
+            ));
         }
     }
     None
 }
 
-fn walk_for_newer_rs(
+fn walk_for_newer_source(
     dir: &std::path::Path,
     target_mtime: std::time::SystemTime,
 ) -> Option<PathBuf> {
+    if dir.is_file() {
+        let meta = std::fs::metadata(dir).ok()?;
+        if meta.modified().ok()? > target_mtime {
+            return Some(dir.to_path_buf());
+        }
+        return None;
+    }
     let entries = std::fs::read_dir(dir).ok()?;
     for entry in entries.flatten() {
         let path = entry.path();
         let ft = entry.file_type().ok()?;
         if ft.is_dir() {
-            if let Some(found) = walk_for_newer_rs(&path, target_mtime) {
+            if let Some(found) = walk_for_newer_source(&path, target_mtime) {
                 return Some(found);
             }
-        } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+        } else if matches!(
+            path.extension().and_then(|s| s.to_str()),
+            Some("rs") | Some("toml")
+        ) {
             if let Ok(meta) = entry.metadata() {
                 if let Ok(mtime) = meta.modified() {
                     if mtime > target_mtime {

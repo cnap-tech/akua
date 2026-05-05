@@ -8,6 +8,7 @@ members = [
 	"crates/engine-host-wasm",
 	"crates/helm-engine-wasm",
 	"crates/kustomize-engine-wasm",
+	"crates/source-hash",
 ]
 
 [workspace.package]
