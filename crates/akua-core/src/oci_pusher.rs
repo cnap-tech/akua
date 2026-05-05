@@ -26,8 +26,8 @@ use sha2::{Digest, Sha256};
 use crate::hex::hex_encode;
 use crate::oci_auth::{self, CredsStore};
 use crate::oci_transport::{
-    apply_bearer, build_client, fetch_token, parse_ref, BearerChallenge, OciRef, TokenCache,
-    TransportError,
+    apply_bearer, build_client, fetch_token, parse_ref, registry_scheme, BearerChallenge, OciRef,
+    TokenCache, TransportError,
 };
 
 /// Media types akua uses for its own published artifacts. Distinct
@@ -111,8 +111,11 @@ pub fn push(
     )?;
 
     let manifest_url = format!(
-        "https://{}/v2/{}/manifests/{}",
-        parsed.registry, parsed.repository, tag
+        "{}://{}/v2/{}/manifests/{}",
+        registry_scheme(&parsed.registry),
+        parsed.registry,
+        parsed.repository,
+        tag
     );
     let manifest_bytes = d.manifest_bytes.clone();
     send_with_auth(
@@ -265,8 +268,11 @@ pub fn push_attestation(
     let att_tag = format!("sha256-{hex}.att");
 
     let manifest_url = format!(
-        "https://{}/v2/{}/manifests/{}",
-        parsed.registry, parsed.repository, att_tag
+        "{}://{}/v2/{}/manifests/{}",
+        registry_scheme(&parsed.registry),
+        parsed.registry,
+        parsed.repository,
+        att_tag
     );
     send_with_auth(
         &client,
@@ -369,8 +375,11 @@ pub fn push_cosign_signature(
     let sig_tag = format!("sha256-{hex}.sig");
 
     let sig_manifest_url = format!(
-        "https://{}/v2/{}/manifests/{}",
-        parsed.registry, parsed.repository, sig_tag
+        "{}://{}/v2/{}/manifests/{}",
+        registry_scheme(&parsed.registry),
+        parsed.registry,
+        parsed.repository,
+        sig_tag
     );
     send_with_auth(
         &client,
@@ -400,9 +409,10 @@ fn upload_blob(
     creds: Option<&oci_auth::Credentials>,
     token: &mut TokenCache,
 ) -> Result<(), OciPushError> {
+    let scheme = registry_scheme(&parsed.registry);
     let start_url = format!(
-        "https://{}/v2/{}/blobs/uploads/",
-        parsed.registry, parsed.repository
+        "{}://{}/v2/{}/blobs/uploads/",
+        scheme, parsed.registry, parsed.repository
     );
     let resp = send_with_auth_raw(
         client,
@@ -424,7 +434,7 @@ fn upload_blob(
     let put_url = if location.starts_with("http://") || location.starts_with("https://") {
         location
     } else {
-        format!("https://{}{}", parsed.registry, location)
+        format!("{}://{}{}", scheme, parsed.registry, location)
     };
     // Append the digest query param. Some registries expect `?digest=`;
     // if Location already has query params, switch to `&`.
@@ -568,6 +578,47 @@ struct MinimalConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use httpmock::prelude::*;
+
+    /// Construct an `oci://127.0.0.1:<port>/<repo>` ref against the
+    /// running mock. `registry_scheme` recognizes loopback hosts and
+    /// switches to plain http, so push/pull will hit the mock.
+    fn mock_oci_ref(server: &MockServer, repo: &str) -> String {
+        format!("oci://127.0.0.1:{}/{}", server.port(), repo)
+    }
+
+    /// Stand up the three endpoints a happy-path push hits:
+    ///   1. POST /v2/<repo>/blobs/uploads/  → 202 + Location
+    ///   2. PUT  <Location>?digest=<sha256> → 201
+    ///   3. PUT  /v2/<repo>/manifests/<tag> → 201
+    ///
+    /// Returns `(POST, PUT-blob, PUT-manifest)` so callers can assert
+    /// hit counts after `push()`.
+    fn mock_happy_path<'a>(
+        server: &'a MockServer,
+        repo: &str,
+        tag: &str,
+    ) -> (httpmock::Mock<'a>, httpmock::Mock<'a>, httpmock::Mock<'a>) {
+        let upload_path = format!("/v2/{repo}/blobs/uploads/");
+        let manifest_path = format!("/v2/{repo}/manifests/{tag}");
+        let location = "/upload-session/abc";
+
+        let post_mock = server.mock(|when, then| {
+            when.method(POST).path(upload_path);
+            then.status(202).header("Location", location);
+        });
+        let put_blob_mock = server.mock(|when, then| {
+            when.method(PUT).path(location);
+            then.status(201);
+        });
+        let put_manifest_mock = server.mock(|when, then| {
+            when.method(PUT)
+                .path(manifest_path)
+                .header("content-type", OCI_MANIFEST_MEDIA_TYPE);
+            then.status(201);
+        });
+        (post_mock, put_blob_mock, put_manifest_mock)
+    }
 
     #[test]
     fn manifest_serialization_shape() {
@@ -604,5 +655,252 @@ mod tests {
             err,
             OciPushError::Transport(TransportError::BadRef(_))
         ));
+    }
+
+    /// Anonymous happy-path push against a mock registry. Asserts the
+    /// returned digests match what `compute_publish_digests` produces
+    /// offline, and that the manifest we PUT parses cleanly through
+    /// oci-client (independent OCI-spec validation: not just our own
+    /// serializer round-tripping).
+    #[test]
+    fn push_happy_path_anonymous() {
+        let server = MockServer::start();
+        let repo = "test/pkg";
+        let tag = "1.0.0";
+        let oci_ref = mock_oci_ref(&server, repo);
+        let layer = b"fake tarball bytes for test only";
+
+        // Capture every request body so we can introspect what the
+        // pusher sent. httpmock's `hits()` counts; `body()` from the
+        // captured request requires reading via `received_requests`.
+        let (post_mock, put_blob_mock, put_manifest_mock) = mock_happy_path(&server, repo, tag);
+
+        let store = CredsStore::empty();
+        let pushed = push(&oci_ref, tag, layer, &store).expect("push must succeed");
+
+        // Two blobs uploaded (layer + config) → POST + PUT each fire 2x.
+        post_mock.assert_hits(2);
+        put_blob_mock.assert_hits(2);
+        put_manifest_mock.assert_hits(1);
+
+        // Returned digests match the offline-computed ones — the
+        // invariant `akua sign` relies on.
+        let d = compute_publish_digests(layer);
+        assert_eq!(pushed.layer_digest, d.layer_digest);
+        assert_eq!(pushed.manifest_digest, d.manifest_digest);
+        assert_eq!(pushed.layer_size, layer.len() as u64);
+        assert_eq!(pushed.tag, tag);
+        assert_eq!(pushed.oci_ref, oci_ref);
+
+        // Independent spec validation: our manifest bytes parse as a
+        // valid OciImageManifest per oci-client's parser.
+        let parsed: oci_client::manifest::OciImageManifest =
+            serde_json::from_slice(&d.manifest_bytes).expect("manifest bytes must be OCI-valid");
+        assert_eq!(parsed.schema_version, 2);
+        assert_eq!(parsed.media_type.as_deref(), Some(OCI_MANIFEST_MEDIA_TYPE));
+        assert_eq!(parsed.config.media_type, AKUA_PACKAGE_CONFIG_MEDIA_TYPE);
+        assert_eq!(parsed.layers.len(), 1);
+        assert_eq!(parsed.layers[0].media_type, AKUA_PACKAGE_LAYER_MEDIA_TYPE);
+        assert_eq!(parsed.layers[0].digest, d.layer_digest);
+        assert_eq!(parsed.layers[0].size as u64, layer.len() as u64);
+    }
+
+    /// Registry returns 401 with a Bearer challenge → pusher fetches a
+    /// token from the realm and retries the upload. Same end-state as
+    /// happy-path; this exercises the auth branch in `send_with_auth_raw`.
+    #[test]
+    fn push_walks_bearer_challenge() {
+        let server = MockServer::start();
+        let repo = "private/pkg";
+        let tag = "2.0.0";
+        let oci_ref = mock_oci_ref(&server, repo);
+        let upload_path = format!("/v2/{repo}/blobs/uploads/");
+        let manifest_path = format!("/v2/{repo}/manifests/{tag}");
+        let realm = format!("http://127.0.0.1:{}/token", server.port());
+        let location = "/upload-session/auth";
+
+        // First POST → 401 challenge. We use a header-match guard
+        // (no Authorization) so the same path can serve both attempts:
+        // unauthenticated → 401, authenticated → 202.
+        let challenge = server.mock(|when, then| {
+            when.method(POST).path(upload_path.clone()).matches(|req| {
+                !req.headers
+                    .as_ref()
+                    .map(|h| {
+                        h.iter()
+                            .any(|(k, _)| k.eq_ignore_ascii_case("authorization"))
+                    })
+                    .unwrap_or(false)
+            });
+            then.status(401).header(
+                "WWW-Authenticate",
+                format!(r#"Bearer realm="{realm}",service="acme",scope="repository:{repo}:push""#),
+            );
+        });
+        // Token endpoint: returns the bearer the pusher will reuse.
+        let token_mock = server.mock(|when, then| {
+            when.method(GET).path("/token");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"token":"deadbeef"}"#);
+        });
+        // Authenticated POST → 202 (only matches when Authorization present).
+        let post_authed = server.mock(|when, then| {
+            when.method(POST)
+                .path(upload_path)
+                .header("authorization", "Bearer deadbeef");
+            then.status(202).header("Location", location);
+        });
+        let put_blob = server.mock(|when, then| {
+            when.method(PUT).path(location);
+            then.status(201);
+        });
+        let put_manifest = server.mock(|when, then| {
+            when.method(PUT).path(manifest_path);
+            then.status(201);
+        });
+
+        let store = CredsStore::empty();
+        push(&oci_ref, tag, b"x", &store).expect("auth-retry push must succeed");
+
+        // Challenge fires once (the *first* POST), token exchanged once,
+        // remaining traffic uses the cached bearer so subsequent POST/PUT
+        // never re-challenge.
+        challenge.assert_hits(1);
+        token_mock.assert_hits(1);
+        post_authed.assert_hits(2);
+        put_blob.assert_hits(2);
+        put_manifest.assert_hits(1);
+    }
+
+    /// Registry's POST /blobs/uploads/ returns 202 but with no
+    /// Location header → MissingUploadLocation. This is a registry
+    /// bug we surface as a typed error rather than hanging.
+    #[test]
+    fn push_missing_upload_location() {
+        let server = MockServer::start();
+        let repo = "broken/pkg";
+        let oci_ref = mock_oci_ref(&server, repo);
+        let upload_path = format!("/v2/{repo}/blobs/uploads/");
+        server.mock(|when, then| {
+            when.method(POST).path(upload_path);
+            then.status(202); // no Location
+        });
+        let err = push(&oci_ref, "1.0.0", b"x", &CredsStore::empty()).unwrap_err();
+        assert!(matches!(err, OciPushError::MissingUploadLocation));
+    }
+
+    /// Registry rejects the blob PUT with a 5xx → UploadFailed
+    /// surfaces the status code + body. Captures the most common
+    /// real-world failure: registry returns 503 under load.
+    #[test]
+    fn push_blob_put_failed() {
+        let server = MockServer::start();
+        let repo = "flaky/pkg";
+        let oci_ref = mock_oci_ref(&server, repo);
+        let upload_path = format!("/v2/{repo}/blobs/uploads/");
+        let location = "/upload-session/x";
+        server.mock(|when, then| {
+            when.method(POST).path(upload_path);
+            then.status(202).header("Location", location);
+        });
+        server.mock(|when, then| {
+            when.method(PUT).path(location);
+            then.status(503).body("backend unavailable");
+        });
+        let err = push(&oci_ref, "1.0.0", b"x", &CredsStore::empty()).unwrap_err();
+        match err {
+            OciPushError::UploadFailed { status, body } => {
+                assert_eq!(status, 503);
+                assert!(body.contains("backend unavailable"));
+            }
+            other => panic!("expected UploadFailed, got {other:?}"),
+        }
+    }
+
+    /// `push_cosign_signature` writes a sidecar manifest with the
+    /// signature in a layer annotation. Verify it round-trips through
+    /// the mock + the returned tag uses cosign's `sha256-<hex>.sig`
+    /// shape.
+    #[test]
+    fn push_cosign_signature_happy_path() {
+        let server = MockServer::start();
+        let repo = "signed/pkg";
+        let oci_ref = mock_oci_ref(&server, repo);
+        let manifest_digest =
+            "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd";
+        let expected_sig_tag =
+            "sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd.sig";
+
+        let upload_path = format!("/v2/{repo}/blobs/uploads/");
+        let sig_manifest_path = format!("/v2/{repo}/manifests/{expected_sig_tag}");
+        let location = "/upload-session/sig";
+
+        server.mock(|when, then| {
+            when.method(POST).path(upload_path);
+            then.status(202).header("Location", location);
+        });
+        server.mock(|when, then| {
+            when.method(PUT).path(location);
+            then.status(201);
+        });
+        let manifest_put = server.mock(|when, then| {
+            when.method(PUT).path(sig_manifest_path);
+            then.status(201);
+        });
+
+        let returned_tag = push_cosign_signature(
+            &oci_ref,
+            manifest_digest,
+            b"payload bytes",
+            "fakesigb64==",
+            &CredsStore::empty(),
+        )
+        .expect("cosign sig push must succeed");
+
+        assert_eq!(returned_tag, expected_sig_tag);
+        manifest_put.assert();
+    }
+
+    /// `push_attestation` pushes a DSSE envelope sidecar tagged
+    /// `sha256-<hex>.att` (cosign's attestation tag convention).
+    #[cfg(feature = "cosign-verify")]
+    #[test]
+    fn push_attestation_happy_path() {
+        let server = MockServer::start();
+        let repo = "attested/pkg";
+        let oci_ref = mock_oci_ref(&server, repo);
+        let manifest_digest =
+            "sha256:abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567";
+        let expected_att_tag =
+            "sha256-abcdef0123456789abcdef0123456789abcdef0123456789abcdef01234567.att";
+
+        let upload_path = format!("/v2/{repo}/blobs/uploads/");
+        let manifest_path = format!("/v2/{repo}/manifests/{expected_att_tag}");
+        let location = "/upload-session/att";
+
+        server.mock(|when, then| {
+            when.method(POST).path(upload_path);
+            then.status(202).header("Location", location);
+        });
+        server.mock(|when, then| {
+            when.method(PUT).path(location);
+            then.status(201);
+        });
+        let manifest_put = server.mock(|when, then| {
+            when.method(PUT).path(manifest_path);
+            then.status(201);
+        });
+
+        let returned_tag = push_attestation(
+            &oci_ref,
+            manifest_digest,
+            b"dsse envelope",
+            &CredsStore::empty(),
+        )
+        .expect("attestation push must succeed");
+
+        assert_eq!(returned_tag, expected_att_tag);
+        manifest_put.assert();
     }
 }

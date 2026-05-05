@@ -47,7 +47,7 @@ use sha2::{Digest, Sha256};
 use crate::hex::hex_encode;
 use crate::oci_auth::{self, Credentials, CredsStore};
 use crate::oci_transport::{
-    build_client, get_with_auth, parse_ref, OciRef, TokenCache, TransportError,
+    build_client, get_with_auth, parse_ref, registry_scheme, OciRef, TokenCache, TransportError,
 };
 
 /// Media type the helm-v3+ OCI chart format uses for the chart blob.
@@ -402,9 +402,10 @@ pub fn fetch_with_opts(
 
     let registry_creds = oci_auth::for_registry(creds, &parsed.registry);
     let mut token = TokenCache::default();
+    let scheme = registry_scheme(&parsed.registry);
     let manifest_url = format!(
-        "https://{}/v2/{}/manifests/{}",
-        parsed.registry, parsed.repository, version
+        "{}://{}/v2/{}/manifests/{}",
+        scheme, parsed.registry, parsed.repository, version
     );
     let manifest_bytes = get_manifest(
         &client,
@@ -440,8 +441,8 @@ pub fn fetch_with_opts(
     let layer_digest = detected.layer.digest.clone();
 
     let blob_url = format!(
-        "https://{}/v2/{}/blobs/{}",
-        parsed.registry, parsed.repository, layer_digest
+        "{}://{}/v2/{}/blobs/{}",
+        scheme, parsed.registry, parsed.repository, layer_digest
     );
     let blob_bytes = get_blob(
         &client,
@@ -586,9 +587,10 @@ fn verify_cosign_signature(
 
     let oci_ref = format!("oci://{}/{}", parsed.registry, parsed.repository);
 
+    let scheme = registry_scheme(&parsed.registry);
     let sig_manifest_url = format!(
-        "https://{}/v2/{}/manifests/{}",
-        parsed.registry, parsed.repository, sig_tag
+        "{}://{}/v2/{}/manifests/{}",
+        scheme, parsed.registry, parsed.repository, sig_tag
     );
     let sig_manifest_bytes =
         get_manifest(client, &sig_manifest_url, &parsed.registry, creds, token).map_err(
@@ -633,8 +635,8 @@ fn verify_cosign_signature(
         .clone();
 
     let payload_url = format!(
-        "https://{}/v2/{}/blobs/{}",
-        parsed.registry, parsed.repository, sig_layer.digest
+        "{}://{}/v2/{}/blobs/{}",
+        scheme, parsed.registry, parsed.repository, sig_layer.digest
     );
     let payload_bytes =
         get_blob(client, &payload_url, &parsed.registry, creds, token).map_err(|source| {

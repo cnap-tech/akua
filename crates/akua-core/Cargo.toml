@@ -121,3 +121,12 @@ tempfile = "3"
 # cosign test fixtures generate a keypair per test run; keeps tests
 # hermetic instead of committing a PEM to the repo.
 rand = "0.8"
+# Local HTTP mock for OCI registry tests — hosts a tiny distribution-API
+# endpoint on `http://127.0.0.1:<port>` so push/pull paths exercise the
+# full transport without a real registry.
+httpmock = "0.7"
+# Pure-Rust OCI client. Dev-only — used to *parse* the manifest bytes
+# our pusher PUTs and assert spec compliance via a real OCI parser
+# (independent verification that we're not just round-tripping our own
+# serializer). No runtime use; we don't make any HTTP calls with it.
+oci-client = { version = "0.11", default-features = false, features = ["rustls-tls"] }

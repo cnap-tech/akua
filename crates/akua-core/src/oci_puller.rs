@@ -17,7 +17,9 @@ use sha2::{Digest, Sha256};
 use crate::hex::hex_encode;
 use crate::oci_auth::{self, CredsStore};
 use crate::oci_pusher::{AKUA_PACKAGE_LAYER_MEDIA_TYPE, OCI_MANIFEST_MEDIA_TYPE};
-use crate::oci_transport::{build_client, get_with_auth, parse_ref, TokenCache, TransportError};
+use crate::oci_transport::{
+    build_client, get_with_auth, parse_ref, registry_scheme, TokenCache, TransportError,
+};
 
 /// Result of a successful pull. `tarball` is the raw `.tar.gz` bytes
 /// — same shape `akua publish` uploaded. Callers that want the
@@ -70,9 +72,10 @@ pub fn pull(oci_ref: &str, tag: &str, creds: &CredsStore) -> Result<PulledPackag
     let registry_creds = oci_auth::for_registry(creds, &parsed.registry);
     let mut token = TokenCache::default();
 
+    let scheme = registry_scheme(&parsed.registry);
     let manifest_url = format!(
-        "https://{}/v2/{}/manifests/{}",
-        parsed.registry, parsed.repository, tag
+        "{}://{}/v2/{}/manifests/{}",
+        scheme, parsed.registry, parsed.repository, tag
     );
     let manifest_bytes = get_with_auth(
         &client,
@@ -95,8 +98,8 @@ pub fn pull(oci_ref: &str, tag: &str, creds: &CredsStore) -> Result<PulledPackag
         })?;
 
     let blob_url = format!(
-        "https://{}/v2/{}/blobs/{}",
-        parsed.registry, parsed.repository, layer.digest
+        "{}://{}/v2/{}/blobs/{}",
+        scheme, parsed.registry, parsed.repository, layer.digest
     );
     let blob = get_with_auth(
         &client,
@@ -149,9 +152,10 @@ pub fn pull_attestation(
         .unwrap_or(manifest_digest);
     let att_tag = format!("sha256-{hex}.att");
 
+    let scheme = registry_scheme(&parsed.registry);
     let manifest_url = format!(
-        "https://{}/v2/{}/manifests/{}",
-        parsed.registry, parsed.repository, att_tag
+        "{}://{}/v2/{}/manifests/{}",
+        scheme, parsed.registry, parsed.repository, att_tag
     );
     match get_with_auth(
         &client,
@@ -172,8 +176,8 @@ pub fn pull_attestation(
                     tag: att_tag.clone(),
                 })?;
             let blob_url = format!(
-                "https://{}/v2/{}/blobs/{}",
-                parsed.registry, parsed.repository, layer.digest
+                "{}://{}/v2/{}/blobs/{}",
+                scheme, parsed.registry, parsed.repository, layer.digest
             );
             let envelope_bytes = get_with_auth(
                 &client,
@@ -198,6 +202,12 @@ pub fn pull_attestation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::oci_pusher::compute_publish_digests;
+    use httpmock::prelude::*;
+
+    fn mock_oci_ref(server: &MockServer, repo: &str) -> String {
+        format!("oci://127.0.0.1:{}/{}", server.port(), repo)
+    }
 
     #[test]
     fn pull_rejects_bad_ref() {
@@ -207,5 +217,141 @@ mod tests {
             err,
             OciPullError::Transport(TransportError::BadRef(_))
         ));
+    }
+
+    /// Anonymous happy-path pull: registry serves the manifest + the
+    /// declared blob. Asserts the puller surfaces both digests
+    /// matching what the publisher would have computed.
+    #[test]
+    fn pull_happy_path_anonymous() {
+        let server = MockServer::start();
+        let repo = "test/pkg";
+        let tag = "1.0.0";
+        let layer = b"hello world tarball" as &[u8];
+        let d = compute_publish_digests(layer);
+        let manifest_bytes = d.manifest_bytes.clone();
+
+        server.mock(|when, then| {
+            when.method(GET).path(format!("/v2/{repo}/manifests/{tag}"));
+            then.status(200)
+                .header("content-type", OCI_MANIFEST_MEDIA_TYPE)
+                .body(manifest_bytes);
+        });
+        server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/v2/{repo}/blobs/{}", d.layer_digest));
+            then.status(200).body(layer);
+        });
+
+        let pulled = pull(&mock_oci_ref(&server, repo), tag, &CredsStore::empty())
+            .expect("pull must succeed");
+        assert_eq!(pulled.tarball, layer);
+        assert_eq!(pulled.layer_digest, d.layer_digest);
+        assert_eq!(pulled.manifest_digest, d.manifest_digest);
+    }
+
+    /// Manifest's layer list contains no akua-package layer (e.g. a
+    /// helm chart artifact at the same ref) → typed NoAkuaLayer error.
+    /// Protects against agents accidentally pulling the wrong artifact
+    /// class.
+    #[test]
+    fn pull_rejects_non_akua_manifest() {
+        let server = MockServer::start();
+        let repo = "test/wrong-class";
+        let tag = "1.0.0";
+        // Manifest with one layer of a different media type.
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": OCI_MANIFEST_MEDIA_TYPE,
+            "config": {
+                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "size": 2,
+                "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            },
+            "layers": [{
+                "mediaType": "application/vnd.cncf.helm.chart.content.v1.tar+gzip",
+                "size": 1,
+                "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            }],
+        });
+        server.mock(|when, then| {
+            when.method(GET).path(format!("/v2/{repo}/manifests/{tag}"));
+            then.status(200).body(manifest.to_string());
+        });
+
+        let err = pull(&mock_oci_ref(&server, repo), tag, &CredsStore::empty()).unwrap_err();
+        assert!(matches!(err, OciPullError::NoAkuaLayer { .. }));
+    }
+
+    /// Registry hands us a blob whose hash doesn't match the manifest's
+    /// declared `layer.digest` → LayerDigestMismatch. This is the
+    /// cache-poisoning / proxy-tamper detection invariant.
+    #[test]
+    fn pull_detects_layer_digest_mismatch() {
+        let server = MockServer::start();
+        let repo = "test/tampered";
+        let tag = "1.0.0";
+        let advertised_layer = b"correct bytes" as &[u8];
+        let d = compute_publish_digests(advertised_layer);
+
+        server.mock(|when, then| {
+            when.method(GET).path(format!("/v2/{repo}/manifests/{tag}"));
+            then.status(200).body(d.manifest_bytes.clone());
+        });
+        // Same blob endpoint, but registry returns *different* bytes
+        // than the manifest declared.
+        server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/v2/{repo}/blobs/{}", d.layer_digest));
+            then.status(200).body(b"tampered bytes" as &[u8]);
+        });
+
+        let err = pull(&mock_oci_ref(&server, repo), tag, &CredsStore::empty()).unwrap_err();
+        match err {
+            OciPullError::LayerDigestMismatch { actual, declared } => {
+                assert_ne!(actual, declared);
+                assert_eq!(declared, d.layer_digest);
+            }
+            other => panic!("expected LayerDigestMismatch, got {other:?}"),
+        }
+    }
+
+    /// Registry returns body that isn't valid JSON → ManifestParse.
+    /// (Real-world: HTML 502 page from a load-balancer.)
+    #[test]
+    fn pull_handles_malformed_manifest() {
+        let server = MockServer::start();
+        let repo = "test/garbled";
+        let tag = "1.0.0";
+        server.mock(|when, then| {
+            when.method(GET).path(format!("/v2/{repo}/manifests/{tag}"));
+            then.status(200).body("not json at all <html>");
+        });
+        let err = pull(&mock_oci_ref(&server, repo), tag, &CredsStore::empty()).unwrap_err();
+        assert!(matches!(err, OciPullError::ManifestParse(_)));
+    }
+
+    /// `pull_attestation`: 404 from the att-tag endpoint must surface
+    /// as `Ok(None)` — a publisher that didn't sign attestations is
+    /// a legitimate state for the caller to apply policy against.
+    #[cfg(feature = "cosign-verify")]
+    #[test]
+    fn pull_attestation_returns_none_on_404() {
+        let server = MockServer::start();
+        let repo = "test/no-att";
+        let manifest_digest = "sha256:abcd";
+        let att_tag = "sha256-abcd.att";
+        server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/v2/{repo}/manifests/{att_tag}"));
+            then.status(404).body("not found");
+        });
+        let result = pull_attestation(
+            &mock_oci_ref(&server, repo),
+            manifest_digest,
+            &CredsStore::empty(),
+        )
+        .expect("404 must be Ok(None), not Err");
+        assert!(result.is_none());
     }
 }

@@ -22,6 +22,31 @@ pub(crate) struct OciRef {
     pub repository: String,
 }
 
+/// HTTP scheme to use when talking to `registry`. `https` everywhere
+/// except loopback hosts (`localhost`, `127.0.0.1`, `[::1]`) — matches
+/// the convention `docker`, `oras`, `crane`, and `skopeo` use for
+/// self-hosted local / dev / test registries. The match is on the
+/// hostname *and* an optional `:port`, so `localhost:5000` and
+/// `127.0.0.1:8443` both qualify.
+pub(crate) fn registry_scheme(registry: &str) -> &'static str {
+    // Strip an optional `:<port>` to get the bare host. IPv6 literals
+    // are bracketed (`[::1]:5000`) so a trailing port is the only colon
+    // *outside* the brackets; for bare-IPv6 (`::1`) we match the whole
+    // string against the loopback set below.
+    let host = if let Some(rest) = registry.strip_prefix('[') {
+        rest.split(']').next().unwrap_or(rest)
+    } else if registry.matches(':').count() == 1 {
+        registry.split(':').next().unwrap_or(registry)
+    } else {
+        registry
+    };
+    if matches!(host, "localhost" | "127.0.0.1" | "::1") {
+        "http"
+    } else {
+        "https"
+    }
+}
+
 /// Parse `oci://<registry>/<path/to/repo>` → `OciRef`. Scheme is
 /// required — bare registry refs are an ambiguity the spec forbids.
 pub(crate) fn parse_ref(s: &str) -> Result<OciRef, TransportError> {
@@ -307,5 +332,25 @@ mod tests {
             Err(TransportError::BadRef(_))
         ));
         assert!(matches!(parse_ref(""), Err(TransportError::BadRef(_))));
+    }
+
+    #[test]
+    fn registry_scheme_uses_https_for_real_registries() {
+        assert_eq!(registry_scheme("ghcr.io"), "https");
+        assert_eq!(registry_scheme("registry-1.docker.io"), "https");
+        assert_eq!(registry_scheme("registry.example.com:5000"), "https");
+    }
+
+    #[test]
+    fn registry_scheme_uses_http_for_loopback() {
+        // Bare loopback hostnames + with port — both must downgrade to
+        // http so local mock registries (incl. our test fixtures) work
+        // without TLS termination.
+        assert_eq!(registry_scheme("localhost"), "http");
+        assert_eq!(registry_scheme("localhost:5000"), "http");
+        assert_eq!(registry_scheme("127.0.0.1"), "http");
+        assert_eq!(registry_scheme("127.0.0.1:8443"), "http");
+        assert_eq!(registry_scheme("::1"), "http");
+        assert_eq!(registry_scheme("[::1]"), "http");
     }
 }
