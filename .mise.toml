@@ -3,7 +3,7 @@
 
 [tools]
 rust = "1.95.0"
-task = "3.48.0"
+task = "3.50.0"
 # Shell-out engines: helm.template + kustomize.build plug into the
 # corresponding akua-core `engine-*-shell` features and expect these
 # binaries on PATH. Pin versions so examples + integration tests
@@ -13,9 +13,9 @@ kustomize = "5.8.1"
 # Bun runs @akua-dev/sdk tests (`task sdk:test`) and resolves deps for the
 # TS SDK package. Bun's native TS support means no node + no
 # `--experimental-strip-types` flag.
-bun       = "1.3.9"
+bun       = "1.3.13"
 # Go compiles the embedded helm/kustomize engines to wasm32-wasip1 via
 # `task build:helm-engine-wasm` / `build:kustomize-engine-wasm`. Pinned
 # so engine sha256 matches between dev + CI builds. Matches the
 # `go 1.25.x` directive in each engine go-src/go.mod.
-go        = "1.25.0"
+go        = "1.26.2"
