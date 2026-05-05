@@ -45,9 +45,12 @@ impl Drop for ObservabilityHandle {
 }
 
 /// Resolve the effective log filter directive from CLI args + env.
-fn resolve_filter(args: &UniversalArgs) -> String {
-    if let Ok(rust_log) = std::env::var("RUST_LOG") {
-        return rust_log;
+/// `rust_log` is the value of `RUST_LOG` (None if unset). Split out so
+/// tests can inject a value without `std::env::set_var` racing with
+/// other tests; production callers funnel through [`resolve_filter`].
+fn resolve_filter_with(args: &UniversalArgs, rust_log: Option<&str>) -> String {
+    if let Some(directive) = rust_log {
+        return directive.to_string();
     }
     let level = match args.log_level.as_deref() {
         Some(l) => l,
@@ -61,6 +64,10 @@ fn resolve_filter(args: &UniversalArgs) -> String {
     format!("warn,akua={level},akua_cli={level},akua_core={level},akua_render_worker={level}")
 }
 
+fn resolve_filter(args: &UniversalArgs) -> String {
+    resolve_filter_with(args, std::env::var("RUST_LOG").ok().as_deref())
+}
+
 fn default_filter() -> String {
     // Leading `warn` silences transitive crates (wasmtime emits an
     // info span per syscall; kcl/rustc_span/salsa flood at debug);
@@ -68,14 +75,23 @@ fn default_filter() -> String {
     "warn,akua=info,akua_cli=info,akua_core=info,akua_render_worker=info".to_string()
 }
 
-/// Apply `AKUA_BRIDGE_TRACE=1` back-compat: OR `akua::bridge=debug` into
-/// the directive so the existing diagnostic shortcut keeps working.
-fn apply_bridge_trace(directive: String) -> String {
-    if std::env::var("AKUA_BRIDGE_TRACE").is_ok_and(|v| v == "1") {
+/// Pure version of [`apply_bridge_trace`]. `bridge_trace` is the value
+/// of `AKUA_BRIDGE_TRACE` (None if unset); only `Some("1")` activates.
+fn apply_bridge_trace_with(directive: String, bridge_trace: Option<&str>) -> String {
+    if bridge_trace == Some("1") {
         format!("{directive},akua::bridge=debug")
     } else {
         directive
     }
+}
+
+/// Apply `AKUA_BRIDGE_TRACE=1` back-compat: OR `akua::bridge=debug` into
+/// the directive so the existing diagnostic shortcut keeps working.
+fn apply_bridge_trace(directive: String) -> String {
+    apply_bridge_trace_with(
+        directive,
+        std::env::var("AKUA_BRIDGE_TRACE").ok().as_deref(),
+    )
 }
 
 /// Initialize the global tracing subscriber. Must be called exactly
@@ -198,27 +214,91 @@ mod tests {
         let f = default_filter();
         assert!(f.contains("akua=info"));
         assert!(f.contains("akua_render_worker=info"));
+        assert!(f.starts_with("warn"));
     }
 
+    /// `RUST_LOG` wins outright — full directive returned verbatim,
+    /// neither `--verbose` nor `--log-level` overrides it.
     #[test]
-    fn bridge_trace_appends_directive() {
-        std::env::set_var("AKUA_BRIDGE_TRACE", "1");
-        let out = apply_bridge_trace("warn".to_string());
-        assert!(out.contains("akua::bridge=debug"));
-        std::env::remove_var("AKUA_BRIDGE_TRACE");
+    fn resolve_filter_rust_log_takes_precedence_over_args() {
+        let args = UniversalArgs {
+            verbose: true,
+            log_level: Some("trace".into()),
+            ..Default::default()
+        };
+        let f = resolve_filter_with(&args, Some("info,my_crate=trace"));
+        assert_eq!(f, "info,my_crate=trace");
     }
 
+    /// `--log-level=<x>` (no `--verbose`, no RUST_LOG) → akua* targets
+    /// at <x>, leading `warn` for transitive crates.
     #[test]
-    fn verbose_forces_debug_on_akua_targets() {
+    fn resolve_filter_log_level_arg_drives_akua_targets() {
+        let args = UniversalArgs {
+            log_level: Some("trace".into()),
+            ..Default::default()
+        };
+        let f = resolve_filter_with(&args, None);
+        assert!(f.starts_with("warn,"), "got: {f}");
+        assert!(f.contains("akua=trace"));
+        assert!(f.contains("akua_cli=trace"));
+        assert!(f.contains("akua_core=trace"));
+        assert!(f.contains("akua_render_worker=trace"));
+    }
+
+    /// `-v` / `--verbose` (no `--log-level`, no RUST_LOG) forces debug
+    /// on akua* targets.
+    #[test]
+    fn resolve_filter_verbose_forces_debug() {
         let args = UniversalArgs {
             verbose: true,
             ..Default::default()
         };
-        // RUST_LOG must not be set for this test; ensure it isn't.
-        std::env::remove_var("RUST_LOG");
-        let f = resolve_filter(&args);
+        let f = resolve_filter_with(&args, None);
         assert!(f.contains("akua=debug"), "got: {f}");
         assert!(f.contains("akua_render_worker=debug"), "got: {f}");
         assert!(f.starts_with("warn"), "leading level should be warn: {f}");
+    }
+
+    /// `--log-level` wins over `--verbose` when both are set (explicit
+    /// flag beats the verbose shorthand).
+    #[test]
+    fn resolve_filter_log_level_beats_verbose() {
+        let args = UniversalArgs {
+            verbose: true,
+            log_level: Some("warn".into()),
+            ..Default::default()
+        };
+        let f = resolve_filter_with(&args, None);
+        assert!(f.contains("akua=warn"));
+        assert!(!f.contains("akua=debug"));
+    }
+
+    /// No flags + no env → the default filter.
+    #[test]
+    fn resolve_filter_no_flags_no_env_uses_default() {
+        let args = UniversalArgs::default();
+        assert_eq!(resolve_filter_with(&args, None), default_filter());
+    }
+
+    #[test]
+    fn bridge_trace_appends_when_env_is_one() {
+        let out = apply_bridge_trace_with("warn".into(), Some("1"));
+        assert_eq!(out, "warn,akua::bridge=debug");
+    }
+
+    /// `AKUA_BRIDGE_TRACE` set to anything other than `"1"` is a no-op
+    /// (legacy convention — empty / "true" / "0" all stay quiet).
+    #[test]
+    fn bridge_trace_only_activates_on_literal_one() {
+        assert_eq!(apply_bridge_trace_with("warn".into(), Some("0")), "warn");
+        assert_eq!(apply_bridge_trace_with("warn".into(), Some("true")), "warn");
+        assert_eq!(apply_bridge_trace_with("warn".into(), Some("")), "warn");
+    }
+
+    #[test]
+    fn bridge_trace_unset_env_is_passthrough() {
+        let out = apply_bridge_trace_with("warn,akua=info".into(), None);
+        assert_eq!(out, "warn,akua=info");
     }
 }
