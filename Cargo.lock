@@ -58,6 +58,7 @@ dependencies = [
  "ctrlc",
  "engine-host-wasm",
  "helm-engine-wasm",
+ "httpmock",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",

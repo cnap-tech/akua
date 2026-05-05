@@ -113,3 +113,117 @@ fn write_text<W: Write>(w: &mut W, out: &PullOutput) -> std::io::Result<()> {
     writeln!(w, "  layer     {}", out.layer_digest)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use akua_core::oci_pusher::{
+        compute_publish_digests, AKUA_PACKAGE_LAYER_MEDIA_TYPE, OCI_MANIFEST_MEDIA_TYPE,
+    };
+    use akua_core::package_tar;
+    use httpmock::prelude::*;
+    use std::fs;
+
+    /// Pack a tiny workspace tree (akua.toml + package.k) into the
+    /// `.tar.gz` shape `oci_pusher::push` would have uploaded — that's
+    /// what `pull` expects to find at the layer blob endpoint.
+    fn fake_published_tarball() -> Vec<u8> {
+        let src = tempfile::tempdir().unwrap();
+        fs::write(
+            src.path().join("akua.toml"),
+            "[package]\nname=\"pulled\"\nversion=\"0.1.0\"\nedition=\"akua.dev/v1alpha1\"\n",
+        )
+        .unwrap();
+        fs::write(src.path().join("package.k"), "resources = []\n").unwrap();
+        package_tar::pack_workspace(src.path()).unwrap()
+    }
+
+    /// Spin up a mock registry that serves the manifest + blob the
+    /// publisher would have written for `tarball`. Returns the
+    /// `oci://127.0.0.1:<port>/<repo>` ref + the tag.
+    fn mock_registry_serving(tarball: &[u8], repo: &str, tag: &str) -> (MockServer, String) {
+        let server = MockServer::start();
+        let d = compute_publish_digests(tarball);
+        let manifest_bytes = d.manifest_bytes.clone();
+        let layer_digest = d.layer_digest.clone();
+        let layer_bytes = tarball.to_vec();
+
+        server.mock(|when, then| {
+            when.method(GET).path(format!("/v2/{repo}/manifests/{tag}"));
+            then.status(200)
+                .header("content-type", OCI_MANIFEST_MEDIA_TYPE)
+                .body(manifest_bytes);
+        });
+        server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/v2/{repo}/blobs/{layer_digest}"));
+            then.status(200)
+                .header("content-type", AKUA_PACKAGE_LAYER_MEDIA_TYPE)
+                .body(layer_bytes);
+        });
+
+        let oci_ref = format!("oci://127.0.0.1:{}/{}", server.port(), repo);
+        (server, oci_ref)
+    }
+
+    /// Happy path: mock registry serves a published tarball, `pull`
+    /// fetches it, unpacks into `out`, and emits a `PullOutput` with
+    /// the resolved digests.
+    #[test]
+    fn pull_fetches_and_unpacks_into_out() {
+        let tarball = fake_published_tarball();
+        let (_server, oci_ref) = mock_registry_serving(&tarball, "team/pkg", "0.1.0");
+        let out = tempfile::tempdir().unwrap();
+
+        let ctx = Context::json();
+        let args = PullArgs {
+            oci_ref: &oci_ref,
+            tag: "0.1.0",
+            out: out.path(),
+        };
+        let mut stdout = Vec::new();
+        let exit = run(&ctx, &args, &mut stdout).expect("pull must succeed");
+        assert!(matches!(exit, ExitCode::Success));
+
+        // Unpacked workspace files landed in `out`.
+        assert!(out.path().join("akua.toml").is_file());
+        assert!(out.path().join("package.k").is_file());
+
+        // JSON output carries the digests the registry advertised.
+        let parsed: serde_json::Value =
+            serde_json::from_slice(&stdout).expect("stdout must be JSON in Context::json");
+        let d = compute_publish_digests(&tarball);
+        assert_eq!(parsed["manifest_digest"], d.manifest_digest);
+        assert_eq!(parsed["layer_digest"], d.layer_digest);
+        assert_eq!(parsed["tag"], "0.1.0");
+        assert_eq!(parsed["oci_ref"], oci_ref);
+    }
+
+    /// Registry 404 on manifest → typed `PullError::Pull` carrying a
+    /// transport status, exit code maps to UserError.
+    #[test]
+    fn pull_surfaces_registry_404_as_user_error() {
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(GET).path_contains("manifests");
+            then.status(404).body("not found");
+        });
+        let oci_ref = format!("oci://127.0.0.1:{}/missing/pkg", server.port());
+        let out = tempfile::tempdir().unwrap();
+
+        let ctx = Context::json();
+        let args = PullArgs {
+            oci_ref: &oci_ref,
+            tag: "0.1.0",
+            out: out.path(),
+        };
+        let mut stdout = Vec::new();
+        let err = run(&ctx, &args, &mut stdout).unwrap_err();
+        assert!(matches!(err, PullError::Pull(_)));
+        assert!(matches!(err.exit_code(), ExitCode::UserError));
+
+        // Structured-error mapping uses E_PULL_FAILED.
+        let structured = err.to_structured();
+        assert_eq!(structured.code, codes::E_PULL_FAILED);
+    }
+}

@@ -107,3 +107,8 @@ rand = "0.8"
 # verify the direct path works, then through the bridge to verify
 # the nested path. Only pulled in for test builds.
 helm-engine-wasm = { path = "../helm-engine-wasm" }
+# Local OCI registry mock — same pattern akua-core uses for
+# oci_pusher/oci_puller tests, applied at the verb layer so
+# `verbs::publish::run` and `verbs::pull::run` exercise the full
+# tarball + push/pull path without a real registry.
+httpmock = "0.7"

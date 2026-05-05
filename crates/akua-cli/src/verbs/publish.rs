@@ -341,3 +341,266 @@ fn attest_published_artifact(
         creds,
     )?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_helpers::workspace_with;
+    use akua_core::oci_pusher::OCI_MANIFEST_MEDIA_TYPE;
+    use httpmock::prelude::*;
+
+    /// Workspace with a `[signing]` block pointing at a freshly-written
+    /// `cosign.key`. Single write of `akua.toml` (no double-write of
+    /// the manifest) — the signing-related publish tests reuse this.
+    fn workspace_with_signing(priv_pem: &str) -> tempfile::TempDir {
+        let dir = workspace_with(&format!(
+            "{NO_SIGN_MANIFEST}\n[signing]\ncosign_private_key = \"cosign.key\"\n"
+        ));
+        std::fs::write(dir.path().join("cosign.key"), priv_pem).unwrap();
+        dir
+    }
+
+    /// Stand up a mock registry that accepts a full `akua publish`:
+    /// the two-blob upload pair (layer + config) plus the manifest
+    /// PUT. Returns `(server, oci_ref)`.
+    fn mock_registry_accepting_publishes(repo: &str, tag: &str) -> (MockServer, String) {
+        let server = MockServer::start();
+        let upload_path = format!("/v2/{repo}/blobs/uploads/");
+        let manifest_path = format!("/v2/{repo}/manifests/{tag}");
+        let location = "/upload-session/x";
+
+        server.mock(|when, then| {
+            when.method(POST).path(upload_path);
+            then.status(202).header("Location", location);
+        });
+        server.mock(|when, then| {
+            when.method(PUT).path(location);
+            then.status(201);
+        });
+        server.mock(|when, then| {
+            when.method(PUT)
+                .path(manifest_path)
+                .header("content-type", OCI_MANIFEST_MEDIA_TYPE);
+            then.status(201);
+        });
+        let oci_ref = format!("oci://127.0.0.1:{}/{}", server.port(), repo);
+        (server, oci_ref)
+    }
+
+    /// Generate a P-256 PKCS#8 PEM keypair for signing tests. Same
+    /// shape `keypair_fixture` uses inside akua-core; inlined here so
+    /// the helper isn't cross-crate exposed.
+    fn keypair_pem() -> (String, String) {
+        use p256::ecdsa::SigningKey;
+        use p256::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
+        let mut rng = rand::rngs::OsRng;
+        let signing = SigningKey::random(&mut rng);
+        let verifying = signing.verifying_key();
+        let priv_pem = signing.to_pkcs8_pem(LineEnding::LF).unwrap().to_string();
+        let pub_pem = verifying.to_public_key_pem(LineEnding::LF).unwrap();
+        (pub_pem, priv_pem)
+    }
+
+    const NO_SIGN_MANIFEST: &str = r#"[package]
+name = "publish-test"
+version = "0.1.0"
+edition = "akua.dev/v1alpha1"
+"#;
+
+    /// Default-tag path: `--tag` omitted → publish picks the
+    /// `[package].version` from `akua.toml`. Asserts the mock got
+    /// every leg of the upload + the JSON output is shaped right.
+    #[test]
+    fn publish_uses_package_version_when_tag_omitted() {
+        let ws = workspace_with(NO_SIGN_MANIFEST);
+        let (_server, oci_ref) = mock_registry_accepting_publishes("team/pub", "0.1.0");
+
+        let ctx = Context::json();
+        let args = PublishArgs {
+            workspace: ws.path(),
+            oci_ref: &oci_ref,
+            tag: None,
+            no_sign: true,
+            no_attest: true,
+        };
+        let mut stdout = Vec::new();
+        let exit = run(&ctx, &args, &mut stdout).expect("publish must succeed");
+        assert!(matches!(exit, ExitCode::Success));
+
+        let parsed: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+        assert_eq!(parsed["tag"], "0.1.0");
+        assert_eq!(parsed["oci_ref"], oci_ref);
+        assert!(parsed["manifest_digest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:"));
+        assert!(parsed["layer_digest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:"));
+        // No signing → both sidecar tags absent.
+        assert!(parsed.get("signature_tag").is_none());
+        assert!(parsed.get("attestation_tag").is_none());
+    }
+
+    /// `--tag` overrides `[package].version`.
+    #[test]
+    fn publish_honors_explicit_tag_override() {
+        let ws = workspace_with(NO_SIGN_MANIFEST);
+        let (_server, oci_ref) = mock_registry_accepting_publishes("team/pub", "rc-7");
+
+        let mut stdout = Vec::new();
+        run(
+            &Context::json(),
+            &PublishArgs {
+                workspace: ws.path(),
+                oci_ref: &oci_ref,
+                tag: Some("rc-7"),
+                no_sign: true,
+                no_attest: true,
+            },
+            &mut stdout,
+        )
+        .unwrap();
+
+        let parsed: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+        assert_eq!(parsed["tag"], "rc-7");
+    }
+
+    /// With `[signing].cosign_private_key` configured, publish pushes
+    /// a `.sig` sidecar AND a `.att` sidecar (attestation auto-pairs
+    /// with signing unless `--no-attest`). Both tag fields populate.
+    #[test]
+    fn publish_signs_and_attests_when_key_configured() {
+        let (_pub_pem, priv_pem) = keypair_pem();
+        let ws = workspace_with_signing(&priv_pem);
+
+        let server = MockServer::start();
+        let repo = "team/signed";
+        let tag = "0.1.0";
+
+        // Catch-all handlers: any blob upload + any manifest PUT
+        // accept. We don't introspect tags here — just need the
+        // pusher to walk all three legs (artifact, sig, attestation)
+        // without 5xx.
+        server.mock(|when, then| {
+            when.method(POST).path_contains("blobs/uploads");
+            then.status(202).header("Location", "/upload-session/x");
+        });
+        server.mock(|when, then| {
+            when.method(PUT).path("/upload-session/x");
+            then.status(201);
+        });
+        server.mock(|when, then| {
+            when.method(PUT).path_contains("manifests");
+            then.status(201);
+        });
+
+        let oci_ref = format!("oci://127.0.0.1:{}/{}", server.port(), repo);
+        let mut stdout = Vec::new();
+        run(
+            &Context::json(),
+            &PublishArgs {
+                workspace: ws.path(),
+                oci_ref: &oci_ref,
+                tag: Some(tag),
+                no_sign: false,
+                no_attest: false,
+            },
+            &mut stdout,
+        )
+        .expect("signed publish must succeed");
+
+        let parsed: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+        let sig = parsed["signature_tag"].as_str().expect("sig tag emitted");
+        let att = parsed["attestation_tag"].as_str().expect("att tag emitted");
+        assert!(sig.ends_with(".sig"), "sig tag shape: {sig}");
+        assert!(att.ends_with(".att"), "att tag shape: {att}");
+        // Both sidecar tags share the same `sha256-<hex>` prefix
+        // because they reference the same artifact digest.
+        let sig_prefix = sig.trim_end_matches(".sig");
+        let att_prefix = att.trim_end_matches(".att");
+        assert_eq!(sig_prefix, att_prefix);
+    }
+
+    /// `--no-attest` with signing on: sig pushed, attestation skipped.
+    #[test]
+    fn publish_no_attest_skips_attestation_only() {
+        let (_pub_pem, priv_pem) = keypair_pem();
+        let ws = workspace_with_signing(&priv_pem);
+
+        let server = MockServer::start();
+        server.mock(|when, then| {
+            when.method(POST).path_contains("blobs/uploads");
+            then.status(202).header("Location", "/upload-session/x");
+        });
+        server.mock(|when, then| {
+            when.method(PUT).path("/upload-session/x");
+            then.status(201);
+        });
+        server.mock(|when, then| {
+            when.method(PUT).path_contains("manifests");
+            then.status(201);
+        });
+
+        let oci_ref = format!("oci://127.0.0.1:{}/team/no-att", server.port());
+        let mut stdout = Vec::new();
+        run(
+            &Context::json(),
+            &PublishArgs {
+                workspace: ws.path(),
+                oci_ref: &oci_ref,
+                tag: Some("0.1.0"),
+                no_sign: false,
+                no_attest: true,
+            },
+            &mut stdout,
+        )
+        .unwrap();
+
+        let parsed: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+        assert!(parsed["signature_tag"].is_string(), "sig still emitted");
+        assert!(
+            parsed.get("attestation_tag").is_none(),
+            "att skipped under --no-attest"
+        );
+    }
+
+    /// Signing key path that doesn't exist → `SigningKeyIo` with the
+    /// path surfaced in the structured error so users see *which*
+    /// path the resolver looked at.
+    #[test]
+    fn publish_surfaces_missing_signing_key_path() {
+        let ws = workspace_with(NO_SIGN_MANIFEST);
+        std::fs::write(
+            ws.path().join("akua.toml"),
+            format!("{NO_SIGN_MANIFEST}\n[signing]\ncosign_private_key = \"missing.key\"\n"),
+        )
+        .unwrap();
+
+        let (_server, oci_ref) = mock_registry_accepting_publishes("team/key-missing", "0.1.0");
+        let mut stdout = Vec::new();
+        let err = run(
+            &Context::json(),
+            &PublishArgs {
+                workspace: ws.path(),
+                oci_ref: &oci_ref,
+                tag: None,
+                no_sign: false,
+                no_attest: false,
+            },
+            &mut stdout,
+        )
+        .unwrap_err();
+        assert!(matches!(err, PublishError::SigningKeyIo { .. }));
+        let structured = err.to_structured();
+        assert_eq!(structured.code, codes::E_PUBLISH_FAILED);
+        assert!(
+            structured
+                .path
+                .as_deref()
+                .is_some_and(|p| p.ends_with("missing.key")),
+            "structured error path field carries the resolved key path"
+        );
+    }
+}

@@ -68,17 +68,8 @@ pub fn collect_vendor_pairs(workspace: &Path, manifest: &AkuaManifest) -> Vec<(S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers::workspace_with;
     use std::fs;
-
-    /// Build a minimal workspace with the supplied `akua.toml` body
-    /// and an empty `package.k`. The path-escape guard requires any
-    /// `path = "./..."` deps to live inside the workspace.
-    fn workspace_with(toml_body: &str) -> tempfile::TempDir {
-        let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("akua.toml"), toml_body).unwrap();
-        fs::write(dir.path().join("package.k"), "resources = []\n").unwrap();
-        dir
-    }
 
     const NO_DEPS: &str = r#"[package]
 name = "vendor-test"

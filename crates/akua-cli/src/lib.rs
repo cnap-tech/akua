@@ -10,3 +10,6 @@ pub mod contract;
 pub mod observability;
 pub mod render_worker;
 pub mod verbs;
+
+#[cfg(test)]
+mod test_helpers;
