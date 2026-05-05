@@ -185,9 +185,15 @@ tasks:
 
   build:render-worker:
     desc: Build akua-render-worker for wasm32-wasip1 (embedded in akua-cli)
+    # akua-core is linked into the worker, so akua-core edits change
+    # the produced wasm. Without it in `sources:`, task's caching
+    # reports "up to date" while akua-cli's build.rs flags the worker
+    # as stale — the contributor goes in circles.
     sources:
       - crates/akua-render-worker/**/*.rs
       - crates/akua-render-worker/Cargo.toml
+      - crates/akua-core/src/**/*.rs
+      - crates/akua-core/Cargo.toml
     generates:
       - "{{.RENDER_WORKER_WASM}}"
     cmds:

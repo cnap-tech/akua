@@ -86,11 +86,18 @@ fn main() {
         return;
     }
 
-    // Best-effort freshness check: if any source file under the watched
-    // trees is newer than the staged `.wasm`, warn loudly. The rerun-if-
-    // changed lines above force this build.rs to re-run on source edits;
-    // this loop turns "build.rs re-ran" into "you need to rebuild the
-    // worker." No-op when both trees and the wasm artifact are clean.
+    // Freshness check: if any source file under the watched trees is
+    // newer than the staged `.wasm`, the worker drifted away from the
+    // host code that's about to embed it. Catching this matters because
+    // host + worker share types and parsers — a stale worker silently
+    // runs old logic against new manifests.
+    //
+    // Dev profiles get a `cargo:warning=` (mtime is a heuristic; false
+    // positives shouldn't block compiling unit tests). Release profiles
+    // — `release`, `ci-release`, or `AKUA_REQUIRE_WORKER` set — hard-
+    // fail with the same gating the missing-worker case uses below: a
+    // shipped binary whose worker drifted is the same kind of bug as
+    // a binary with no worker at all.
     if let Some(stale) = source_newer_than(
         &worker_wasm,
         &[
@@ -98,10 +105,23 @@ fn main() {
             root.join("crates/akua-core/src"),
         ],
     ) {
-        println!(
-            "cargo:warning=akua-render-worker.wasm is older than {} — run `task build:render-worker` to rebuild it before re-running cargo build.",
+        let profile = std::env::var("PROFILE").unwrap_or_default();
+        let release_like = profile == "release"
+            || profile == "ci-release"
+            || std::env::var_os("CARGO_CFG_AKUA_REQUIRE_WORKER").is_some();
+        let msg = format!(
+            "akua-render-worker.wasm is older than {} — run `task build:render-worker` to rebuild it before re-running cargo build.",
             stale.display()
         );
+        if release_like {
+            panic!(
+                "{msg}\nRelease profiles refuse stale workers because host + worker drift is a \
+                 release-quality bug. If you're certain the mtime signal is a false positive \
+                 (e.g. CI cross-job artifact transfer setting fresh source mtimes), build under \
+                 a non-release profile or `touch` the worker after restoring it."
+            );
+        }
+        println!("cargo:warning={msg}");
     }
 
     let wasm = std::fs::read(&worker_wasm)
