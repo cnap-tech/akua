@@ -75,20 +75,27 @@ fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
-        // Skip dot-prefixed (`.git`, `.cargo/`, editor swap files).
+        // .git, .cargo, editor swap files — none affect compiled output.
         if name_str.starts_with('.') {
             continue;
         }
         let path = entry.path();
         if path.is_dir() {
             collect_files(&path, out);
-        } else if matches!(
-            path.extension().and_then(|s| s.to_str()),
-            Some("rs") | Some("toml")
-        ) {
+        } else if is_tracked_source(&path) {
             out.push(path);
         }
     }
+}
+
+/// Whether `path` is a source file the freshness protocol covers.
+/// Shared with akua-cli's mtime fallback walker so a future addition
+/// (e.g. `.kcl`) only has to land in one place.
+pub fn is_tracked_source(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|s| s.to_str()),
+        Some("rs") | Some("toml")
+    )
 }
 
 fn hex_digest(bytes: &[u8]) -> String {
@@ -171,6 +178,37 @@ mod tests {
         std::fs::write(&f, b"fn main() {}\n").unwrap();
         let h2 = compute(&[dir.path().to_path_buf()], dir.path());
         assert_eq!(h1, h2);
+    }
+
+    /// When an input path doesn't share a prefix with `workspace_root`
+    /// (e.g. an absolute path outside the workspace), `compute` falls
+    /// back to using the absolute path in the hash. Two consumers
+    /// passing the same absolute path get the same hash — the
+    /// portability guarantee only applies to in-workspace paths.
+    #[test]
+    fn paths_outside_workspace_root_use_absolute_path() {
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("x.rs"), b"// outside\n").unwrap();
+        // Same input path, different workspace_root — the hash is
+        // determined by file content + the relpath we substitute, and
+        // since we can't strip a non-matching prefix, both fall back to
+        // the same absolute path. Hashes therefore match.
+        let h1 = compute(
+            std::slice::from_ref(&outside.path().to_path_buf()),
+            workspace.path(),
+        );
+        let h2 = compute(
+            std::slice::from_ref(&outside.path().to_path_buf()),
+            outside.path(),
+        );
+        // h2 strips the prefix (x.rs), h1 keeps absolute — different.
+        // The hash is therefore *not* portable for out-of-workspace
+        // paths; document this so callers know.
+        assert_ne!(
+            h1, h2,
+            "out-of-workspace paths produce different hashes per workspace_root"
+        );
     }
 
     /// Non-`.rs` / non-`.toml` files (markdown, golden YAML, dotfiles)

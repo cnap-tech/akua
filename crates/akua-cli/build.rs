@@ -177,11 +177,12 @@ fn check_worker_freshness(
     // Append rather than replace the extension — the file lives next
     // to `<basename>.wasm` as `<basename>.wasm.sources.sha256`. Matches
     // how `task build:render-worker` writes it.
-    let hash_file = {
-        let mut p = worker_wasm.as_os_str().to_owned();
-        p.push(".sources.sha256");
-        std::path::PathBuf::from(p)
-    };
+    // Append (not replace) the extension: `<basename>.wasm.sources.sha256`.
+    // OsString::push avoids `Path::with_extension`'s replace-only semantics
+    // and stays correct for non-UTF-8 paths (vs. format!("{}.foo")).
+    let mut hash_file = worker_wasm.as_os_str().to_owned();
+    hash_file.push(".sources.sha256");
+    let hash_file = std::path::PathBuf::from(hash_file);
     if hash_file.exists() {
         let recorded = std::fs::read_to_string(&hash_file).ok()?;
         let recorded = recorded.trim();
@@ -230,10 +231,7 @@ fn walk_for_newer_source(
             if let Some(found) = walk_for_newer_source(&path, target_mtime) {
                 return Some(found);
             }
-        } else if matches!(
-            path.extension().and_then(|s| s.to_str()),
-            Some("rs") | Some("toml")
-        ) {
+        } else if source_hash::is_tracked_source(&path) {
             if let Ok(meta) = entry.metadata() {
                 if let Ok(mtime) = meta.modified() {
                     if mtime > target_mtime {
