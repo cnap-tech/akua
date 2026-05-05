@@ -1080,4 +1080,263 @@ mod tests {
         let detected = detect_package(&manifest).unwrap();
         assert_eq!(detected.kind, PackageKind::KclModule);
     }
+
+    // --- Mock-registry tests for `fetch_with_opts` --------------------------
+
+    use httpmock::prelude::*;
+
+    /// Build a deterministic helm-shaped `.tar.gz` carrying a single
+    /// `<chart-name>/Chart.yaml`. Smaller than the existing
+    /// `extract_blob_unpacks_helm_shaped_tarball` fixture — only the
+    /// Chart.yaml marker is needed for the resolver.
+    fn helm_tarball(chart_name: &str) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let gz = flate2::write::GzEncoder::new(&mut buf, flate2::Compression::default());
+        let mut tar_b = tar::Builder::new(gz);
+        let body =
+            format!("apiVersion: v2\nname: {chart_name}\nversion: 0.0.1\nappVersion: \"1\"\n");
+        let mut hdr = tar::Header::new_gnu();
+        hdr.set_size(body.len() as u64);
+        hdr.set_mode(0o644);
+        hdr.set_cksum();
+        tar_b
+            .append_data(
+                &mut hdr,
+                format!("{chart_name}/Chart.yaml"),
+                body.as_bytes(),
+            )
+            .unwrap();
+        tar_b.into_inner().unwrap().finish().unwrap();
+        buf
+    }
+
+    /// Build the OCI manifest JSON the mock registry should serve for
+    /// `tarball`. Returns `(manifest_bytes, layer_digest)` so the
+    /// caller can wire both endpoints with matching content-addresses.
+    fn build_helm_manifest(tarball: &[u8]) -> (Vec<u8>, String) {
+        let layer_digest = format!("sha256:{}", hex_encode(&Sha256::digest(tarball)));
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": "application/vnd.cncf.helm.config.v1+json",
+                "size": 2,
+                "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            },
+            "layers": [{
+                "mediaType": HELM_CHART_LAYER_MEDIA_TYPE,
+                "size": tarball.len(),
+                "digest": layer_digest,
+            }],
+        });
+        (serde_json::to_vec(&manifest).unwrap(), layer_digest.clone())
+    }
+
+    fn mock_oci_ref(server: &MockServer, repo: &str) -> String {
+        format!("oci://127.0.0.1:{}/{}", server.port(), repo)
+    }
+
+    /// Anonymous happy-path Helm pull: registry serves the manifest +
+    /// the tarball blob, fetcher unpacks into the cache and returns
+    /// the resolved digest + chart root dir.
+    #[test]
+    fn fetch_with_opts_pulls_helm_chart_through_mock_registry() {
+        let server = MockServer::start();
+        let repo = "team/nginx";
+        let version = "1.2.3";
+        let tarball = helm_tarball("nginx");
+        let (manifest_bytes, layer_digest) = build_helm_manifest(&tarball);
+
+        server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/v2/{repo}/manifests/{version}"));
+            then.status(200)
+                .header("content-type", "application/vnd.oci.image.manifest.v1+json")
+                .body(manifest_bytes);
+        });
+        server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/v2/{repo}/blobs/{layer_digest}"));
+            then.status(200).body(tarball.clone());
+        });
+
+        let cache = tempfile::tempdir().unwrap();
+        let creds = oci_auth::CredsStore::empty();
+        let opts = FetchOpts {
+            expected_digest: None,
+            creds: &creds,
+            cosign_public_key_pem: None,
+        };
+        let fetched = fetch_with_opts(&mock_oci_ref(&server, repo), version, cache.path(), &opts)
+            .expect("fetch must succeed");
+
+        assert_eq!(fetched.kind, PackageKind::HelmChart);
+        assert_eq!(fetched.blob_digest, layer_digest);
+        assert!(fetched.root_dir.join("Chart.yaml").is_file());
+        // Cache uses `<root>/sha256/<hex>/<chart>/`.
+        assert!(fetched.root_dir.to_string_lossy().contains("sha256/"));
+    }
+
+    /// Cache fast-path: when `expected_digest` is set AND the cache
+    /// already contains that digest, fetch returns immediately
+    /// without making any HTTP requests. The mock has zero handlers
+    /// registered — any hit would 501.
+    #[test]
+    fn fetch_with_opts_returns_cache_hit_without_network() {
+        let server = MockServer::start();
+        let repo = "team/cached";
+        let tarball = helm_tarball("cached");
+        let (_manifest_bytes, layer_digest) = build_helm_manifest(&tarball);
+
+        // Trap: any HTTP call to the mock fails the test. The cache-hit
+        // path must short-circuit before any request lands.
+        let trap = server.mock(|when, then| {
+            when.any_request();
+            then.status(501);
+        });
+
+        // Pre-populate the cache as `extract_blob` would have on a
+        // prior pull.
+        let cache = tempfile::tempdir().unwrap();
+        let cache_dir = cache_dir_for(cache.path(), &layer_digest);
+        extract_blob(&tarball, &cache_dir, ArchiveFormat::GzipTar).unwrap();
+
+        let creds = oci_auth::CredsStore::empty();
+        let opts = FetchOpts {
+            expected_digest: Some(&layer_digest),
+            creds: &creds,
+            cosign_public_key_pem: None,
+        };
+        let fetched = fetch_with_opts(&mock_oci_ref(&server, repo), "1.0.0", cache.path(), &opts)
+            .expect("cache hit must skip the network");
+        assert_eq!(fetched.blob_digest, layer_digest);
+        trap.assert_hits(0);
+    }
+
+    /// Manifest declaring no helm/kcl layer (config-only artifact, or
+    /// a non-package class) → typed `NoChartLayer`.
+    #[test]
+    fn fetch_with_opts_rejects_manifest_without_chart_layer() {
+        let server = MockServer::start();
+        let repo = "team/wrong-class";
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "size": 2,
+                "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            },
+            "layers": [],
+        });
+        server.mock(|when, then| {
+            when.method(GET).path_contains("manifests");
+            then.status(200)
+                .header("content-type", "application/vnd.oci.image.manifest.v1+json")
+                .body(serde_json::to_vec(&manifest).unwrap());
+        });
+
+        let cache = tempfile::tempdir().unwrap();
+        let creds = oci_auth::CredsStore::empty();
+        let err = fetch_with_opts(
+            &mock_oci_ref(&server, repo),
+            "1.0.0",
+            cache.path(),
+            &FetchOpts {
+                expected_digest: None,
+                creds: &creds,
+                cosign_public_key_pem: None,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, OciFetchError::NoChartLayer { .. }));
+    }
+
+    /// Registry hands us a blob whose hash doesn't match the
+    /// manifest's declared `layer.digest` → `ManifestDigestMismatch`.
+    /// Cache-poisoning / proxy-tamper detection invariant.
+    #[test]
+    fn fetch_with_opts_detects_blob_digest_mismatch() {
+        let server = MockServer::start();
+        let repo = "team/tampered";
+        let advertised = helm_tarball("nginx");
+        let (manifest_bytes, layer_digest) = build_helm_manifest(&advertised);
+
+        server.mock(|when, then| {
+            when.method(GET).path_contains("manifests");
+            then.status(200).body(manifest_bytes);
+        });
+        // Same blob endpoint, different bytes — registry tampered.
+        server.mock(|when, then| {
+            when.method(GET)
+                .path(format!("/v2/{repo}/blobs/{layer_digest}"));
+            then.status(200).body(b"different bytes" as &[u8]);
+        });
+
+        let cache = tempfile::tempdir().unwrap();
+        let creds = oci_auth::CredsStore::empty();
+        let err = fetch_with_opts(
+            &mock_oci_ref(&server, repo),
+            "1.0.0",
+            cache.path(),
+            &FetchOpts {
+                expected_digest: None,
+                creds: &creds,
+                cosign_public_key_pem: None,
+            },
+        )
+        .unwrap_err();
+        match err {
+            OciFetchError::ManifestDigestMismatch { actual, declared } => {
+                assert_eq!(declared, layer_digest);
+                assert_ne!(actual, declared);
+            }
+            other => panic!("expected ManifestDigestMismatch, got {other:?}"),
+        }
+    }
+
+    /// Lockfile pinned a digest but the registry serves a different
+    /// (also self-consistent) artifact → `LockDigestMismatch`. This
+    /// is what catches an upstream tag silently moving under a
+    /// pinned dep.
+    #[test]
+    fn fetch_with_opts_enforces_lockfile_pinned_digest() {
+        let server = MockServer::start();
+        let repo = "team/drifted";
+        let tarball = helm_tarball("nginx");
+        let (manifest_bytes, _layer_digest) = build_helm_manifest(&tarball);
+
+        server.mock(|when, then| {
+            when.method(GET).path_contains("manifests");
+            then.status(200).body(manifest_bytes);
+        });
+        server.mock(|when, then| {
+            when.method(GET).path_contains("blobs");
+            then.status(200).body(tarball.clone());
+        });
+
+        let cache = tempfile::tempdir().unwrap();
+        let creds = oci_auth::CredsStore::empty();
+        let stale_pin = "sha256:dead000000000000000000000000000000000000000000000000000000000000";
+        let err = fetch_with_opts(
+            &mock_oci_ref(&server, repo),
+            "1.0.0",
+            cache.path(),
+            &FetchOpts {
+                expected_digest: Some(stale_pin),
+                creds: &creds,
+                cosign_public_key_pem: None,
+            },
+        )
+        .unwrap_err();
+        match err {
+            OciFetchError::LockDigestMismatch {
+                expected, actual, ..
+            } => {
+                assert_eq!(expected, stale_pin);
+                assert_ne!(actual, stale_pin);
+            }
+            other => panic!("expected LockDigestMismatch, got {other:?}"),
+        }
+    }
 }
