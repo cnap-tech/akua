@@ -63,6 +63,7 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry_sdk",
  "p256",
+ "pkcs8",
  "rand 0.8.6",
  "schemars",
  "serde",

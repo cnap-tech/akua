@@ -119,6 +119,21 @@ pub fn run<W: Write>(
     args: &SignArgs<'_>,
     stdout: &mut W,
 ) -> Result<ExitCode, SignError> {
+    let passphrase = std::env::var("AKUA_COSIGN_PASSPHRASE")
+        .ok()
+        .filter(|s| !s.is_empty());
+    run_with(ctx, args, stdout, passphrase.as_deref())
+}
+
+/// Like [`run`] but with the cosign passphrase passed in explicitly.
+/// Production callers funnel through [`run`]; tests cover the
+/// encrypted-key path without `std::env::set_var` racing other tests.
+pub(crate) fn run_with<W: Write>(
+    ctx: &Context,
+    args: &SignArgs<'_>,
+    stdout: &mut W,
+    passphrase: Option<&str>,
+) -> Result<ExitCode, SignError> {
     let bytes = std::fs::read(args.tarball).map_err(|source| SignError::ReadInput {
         what: "tarball",
         path: args.tarball.to_path_buf(),
@@ -133,13 +148,10 @@ pub fn run<W: Write>(
     let digests = oci_pusher::compute_publish_digests(&bytes);
 
     let key_pem = load_key(args)?;
-    let passphrase = std::env::var("AKUA_COSIGN_PASSPHRASE")
-        .ok()
-        .filter(|s| !s.is_empty());
 
     let docker_reference = args.oci_ref.strip_prefix("oci://").unwrap_or(args.oci_ref);
     let payload = cosign::build_simple_signing_payload(docker_reference, &digests.manifest_digest);
-    let signature_b64 = cosign::sign_keyed(&key_pem, &payload, passphrase.as_deref())?;
+    let signature_b64 = cosign::sign_keyed(&key_pem, &payload, passphrase)?;
 
     let sidecar = SignSidecar {
         oci_ref: args.oci_ref.to_string(),
@@ -393,5 +405,86 @@ mod tests {
         let expected =
             oci_pusher::compute_publish_digests(&std::fs::read(&tar_path).unwrap()).manifest_digest;
         assert_eq!(sidecar.manifest_digest, expected);
+    }
+
+    /// Encrypted PKCS#8 private key + correct passphrase → sign
+    /// succeeds and the sidecar verifies. Exercises the new
+    /// `run_with` injection seam without `std::env::set_var`.
+    #[test]
+    fn run_with_correct_passphrase_signs_encrypted_key() {
+        use pkcs8::EncodePrivateKey as PkcsEncode;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().join("ws");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let tar_path = tmp.path().join("p.tgz");
+        pack_minimal_tarball(&workspace, &tar_path);
+
+        // Encrypt the private key with `hunter2`. Cosign accepts any
+        // PBES2-encoded PKCS#8 PEM under that scheme.
+        let sk = SigningKey::random(&mut OsRng);
+        let passphrase = "hunter2";
+        let key_pem = sk
+            .to_pkcs8_encrypted_pem(&mut OsRng, passphrase.as_bytes(), LineEnding::LF)
+            .unwrap()
+            .to_string();
+        let key_path = tmp.path().join("priv-encrypted.pem");
+        std::fs::write(&key_path, &key_pem).unwrap();
+
+        run_with(
+            &ctx_json(),
+            &SignArgs {
+                tarball: &tar_path,
+                oci_ref: "oci://x/y",
+                tag: "0.1.0",
+                key: Some(&key_path),
+                workspace: &workspace,
+                out: None,
+            },
+            &mut Vec::new(),
+            Some(passphrase),
+        )
+        .expect("sign with correct passphrase must succeed");
+
+        let sidecar = SignSidecar::read_from(&tmp.path().join("p.tgz.akuasig")).unwrap();
+        assert!(!sidecar.signature_b64.is_empty());
+    }
+
+    /// Encrypted key + wrong passphrase → cosign Crypto error.
+    /// Without the `run_with` injection seam this branch was
+    /// unreachable from a unit test.
+    #[test]
+    fn run_with_wrong_passphrase_surfaces_crypto_error() {
+        use pkcs8::EncodePrivateKey as PkcsEncode;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = tmp.path().join("ws");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let tar_path = tmp.path().join("p.tgz");
+        pack_minimal_tarball(&workspace, &tar_path);
+
+        let sk = SigningKey::random(&mut OsRng);
+        let key_pem = sk
+            .to_pkcs8_encrypted_pem(&mut OsRng, b"hunter2", LineEnding::LF)
+            .unwrap()
+            .to_string();
+        let key_path = tmp.path().join("priv-encrypted.pem");
+        std::fs::write(&key_path, &key_pem).unwrap();
+
+        let err = run_with(
+            &ctx_json(),
+            &SignArgs {
+                tarball: &tar_path,
+                oci_ref: "oci://x/y",
+                tag: "0.1.0",
+                key: Some(&key_path),
+                workspace: &workspace,
+                out: None,
+            },
+            &mut Vec::new(),
+            Some("wrong-pass"),
+        )
+        .unwrap_err();
+        assert!(matches!(err, SignError::Crypto(_)), "got: {err:?}");
     }
 }

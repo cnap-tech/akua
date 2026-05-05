@@ -145,6 +145,24 @@ pub fn run<W: Write>(
     args: &PublishArgs<'_>,
     stdout: &mut W,
 ) -> Result<ExitCode, PublishError> {
+    // Read the passphrase env up front. Empty / unset → None, which
+    // sign_keyed treats as "key isn't encrypted." Reading here keeps
+    // the secret in scope only as long as the verb runs.
+    let passphrase = std::env::var("AKUA_COSIGN_PASSPHRASE")
+        .ok()
+        .filter(|s| !s.is_empty());
+    run_with(ctx, args, stdout, passphrase.as_deref())
+}
+
+/// Like [`run`] but with the cosign passphrase passed in explicitly.
+/// Production callers funnel through [`run`]; tests cover the
+/// encrypted-key path without `std::env::set_var` racing other tests.
+pub(crate) fn run_with<W: Write>(
+    ctx: &Context,
+    args: &PublishArgs<'_>,
+    stdout: &mut W,
+    passphrase: Option<&str>,
+) -> Result<ExitCode, PublishError> {
     let manifest = AkuaManifest::load(args.workspace)?;
 
     let tag = args
@@ -175,14 +193,12 @@ pub fn run<W: Write>(
         load_signing_key(args.workspace, &manifest)?
     };
 
-    // Passphrase is only meaningful when we're actually signing.
-    // Deferring the env read past `no_sign` avoids unnecessary
-    // syscalls (minor) + keeps the secret out of the process
-    // address space when the code path can't use it.
+    // Passphrase is only meaningful when we're actually signing —
+    // an unencrypted key with a passphrase set is harmless (cosign
+    // ignores the passphrase) but we don't pass it down for signing
+    // attempts that won't happen.
     let passphrase = if private_pem.is_some() {
-        std::env::var("AKUA_COSIGN_PASSPHRASE")
-            .ok()
-            .filter(|s| !s.is_empty())
+        passphrase
     } else {
         None
     };
@@ -191,7 +207,7 @@ pub fn run<W: Write>(
         Some(sign_published_artifact(
             args.oci_ref,
             pem,
-            passphrase.as_deref(),
+            passphrase,
             &pushed.manifest_digest,
             &creds,
         )?)
@@ -213,7 +229,7 @@ pub fn run<W: Write>(
                 &pushed.tag,
                 &pushed.manifest_digest,
                 pem,
-                passphrase.as_deref(),
+                passphrase,
                 &creds,
             )?)
         }

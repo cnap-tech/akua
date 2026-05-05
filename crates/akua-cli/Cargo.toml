@@ -101,7 +101,10 @@ engine-host-wasm = { path = "../engine-host-wasm" }
 
 [dev-dependencies]
 tempfile = "3"
-p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std", "pem"] }
+p256 = { version = "0.13", default-features = false, features = ["ecdsa", "std", "pem", "pkcs8"] }
+# Encrypted PKCS#8 PEM emission for the cosign passphrase tests.
+# Same shape akua-core uses; dev-only here.
+pkcs8 = { version = "0.10", default-features = false, features = ["pem", "pkcs5", "encryption", "alloc"] }
 rand = "0.8"
 # For tests/sandbox_nested_wasmtime.rs — call helm directly to
 # verify the direct path works, then through the bridge to verify
